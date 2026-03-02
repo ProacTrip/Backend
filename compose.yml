@@ -1,0 +1,110 @@
+name: proactrip-backend
+
+services:
+  # ===========================================================================
+  # PostgreSQL 18.3
+  # ===========================================================================
+  postgres:
+    image: ${DB_IMAGE}
+    container_name: proactrip-postgres
+    hostname: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-multiple-dbs.sql:/docker-entrypoint-initdb.d/init-multiple-dbs.sql:ro
+    ports:
+      - "${DB_PORT}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    shm_size: 1gb
+    networks:
+      - backend
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ===========================================================================
+  # DragonflyDB 1.37.0
+  # ===========================================================================
+  dragonfly:
+    image: ${REDIS_IMAGE}
+    container_name: proactrip-dragonfly
+    hostname: ${REDIS_HOST}
+    restart: unless-stopped
+    command: >
+      --port ${REDIS_PORT}
+      --snapshot_cron "*/15 * * * *"
+      --dbfilename=dump
+      --proactor_threads ${REDIS_THREADS}
+      --logtostderr
+    environment:
+      - DFLY_maxmemory=${REDIS_MAXMEMORY}
+      - DFLY_cache_mode=${DRAGONFLY_CACHE_MODE}
+    ulimits:
+      memlock: -1
+    volumes:
+      - dragonfly_data:/data
+    ports:
+      - "${REDIS_PORT}:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "echo 'PING' | nc -w 1 127.0.0.1 6379 | grep -q PONG || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - backend
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ===========================================================================
+  # Backend API - Servicio Go
+  # ===========================================================================
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: proactrip-api
+    hostname: api
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "${SERVER_PORT}:8080"
+    volumes:
+      - .:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      dragonfly:
+        condition: service_healthy
+    networks:
+      - backend
+
+# =============================================================================
+# Volúmenes persistentes
+# =============================================================================
+volumes:
+  postgres_data:
+    driver: local
+  dragonfly_data:
+    driver: local
+
+# =============================================================================
+# Redes
+# =============================================================================
+networks:
+  backend:
+    driver: bridge

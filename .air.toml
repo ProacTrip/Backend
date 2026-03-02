@@ -1,0 +1,76 @@
+root = "."
+testdata_dir = "testdata"
+tmp_dir = "tmp"
+
+[build]
+  # Comando para compilar
+  cmd = "go build -o ./tmp/main ./cmd/api/main.go"
+  
+  # Directorio de salida del binario
+  entrypoint = "./tmp/main"
+  
+  # Directorio temporal
+  full_bin = "./tmp/main"
+  
+  # Argumentos pasados al binario
+  args_bin = []
+  
+  # Archivos a observar (patrones glob)
+  include_ext = ["go", "tpl", "tmpl", "html"]
+  
+  # Directorios a ignorar
+  exclude_dir = ["assets", "tmp", "vendor", "testdata", "migrations", "scripts"]
+  
+  # Archivos a ignorar
+  exclude_file = []
+  
+  # Patrones de exclusión
+  exclude_regex = ["_test.go"]
+  
+  # Excluir archivos no modificados
+  exclude_unchanged = true
+  
+  # Seguir symlinks
+  follow_symlink = true
+  
+  # Directorios adicionales a observar
+  include_dir = []
+  
+  # Archivos a observar específicamente
+  include_file = []
+  
+  # Matar procesos antes de compilar
+  kill_delay = "0s"
+  
+  # Registro de logs
+  log = "build-errors.log"
+  
+  # Enviar interrupt signal antes de matar
+  send_interrupt = true
+  
+  # Timeout para matar proceso
+  stop_on_error = true
+
+[color]
+  # Colores para output
+  app = ""
+  build = "yellow"
+  main = "magenta"
+  runner = "green"
+  watcher = "cyan"
+
+[log]
+  # Mostrar tiempo
+  time = true
+  
+  # Solo mostrar errores de compilación
+  main_only = false
+
+[misc]
+  # Salir si el directorio raíz no existe
+  clean_on_exit = false
+
+[screen]
+  # Configuración de pantalla
+  clear_on_rebuild = false
+  keep_scroll = true

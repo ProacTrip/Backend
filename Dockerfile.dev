@@ -1,0 +1,30 @@
+FROM golang:1.26.0-alpine3.23
+
+# Instalar dependencias del sistema
+RUN apk add --no-cache \
+    git \
+    ca-certificates \
+    tzdata \
+    gcc \
+    musl-dev
+
+# Configurar zona horaria
+ENV TZ=UTC
+
+# Instalar Air para hot-reload
+RUN go install github.com/air-verse/air@latest
+
+# Directorio de trabajo
+WORKDIR /app
+
+# Copiar go.mod y go.sum primero (para caché de dependencias)
+COPY go.mod go.sum ./
+
+# Descargar dependencias
+RUN go mod download && go mod verify
+
+# Exponer puerto
+EXPOSE 8080
+
+# Comando por defecto (sobrescribible)
+CMD ["air", "-c", ".air.toml"]
