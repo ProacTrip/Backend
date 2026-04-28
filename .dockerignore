@@ -1,0 +1,14 @@
+.git
+.env
+.env.*
+!.env.example
+docs/
+*.md
+.vscode/
+.idea/
+*.swp
+*.swo
+tmp/
+api
+*.exe
+*.test

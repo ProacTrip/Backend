@@ -1,0 +1,137 @@
+// Domain: Entidades y tipos de dominio para perfiles de usuario.
+// Define la estructura del perfil y sus estados.
+package domain
+
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
+
+// =============================================================================
+// Tipos de perfil de usuario
+// =============================================================================
+
+// UserProfileStatus representa el estado del perfil
+type UserProfileStatus string
+
+const (
+	ProfileStatusPending  UserProfileStatus = "pending"
+	ProfileStatusActive   UserProfileStatus = "active"
+	ProfileStatusInactive UserProfileStatus = "inactive"
+)
+
+// Gender representa el género del usuario
+type Gender string
+
+const (
+	GenderMale           Gender = "male"
+	GenderFemale         Gender = "female"
+	GenderNonBinary      Gender = "non_binary"
+	GenderPreferNotToSay Gender = "prefer_not_to_say"
+)
+
+// UserProfile representa el perfil de usuario (alineado con migración)
+type UserProfile struct {
+	ID              uuid.UUID  `json:"id"`      // PK - diferente de user_id
+	UserID          uuid.UUID  `json:"user_id"` // FK al dominio Auth
+	FirstName       *string    `json:"first_name,omitempty"`
+	LastName        *string    `json:"last_name,omitempty"`
+	DateOfBirth     *time.Time `json:"date_of_birth,omitzero"`
+	Gender          *Gender    `json:"gender,omitempty"`
+	Nationality     *string    `json:"nationality,omitempty"`
+	Phone           *string    `json:"phone,omitempty"`
+	PhoneVerified   bool       `json:"phone_verified"`
+	AvatarURL       *string    `json:"avatar_url,omitempty"`
+	CurrentLocation *string    `json:"current_location,omitempty"`
+	Bio             *string    `json:"bio,omitempty"`
+	TimezoneName    string     `json:"timezone_name"` // NOT NULL DEFAULT 'UTC'
+	LanguageCode    string     `json:"language_code"` // NOT NULL DEFAULT 'es'
+	CurrencyCode    string     `json:"currency_code"` // NOT NULL DEFAULT 'EUR'
+	IsPublic        bool       `json:"is_public"`     // NOT NULL DEFAULT FALSE
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+}
+
+// =============================================================================
+// Métodos de dominio
+// =============================================================================
+
+// NewUserProfile crea un nuevo perfil de usuario
+// IMPORTANTE: Usa user_id (FK al auth) diferente del id (PK auto-generado)
+func NewUserProfile(userID uuid.UUID) *UserProfile {
+	now := time.Now()
+	return &UserProfile{
+		UserID:        userID,
+		TimezoneName:  "UTC",
+		LanguageCode:  "es",
+		CurrencyCode:  "EUR",
+		IsPublic:      false,
+		PhoneVerified: false,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+}
+
+// SetName establece nombre y apellido
+func (p *UserProfile) SetName(firstName, lastName *string) {
+	p.FirstName = firstName
+	p.LastName = lastName
+	p.UpdatedAt = time.Now()
+}
+
+// SetPersonalInfo establece información personal
+func (p *UserProfile) SetPersonalInfo(dateOfBirth *time.Time, gender *Gender, nationality *string, bio *string) {
+	p.DateOfBirth = dateOfBirth
+	p.Gender = gender
+	p.Nationality = nationality
+	p.Bio = bio
+	p.UpdatedAt = time.Now()
+}
+
+// SetContact establece información de contacto
+func (p *UserProfile) SetContact(phone, location *string, phoneVerified bool) {
+	p.Phone = phone
+	p.CurrentLocation = location
+	p.PhoneVerified = phoneVerified
+	p.UpdatedAt = time.Now()
+}
+
+// SetPreferences establece preferencias
+func (p *UserProfile) SetPreferences(timezone, language, currency *string, isPublic bool) {
+	if timezone != nil {
+		p.TimezoneName = *timezone
+	}
+	if language != nil {
+		p.LanguageCode = *language
+	}
+	if currency != nil {
+		p.CurrencyCode = *currency
+	}
+	p.IsPublic = isPublic
+	p.UpdatedAt = time.Now()
+}
+
+// SetAvatar establece la URL del avatar
+func (p *UserProfile) SetAvatar(avatarURL *string) {
+	p.AvatarURL = avatarURL
+	p.UpdatedAt = time.Now()
+}
+
+// FullName retorna el nombre completo
+func (p *UserProfile) FullName() string {
+	if p.FirstName == nil && p.LastName == nil {
+		return ""
+	}
+	var full string
+	if p.FirstName != nil {
+		full = *p.FirstName
+	}
+	if p.LastName != nil {
+		if full != "" {
+			full += " "
+		}
+		full += *p.LastName
+	}
+	return full
+}

@@ -1,0 +1,32 @@
+# Environment
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Binaries
+*.exe
+*.test
+api
+tmp/
+
+# Go
+go.work
+go.work.sum
+
+# Docker
+docker-compose.override.yml
+
+# Docs (optional - uncomment if needed)
+# docs/
+# *.md

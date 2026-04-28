@@ -1,0 +1,115 @@
+# ProacTrip Backend - Docker Compose (Development)
+# =============================================================================
+# Services: PostgreSQL, DragonflyDB, API Go
+# Usage: docker compose up -d
+# =============================================================================
+
+services:
+  # ===========================================================================
+  # PostgreSQL 18.3
+  # ===========================================================================
+  postgres:
+    image: ${DB_IMAGE:-postgres:18.3}
+    container_name: proactrip-postgres
+    hostname: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+      POSTGRES_DB: ${DB_NAME:-proactrip}
+    # PostgreSQL 18+ requiere mount en /var/lib/postgresql (no en /data)
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-proactrip}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - backend
+    ports:
+      - "${DB_PORT:-5432}:5432"
+
+  # ===========================================================================
+  # DragonflyDB v1.38.0 - Cache y EventBus
+  # ===========================================================================
+  dragonfly:
+    image: ghcr.io/dragonflydb/dragonfly:v1.38.0
+    container_name: proactrip-dragonfly
+    hostname: dragonfly
+    restart: unless-stopped
+    # Reducido a 2 threads para funcionar con 512MB (1 thread = 256MB mínimo)
+    command: >
+      --port 6379
+      --snapshot_cron "*/15 * * * *"
+      --dbfilename=dump
+      --proactor_threads=2
+      --cache_mode=true
+      --replica_delete_expired
+      --logtostderr
+    environment:
+      - DFLY_maxmemory=${DRAGONFLY_MAXMEMORY:-512mb}
+      - DFLY_requirepass=${DRAGONFLY_PASSWORD:-}
+    ulimits:
+      memlock: -1
+    volumes:
+      - dragonfly_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -h localhost -p 6379 ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - backend
+    ports:
+      - "${DRAGONFLY_PORT:-6379}:6379"
+
+  # ===========================================================================
+  # API - Go (Development con volumen para rebuild manual)
+  # ===========================================================================
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: proactrip-api
+    hostname: api
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "${SERVER_PORT:-8080}:8080"
+      - "6060:6060"  # pprof
+    volumes:
+      - .:/app
+      - go-cache:/root/.cache/go-build
+    depends_on:
+      postgres:
+        condition: service_healthy
+      dragonfly:
+        condition: service_healthy
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    environment:
+      - APP_ENV=development
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  postgres_data:
+  dragonfly_data:
+  go-cache:
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  backend:
+    driver: bridge
