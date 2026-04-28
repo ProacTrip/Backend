@@ -3,6 +3,7 @@
 package config
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -10,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/ProacTrip/Backend/internal/shared/ratelimit"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -27,6 +29,12 @@ func generateSecureKey() (string, error) {
 	return hex.EncodeToString(bytes), nil
 }
 
+type ContextConfig struct {
+	OpenWeatherAPIKey    string
+	OpenWeatherCacheTTL  time.Duration
+	IpQueryBaseURL       string
+}
+
 // Configuración principal que agrupa todos los componentes de la aplicación
 type Config struct {
 	Server         ServerConfig
@@ -35,6 +43,7 @@ type Config struct {
 	Frontend       FrontendConfig
 	Security       SecurityConfig
 	Email          EmailConfig
+	Context        ContextConfig
 	SerpAPIKey     string                    // API key de SerpAPI para búsqueda de vuelos
 	PasetoKeyBytes []byte                    // Bytes decodificados de PASETO_KEY (para uso directo)
 	RateLimit      *ratelimit.RateLimitConfig // Configuración de rate limiting
@@ -162,6 +171,11 @@ func Load() *Config {
 		Email: EmailConfig{
 			ResendAPIKey: getEnv("RESEND_API_KEY", ""),
 		},
+		Context: ContextConfig{
+			OpenWeatherAPIKey:   getEnv("OPENWEATHER_API_KEY", ""),
+			OpenWeatherCacheTTL: getEnvDuration("CONTEXT_WEATHER_CACHE_TTL", 10*time.Minute),
+			IpQueryBaseURL:      cmp.Or(getEnv("IPQUERY_BASE_URL", ""), "https://api.ipquery.io"),
+		},
 		SerpAPIKey: getEnv("SERPAPI_KEY", ""),
 		RateLimit:  ratelimit.LoadRateLimitConfig(),
 	}
@@ -173,6 +187,18 @@ func getEnv(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultValue
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return defaultValue
+	}
+	return d
 }
 
 // Addr retorna dirección del servidor en formato host:port

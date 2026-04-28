@@ -16,6 +16,7 @@ import (
 
 	"github.com/ProacTrip/Backend/internal/config"
 	authModule "github.com/ProacTrip/Backend/internal/modules/auth"
+	contextModule "github.com/ProacTrip/Backend/internal/modules/context"
 	notifModule "github.com/ProacTrip/Backend/internal/modules/notification"
 	searchModule "github.com/ProacTrip/Backend/internal/modules/search"
 	userModule "github.com/ProacTrip/Backend/internal/modules/user"
@@ -46,6 +47,7 @@ type App struct {
 	UserModule         *userModule.Module
 	NotificationModule *notifModule.Module
 	SearchModule       *searchModule.Module
+	ContextModule      *contextModule.Module
 }
 
 func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
@@ -278,6 +280,15 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		return nil, err
 	}
 
+	// Context Module (IP geolocation + weather)
+	contextMod := contextModule.NewModule(contextModule.Config{
+		OpenWeatherAPIKey:   cfg.Context.OpenWeatherAPIKey,
+		OpenWeatherCacheTTL: cfg.Context.OpenWeatherCacheTTL,
+		IpQueryBaseURL:      cfg.Context.IpQueryBaseURL,
+		Cache:               df,
+		RateLimiter:         rateLimiter,
+	})
+
 	// Rutas
 
 	// Health checks
@@ -330,6 +341,10 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	searchGroup.POST("/flights", searchMod.SearchFlightsHandler.Handle)
 	searchGroup.POST("/flight-details", searchMod.FlightDetailsHandler.Handle)
 
+	// Context route: location + weather (public, no auth required)
+	contextGroup := e.Group("/v1")
+	contextGroup.GET("/context", contextMod.GetContextHandler.Handle)
+
 	// === App Structure ===
 	app := &App{
 		Echo:               e,
@@ -341,9 +356,10 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		UserModule:         userMod,
 		NotificationModule: notifMod,
 		SearchModule:       searchMod,
+		ContextModule:      contextMod,
 	}
 
-	slog.Info("App initialized", "modules", []string{"auth", "user", "notification", "search"})
+	slog.Info("App initialized", "modules", []string{"auth", "user", "notification", "search", "context"})
 
 	return app, nil
 }

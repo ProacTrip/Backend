@@ -28,8 +28,9 @@ func DefaultConfig() *RateLimitConfig {
 		AuthenticatedPerMinute: 10,
 		AnonymousPerMinute:     5,
 		Providers: map[string]ProviderLimit{
-			"resend":  {MaxRequests: 100, Window: 24 * time.Hour},
-			"serpapi": {MaxRequests: 50, Window: 1 * time.Hour},
+			"resend":      {MaxRequests: 100, Window: 24 * time.Hour},
+			"serpapi":     {MaxRequests: 50, Window: 1 * time.Hour},
+			"openweather": {MaxRequests: 1000, Window: 24 * time.Hour},
 		},
 	}
 }
@@ -47,7 +48,7 @@ func LoadRateLimitConfig() *RateLimitConfig {
 		cfg.AnonymousPerMinute = v
 	}
 
-	for _, name := range []string{"resend", "serpapi"} {
+	for _, name := range []string{"resend", "serpapi", "openweather"} {
 		prefix := fmt.Sprintf("RATELIMIT_PROVIDER_%s", strings.ToUpper(name))
 		maxKey := prefix + "_MAX"
 		windowKey := prefix + "_WINDOW_SEC"
