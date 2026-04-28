@@ -11,7 +11,6 @@ import (
 	"github.com/ProacTrip/Backend/internal/modules/auth/adapters/token"
 	"github.com/ProacTrip/Backend/internal/modules/auth/adapters/verification"
 	"github.com/ProacTrip/Backend/internal/modules/auth/domain"
-	"github.com/ProacTrip/Backend/internal/modules/auth/features/current_user"
 	"github.com/ProacTrip/Backend/internal/modules/auth/features/login"
 	"github.com/ProacTrip/Backend/internal/modules/auth/features/logout"
 	"github.com/ProacTrip/Backend/internal/modules/auth/features/register"
@@ -43,9 +42,6 @@ type Module struct {
 	VerifyEmailHandler func() *verify_email.Handler
 	Login              *login.UseCase
 	LoginHandler       *login.Handler
-	CurrentUser        *current_user.UseCase
-	CurrentUserHandler *current_user.Handler
-
 	Logout        *logout.UseCase
 	LogoutHandler *logout.Handler
 }
@@ -141,13 +137,6 @@ func NewModule(cfg Config) (*Module, error) {
 	})
 	m.LoginHandler = login.NewHandler(m.Login, cfg.IsProduction)
 
-	// Current User
-	m.CurrentUser = current_user.NewUseCase(current_user.UseCaseDeps{
-		Repo:     m.Repository,
-		TokenSvc: m.TokenService,
-	})
-	m.CurrentUserHandler = current_user.NewHandler(m.CurrentUser, cfg.IsProduction)
-
 	// Logout
 	m.Logout = logout.NewUseCase(logout.UseCaseDeps{
 		TokenSvc:    m.TokenService,
@@ -158,7 +147,7 @@ func NewModule(cfg Config) (*Module, error) {
 	// Register domain error mappings
 	registerAuthErrorMappings()
 
-	slog.Info("Auth module initialized", "features", []string{"register", "verify_email", "login", "current_user", "logout"})
+	slog.Info("Auth module initialized", "features", []string{"register", "verify_email", "login", "logout"})
 
 	return m, nil
 }

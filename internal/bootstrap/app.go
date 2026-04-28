@@ -321,9 +321,6 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	// Login endpoint
 	authGroup.POST("/login", authMod.LoginHandler.Handle)
 
-	// Current User endpoint — authenticated rate limiting
-	authGroup.GET("/current-user", authMod.CurrentUserHandler.Handle, authRateLimitMW)
-
 	// Logout endpoints — authenticated rate limiting
 	authGroup.POST("/logout", authMod.LogoutHandler.Handle, authRateLimitMW)
 	authGroup.POST("/logout/all", authMod.LogoutHandler.HandleAll, authRateLimitMW)

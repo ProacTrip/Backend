@@ -34,7 +34,6 @@
 - [MFA — Disable Method](#mfa--disable-method)
 - [MFA — Disable All Methods](#mfa--disable-all-methods)
 - [SSE Token](#sse-token)
-- [Current User](#current-user)
 - [Configuración CORS](#configuración-cors)
 - [Rate Limiting](#rate-limiting)
 - [Cache](#cache)
@@ -615,7 +614,6 @@ Esto previene almacenamiento en caches compartidos o del navegador.
 | `POST /v1/auth/login` | `no-store, private` | Datos de sesión sensibles |
 | `POST /v1/auth/register` | `no-store, private` | Datos de registro sensibles |
 | `POST /v1/auth/verify-email` | `no-store, private` | Datos de usuario + sesión |
-| `GET /v1/auth/current-user` | `no-store, private` | Perfil del usuario autenticado |
 | `POST /v1/auth/logout` | `no-store, private` | Invalidación de sesión |
 | `POST /v1/auth/logout/all` | `no-store, private` | Invalidación masiva de sesiones |
 
