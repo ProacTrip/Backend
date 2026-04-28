@@ -1672,7 +1672,7 @@ El backend **siempre obtiene datos frescos del proveedor** (SerpAPI). La caché 
 
 | Aspecto | Valor |
 |---------|-------|
-| TTL de caché | 15 minutos (900 segundos) |
+| TTL de caché | 5 minutos (300 segundos) |
 | Backend de caché | DragonflyDB (Redis-compatible) |
 | Clave de caché | Hash con Blake3 de los parámetros de búsqueda (ver campos abajo) |
 | Invalidación | Por TTL únicamente. No se invalida manualmente |

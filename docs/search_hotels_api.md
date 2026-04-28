@@ -1488,16 +1488,17 @@ El backend **siempre obtiene datos frescos del proveedor** (SerpAPI). La caché 
 
 | Aspecto | Valor |
 |---------|-------|
-| TTL de caché | 15 minutos (900 segundos) |
+| TTL de caché | 5 minutos (300 segundos) |
 | Backend de caché | DragonflyDB (Redis-compatible) |
 | Clave de caché | Hash con Blake3 de los parámetros de búsqueda (ver campos abajo) |
 | Invalidación | Por TTL únicamente. No se invalida manualmente |
+| Proveedor externo | Siempre datos frescos (`from_cache: false`) |
 
 - Si un usuario busca sin autenticarse, se registra, y vuelve a buscar con los mismos parámetros dentro de la ventana de caché → se reutilizan los resultados cacheados (sin nueva llamada a SerpAPI)
 - `from_cache` es **siempre `false`** en todas las respuestas. La caché no se expone al frontend
 - `cached_at` es **siempre `null`** en todas las respuestas
 
-> **Motivo:** El manejo interno de caché evita llamadas redundantes al proveedor externo (ahorro de créditos de API) sin exponer detalles de implementación al frontend.
+> **Motivo:** Los resultados de vuelos y hoteles cambian constantemente. 5 minutos es el máximo razonable antes de que los datos queden obsoletos. El manejo interno de caché evita llamadas redundantes al proveedor sin exponer detalles al frontend.
 
 ### Campos que Forman la Clave de Caché
 
