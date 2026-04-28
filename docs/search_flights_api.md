@@ -436,9 +436,21 @@ Los aeropuertos pueden ser múltiples, separados por coma: `"departure": "LAX,SF
 
 ### Notas sobre Parámetros de Localización
 
-**Usuarios no autenticados:** El frontend debe detectar la ubicación del usuario (vía API de geolocalización del navegador o IP) y enviar `gl`, `hl` y `currency` para personalizar los resultados.
+La ubicación del usuario la resuelve **siempre el backend** a partir de la IP de la request. El frontend nunca llama a APIs externas de geolocalización directamente.
 
-**Usuarios autenticados:** El backend usa los datos guardados en el perfil (país, idioma, moneda). Los parámetros `gl`, `hl`, `currency` pueden omitirse o usarse para sobrescribir temporalmente las preferencias.
+**Usuarios no autenticados:** Al cargar la página por primera vez, el frontend llama a `GET /v1/context` para obtener la ubicación y el clima detectados desde la IP. Con esa respuesta, el frontend envía `gl`, `hl` y `currency` en las búsquedas posteriores.
+
+```
+Frontend (primera carga)
+  │
+  ├── GET /v1/context  →  { location: {...}, weather: {...} }
+  │
+  └── POST /v1/search/flights  { departure:"MAD", gl:"ES", hl:"es", currency:"EUR", ... }
+```
+
+El endpoint `/v1/context` usa ipquery.io internamente para resolver la IP y OpenWeather para el clima. Devuelve la misma estructura `context` que el login de usuarios autenticados.
+
+**Usuarios autenticados:** El backend usa los datos guardados en el perfil (país, idioma, moneda) y el `context` recibido durante el login. Los parámetros `gl`, `hl`, `currency` pueden omitirse o usarse para sobrescribir temporalmente las preferencias.
 
 ### Ejemplos curl
 
@@ -1656,12 +1668,20 @@ El backend cachea los resultados de búsqueda en DragonflyDB para reducir llamad
 
 ### Estrategia de Caché
 
+El backend **siempre obtiene datos frescos del proveedor** (SerpAPI). La caché es una capa interna gestionada por el servidor con DragonflyDB, totalmente transparente para el frontend.
+
 | Aspecto | Valor |
 |---------|-------|
 | TTL de caché | 15 minutos (900 segundos) |
 | Backend de caché | DragonflyDB (Redis-compatible) |
 | Clave de caché | Hash con Blake3 de los parámetros de búsqueda (ver campos abajo) |
 | Invalidación | Por TTL únicamente. No se invalida manualmente |
+
+- Si un usuario busca sin autenticarse, se registra, y vuelve a buscar con los mismos parámetros dentro de la ventana de caché → se reutilizan los resultados cacheados (sin nueva llamada a SerpAPI)
+- `from_cache` es **siempre `false`** en todas las respuestas. La caché no se expone al frontend
+- `cached_at` es **siempre `null`** en todas las respuestas
+
+> **Motivo:** El manejo interno de caché evita llamadas redundantes al proveedor externo (ahorro de créditos de API) sin exponer detalles de implementación al frontend.
 
 ### Campos que Forman la Clave de Caché
 
@@ -1699,28 +1719,7 @@ La clave de caché se genera haciendo hash de los siguientes campos del request:
 | `cursor` | **No** — la paginación ocurre post-caché en el servidor |
 | `limit` | **No** — la paginación ocurre post-caché en el servidor |
 
-> Dos requests con exactamente los mismos parámetros (excepto `outbound_selection_token`) devolverán la misma respuesta cacheada durante 15 minutos.
-
-### Semántica de `from_cache` y `cached_at`
-
-| `from_cache` | `cached_at` | Significado |
-|--------------|-------------|-------------|
-| `false` | `null` | Respuesta fresca del proveedor externo. Se cachea para futuros requests |
-| `true` | `"2026-03-20T13:10:00Z"` | Respuesta servida desde caché. `cached_at` indica cuándo se obtuvo originalmente |
-
-> El frontend puede usar `cached_at` para mostrar al usuario cuándo se actualizaron los precios por última vez. Ejemplo: *"Precios actualizados hace 8 minutos"*.
-
-### Headers de Caché HTTP
-
-Los endpoints de búsqueda incluyen headers que permiten el almacenamiento en caches del navegador y proxies intermedios por tiempo limitado:
-
-```
-Cache-Control: public, max-age=900, s-maxage=900, stale-while-revalidate=300
-```
-
-- `max-age=900` — El navegador puede cachear por 15 minutos
-- `s-maxage=900` — Los proxies compartidos pueden cachear por 15 minutos
-- `stale-while-revalidate=300` — Servir datos stale mientras se revalida en background (5 minutos)
+> Dos requests con exactamente los mismos parámetros (excepto `outbound_selection_token`) se benefician de la caché interna durante la ventana de TTL, evitando llamadas redundantes a SerpAPI.
 
 ---
 
