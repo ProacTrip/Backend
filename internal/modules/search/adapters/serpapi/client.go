@@ -62,9 +62,24 @@ func (c *Client) GetBookingDetails(ctx context.Context, bookingToken string, adu
 	return c.doRequest(ctx, params)
 }
 
+// SearchHotels performs a hotel search via the SerpAPI HTTP API using google_hotels engine.
+func (c *Client) SearchHotels(ctx context.Context, params map[string]string) (map[string]interface{}, error) {
+	return c.doRequestWithEngine(ctx, params, "google_hotels")
+}
+
+// GetHotelDetails retrieves hotel property details via the SerpAPI HTTP API.
+func (c *Client) GetHotelDetails(ctx context.Context, params map[string]string) (map[string]interface{}, error) {
+	return c.doRequestWithEngine(ctx, params, "google_hotels")
+}
+
 // doRequest builds and executes an HTTP GET request to SerpAPI.
 // Respects context cancellation for graceful shutdown.
 func (c *Client) doRequest(ctx context.Context, params map[string]string) (map[string]interface{}, error) {
+	return c.doRequestWithEngine(ctx, params, "google_flights")
+}
+
+// doRequestWithEngine builds and executes an HTTP GET request to SerpAPI with a given engine.
+func (c *Client) doRequestWithEngine(ctx context.Context, params map[string]string, engine string) (map[string]interface{}, error) {
 	u, err := url.Parse(serpapiBaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse serpapi URL: %w", err)
@@ -74,7 +89,7 @@ func (c *Client) doRequest(ctx context.Context, params map[string]string) (map[s
 	for k, v := range params {
 		q.Set(k, v)
 	}
-	q.Set("engine", "google_flights")
+	q.Set("engine", engine)
 	q.Set("api_key", c.apiKey)
 	u.RawQuery = q.Encode()
 

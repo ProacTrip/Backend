@@ -266,16 +266,20 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 
 	// Search Module
 	searchMod, err := searchModule.NewModule(searchModule.Config{
-		Provider:         nil, // created from SerpAPIKey/SerpAPITimeout
-		SerpAPIKey:       cfg.SerpAPIKey,
-		SerpAPITimeout:   30 * time.Second,
-		SearchCache:      df,
-		DetailsCache:     df,
-		Repo:             nil, // created from PgxPool
-		PgxPool:          searchPool,
-		SearchTTL:        15 * time.Minute,
-		FlightDetailsTTL: 15 * time.Minute,
-		RateLimiter:      rateLimiter,
+		Provider:          nil, // created from SerpAPIKey/SerpAPITimeout
+		SerpAPIKey:        cfg.SerpAPIKey,
+		SerpAPITimeout:    30 * time.Second,
+		SearchCache:       df,
+		DetailsCache:      df,
+		HotelSearchCache:  df,
+		HotelDetailsCache: df,
+		Repo:              nil, // created from PgxPool
+		PgxPool:           searchPool,
+		SearchTTL:         15 * time.Minute,
+		FlightDetailsTTL:  15 * time.Minute,
+		HotelSearchTTL:    5 * time.Minute,
+		HotelDetailsTTL:   15 * time.Minute,
+		RateLimiter:       rateLimiter,
 	})
 	if err != nil {
 		return nil, err
@@ -361,6 +365,8 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	searchGroup := e.Group("/v1/search", anonRateLimitMW, serpapiRateLimitMW)
 	searchGroup.POST("/flights", searchMod.SearchFlightsHandler.Handle)
 	searchGroup.POST("/flight-details", searchMod.FlightDetailsHandler.Handle)
+	searchGroup.POST("/hotels", searchMod.SearchHotelsHandler.Handle)
+	searchGroup.POST("/hotel-details", searchMod.HotelDetailsHandler.Handle)
 
 	// Context route: location + weather (public, no auth required)
 	contextGroup := e.Group("/v1")

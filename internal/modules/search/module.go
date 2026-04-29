@@ -11,7 +11,9 @@ import (
 	"github.com/ProacTrip/Backend/internal/modules/search/adapters/serpapi"
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/flight_details"
+	"github.com/ProacTrip/Backend/internal/modules/search/features/hotel_details"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/search_flights"
+	"github.com/ProacTrip/Backend/internal/modules/search/features/search_hotels"
 	serrors "github.com/ProacTrip/Backend/internal/shared/errors"
 	"github.com/ProacTrip/Backend/internal/shared/ratelimit"
 )
@@ -24,10 +26,14 @@ import (
 type Module struct {
 	SearchFlightsHandler *search_flights.Handler
 	FlightDetailsHandler *flight_details.Handler
+	SearchHotelsHandler  *search_hotels.Handler
+	HotelDetailsHandler  *hotel_details.Handler
 	Repository           domain.SearchHistoryRepository
 
 	searchUC  *search_flights.UseCase
 	detailsUC *flight_details.UseCase
+	hotelsUC  *search_hotels.UseCase
+	hdetailsUC *hotel_details.UseCase
 }
 
 // Wait blocks until all fire-and-forget goroutines have completed.
@@ -35,6 +41,8 @@ type Module struct {
 func (m *Module) Wait() {
 	m.searchUC.Wait()
 	m.detailsUC.Wait()
+	m.hotelsUC.Wait()
+	m.hdetailsUC.Wait()
 }
 
 // =============================================================================
@@ -55,8 +63,10 @@ type Config struct {
 
 	// Cache — la implementación de cache (normalmente cache.Dragonfly).
 	// Los use cases esperan interfaces Get/Set.
-	SearchCache  search_flights.Cache
-	DetailsCache flight_details.Cache
+	SearchCache      search_flights.Cache
+	DetailsCache     flight_details.Cache
+	HotelSearchCache search_hotels.Cache
+	HotelDetailsCache hotel_details.Cache
 
 	// SearchHistoryRepo — repositorio para grabar historial de búsquedas.
 	// Si es nil, se crea desde PgxPool.
@@ -65,6 +75,8 @@ type Config struct {
 	// TTLs para cache
 	SearchTTL        time.Duration
 	FlightDetailsTTL time.Duration
+	HotelSearchTTL   time.Duration
+	HotelDetailsTTL  time.Duration
 
 	// Pool para el repositorio de historial (solo si Repo es nil)
 	PgxPool postgres.PgxPool
@@ -87,13 +99,16 @@ func NewModule(cfg Config) (*Module, error) {
 		provider = adapter
 	}
 
+	// Get the serpapi adapter reference for hotel use cases
+	serpAdapter, _ := provider.(*serpapi.Adapter)
+
 	// 2. Repository (search history)
 	repo := cfg.Repo
 	if repo == nil {
 		repo = postgres.NewSearchHistoryRepo(cfg.PgxPool)
 	}
 
-	// 3. Use Cases
+	// 3. Use Cases — flights
 	searchUC := search_flights.NewUseCase(search_flights.UseCaseDeps{
 		Provider:  provider,
 		Cache:     cfg.SearchCache,
@@ -107,15 +122,30 @@ func NewModule(cfg Config) (*Module, error) {
 		DetailsTTL: cfg.FlightDetailsTTL,
 	})
 
-	// 4. Handlers
+	// 4. Use Cases — hotels
+	hotelsUC := search_hotels.NewUseCase(search_hotels.UseCaseDeps{
+		SerpapiAdapter: serpAdapter,
+		Cache:          cfg.HotelSearchCache,
+		SearchTTL:      cfg.HotelSearchTTL,
+	})
+
+	hdetailsUC := hotel_details.NewUseCase(hotel_details.UseCaseDeps{
+		SerpapiAdapter: serpAdapter,
+		Cache:          cfg.HotelDetailsCache,
+		DetailsTTL:     cfg.HotelDetailsTTL,
+	})
+
+	// 5. Handlers
 	searchHandler := search_flights.NewHandler(searchUC)
 	detailsHandler := flight_details.NewHandler(detailsUC)
+	hotelsHandler := search_hotels.NewHandler(hotelsUC)
+	hdetailsHandler := hotel_details.NewHandler(hdetailsUC)
 
-	// 5. Register domain error mappings
+	// 6. Register domain error mappings
 	registerSearchErrors()
 
 	slog.Info("Search module initialized",
-		"features", []string{"search_flights", "flight_details"},
+		"features", []string{"search_flights", "flight_details", "search_hotels", "hotel_details"},
 		"search_ttl", cfg.SearchTTL,
 		"details_ttl", cfg.FlightDetailsTTL,
 	)
@@ -123,9 +153,13 @@ func NewModule(cfg Config) (*Module, error) {
 	return &Module{
 		SearchFlightsHandler: searchHandler,
 		FlightDetailsHandler: detailsHandler,
+		SearchHotelsHandler:  hotelsHandler,
+		HotelDetailsHandler:  hdetailsHandler,
 		Repository:           repo,
 		searchUC:             searchUC,
 		detailsUC:            detailsUC,
+		hotelsUC:             hotelsUC,
+		hdetailsUC:           hdetailsUC,
 	}, nil
 }
 
