@@ -48,6 +48,9 @@ func (uc *UseCase) Execute(ctx context.Context, ip, lang string) (*domain.Contex
 		return nil, fmt.Errorf("resolve ip: %w", err)
 	}
 
+	location.Currency = domain.CurrencyForCountry(location.CountryCode)
+	location.Language = lang
+
 	result, err := uc.rateLimiter.ProviderAllow(ctx, "openweather")
 	if err != nil {
 		return nil, fmt.Errorf("rate limit: %w", err)

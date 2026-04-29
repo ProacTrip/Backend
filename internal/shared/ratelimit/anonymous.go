@@ -3,6 +3,7 @@
 package ratelimit
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -10,12 +11,13 @@ import (
 )
 
 const (
-	AnonCookieName      = "anon_id"
+	AnonCookieName      = "__Secure-anon_token"
 	AnonContextKey      = "anon_id"
-	AnonCookieMaxAgeSec = 86400 * 365 // 1 year
+	AnonCookieMaxAgeSec = 315360000 // 10 years
+	AnonCookieDomain    = ".proactrip.com"
 )
 
-func AnonymousCookieMiddleware(skipper func(c *echo.Context) bool) echo.MiddlewareFunc {
+func AnonymousCookieMiddleware(skipper func(c *echo.Context) bool, isProduction bool) echo.MiddlewareFunc {
 	if skipper == nil {
 		skipper = func(c *echo.Context) bool { return false }
 	}
@@ -26,14 +28,14 @@ func AnonymousCookieMiddleware(skipper func(c *echo.Context) bool) echo.Middlewa
 				return next(c)
 			}
 
-			anonID := extractOrGenerateAnonID(c)
+			anonID := extractOrGenerateAnonID(c, isProduction)
 			c.Set(AnonContextKey, anonID)
 			return next(c)
 		}
 	}
 }
 
-func extractOrGenerateAnonID(c *echo.Context) string {
+func extractOrGenerateAnonID(c *echo.Context, isProduction bool) string {
 	cookie, err := c.Cookie(AnonCookieName)
 	if err == nil && cookie.Value != "" {
 		return cookie.Value
@@ -41,15 +43,25 @@ func extractOrGenerateAnonID(c *echo.Context) string {
 
 	anonID := uuid.Must(uuid.NewV7()).String()
 
-	cookie = new(http.Cookie)
-	cookie.Name = AnonCookieName
-	cookie.Value = anonID
-	cookie.Path = "/"
-	cookie.MaxAge = AnonCookieMaxAgeSec
-	cookie.HttpOnly = true
-	cookie.Secure = true
-	cookie.SameSite = http.SameSiteLaxMode
-	c.SetCookie(cookie)
+	cookie = &http.Cookie{
+		Name:     AnonCookieName,
+		Value:    anonID,
+		Path:     "/",
+		MaxAge:   AnonCookieMaxAgeSec,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+	}
+
+	setCookieStr := func() string {
+		if isProduction {
+			return fmt.Sprintf("%s; Domain=%s; Partitioned",
+				cookie.String(), AnonCookieDomain)
+		}
+		return cookie.String() + "; Partitioned"
+	}()
+
+	c.Response().Header().Add("Set-Cookie", setCookieStr)
 
 	return anonID
 }

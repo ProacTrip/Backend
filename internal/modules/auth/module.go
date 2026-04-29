@@ -92,9 +92,10 @@ func NewModule(cfg Config) (*Module, error) {
 
 	// 4. Inicializar Token Service (PASETO)
 	tokenSvc, err := token.NewPasetoService(token.PasetoConfig{
-		SymmetricKey: cfg.PasetoKey,
-		AccessTTL:    cfg.AccessTokenTTL,
-		RefreshTTL:   cfg.RefreshTokenTTL,
+		SymmetricKey:    cfg.PasetoKey,
+		AccessTTL:       cfg.AccessTokenTTL,
+		RefreshTTL:      cfg.RefreshTokenTTL,
+		DragonflyClient: cfg.DragonflyClient,
 	})
 	if err != nil {
 		return nil, err

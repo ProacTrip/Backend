@@ -2,6 +2,7 @@ package get_context
 
 import (
 	"net/http"
+	"strings"
 
 	httperr "github.com/ProacTrip/Backend/internal/shared/http"
 	"github.com/labstack/echo/v5"
@@ -17,10 +18,7 @@ func NewHandler(useCase *UseCase) *Handler {
 
 func (h *Handler) Handle(c *echo.Context) error {
 	ip := c.RealIP()
-	lang := c.QueryParam("lang")
-	if lang == "" {
-		lang = "en"
-	}
+	lang := extractLanguage(c)
 
 	result, err := h.useCase.Execute(c.Request().Context(), ip, lang)
 	if err != nil {
@@ -28,4 +26,17 @@ func (h *Handler) Handle(c *echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, result)
+}
+
+func extractLanguage(c *echo.Context) string {
+	header := c.Request().Header.Get("Accept-Language")
+	if header == "" {
+		return "en"
+	}
+	parts := strings.SplitN(header, ",", 2)
+	first := strings.TrimSpace(parts[0])
+	if len(first) >= 2 {
+		return strings.ToLower(first[:2])
+	}
+	return "en"
 }

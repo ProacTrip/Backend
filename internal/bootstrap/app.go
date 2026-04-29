@@ -25,6 +25,7 @@ import (
 	"github.com/ProacTrip/Backend/internal/shared/database"
 	sharederrors "github.com/ProacTrip/Backend/internal/shared/errors"
 	"github.com/ProacTrip/Backend/internal/shared/eventbus"
+	sharedmiddleware "github.com/ProacTrip/Backend/internal/shared/middleware"
 	"github.com/ProacTrip/Backend/internal/shared/ratelimit"
 
 	"github.com/labstack/echo/v5"
@@ -289,14 +290,34 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		RateLimiter:         rateLimiter,
 	})
 
+	// Auth Middleware (silent refresh token rotation)
+	authMiddleware := sharedmiddleware.NewAuthMiddleware(sharedmiddleware.AuthConfig{
+		IsProduction: cfg.Server.Env == "production",
+		TokenSvc:     authMod.TokenService,
+		UserRepo:     authMod.Repository,
+		CookieDomain: ".proactrip.com",
+	})
+
 	// Rutas
 
 	// Health checks
 	e.GET("/health", healthCheckHandler(rdb, poolMgr))
 	e.GET("/ready", readyCheckHandler(rdb, poolMgr))
 
-	// Middleware: cookie anónimo, rate limit anónimo
-	anonCookieMW := ratelimit.AnonymousCookieMiddleware(nil)
+	// Middleware: cookie anónimo (GLOBAL — todas las rutas)
+	// Skipper: no setear si el usuario ya tiene access_token
+	anonSkipper := func(c *echo.Context) bool {
+		if _, err := c.Cookie("__Secure-access_token"); err == nil {
+			return true
+		}
+		if _, err := c.Cookie("access_token"); err == nil {
+			return true
+		}
+		return false
+	}
+	anonCookieMW := ratelimit.AnonymousCookieMiddleware(anonSkipper, cfg.Server.Env == "production")
+	e.Use(anonCookieMW)
+
 	anonRateLimitMW := ratelimit.AnonymousRateLimitMiddleware(rateLimiter)
 
 	// Middleware: rate limit autenticado (extrae user ID del PASETO)
@@ -332,12 +353,12 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	// Login endpoint
 	authGroup.POST("/login", authMod.LoginHandler.Handle)
 
-	// Logout endpoints — authenticated rate limiting
-	authGroup.POST("/logout", authMod.LogoutHandler.Handle, authRateLimitMW)
-	authGroup.POST("/logout/all", authMod.LogoutHandler.HandleAll, authRateLimitMW)
+	// Logout endpoints — auth middleware + authenticated rate limiting
+	authGroup.POST("/logout", authMod.LogoutHandler.Handle, authMiddleware.Handle, authRateLimitMW)
+	authGroup.POST("/logout/all", authMod.LogoutHandler.HandleAll, authMiddleware.Handle, authRateLimitMW)
 
 	// Search routes: /v1/search (públicas con rate limit)
-	searchGroup := e.Group("/v1/search", anonCookieMW, anonRateLimitMW, serpapiRateLimitMW)
+	searchGroup := e.Group("/v1/search", anonRateLimitMW, serpapiRateLimitMW)
 	searchGroup.POST("/flights", searchMod.SearchFlightsHandler.Handle)
 	searchGroup.POST("/flight-details", searchMod.FlightDetailsHandler.Handle)
 

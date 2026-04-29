@@ -110,7 +110,7 @@ func TestGlobalRateLimitMiddlewareReturns429WhenExceeded(t *testing.T) {
 func TestAnonymousRateLimitMiddleware(t *testing.T) {
 	e, rl, _ := setupEchoWithRateLimiter(t, 2)
 
-	anonMW := ratelimit.AnonymousCookieMiddleware(nil)
+	anonMW := ratelimit.AnonymousCookieMiddleware(nil, false)
 	anonRLMW := ratelimit.AnonymousRateLimitMiddleware(rl)
 
 	e.GET("/test", func(c *echo.Context) error {
@@ -122,7 +122,7 @@ func TestAnonymousRateLimitMiddleware(t *testing.T) {
 	e.ServeHTTP(rec, req)
 
 	cookies := rec.Result().Cookies()
-	if len(cookies) != 1 || cookies[0].Name != "anon_id" {
+	if len(cookies) != 1 || cookies[0].Name != "__Secure-anon_token" {
 		t.Errorf("expected anon_id cookie, got %d cookies", len(cookies))
 	}
 
@@ -134,7 +134,7 @@ func TestAnonymousRateLimitMiddleware(t *testing.T) {
 func TestAnonymousCookieMiddlewareSetsCookieAttributes(t *testing.T) {
 	e, _, _ := setupEchoWithRateLimiter(t, 10)
 
-	anonMW := ratelimit.AnonymousCookieMiddleware(nil)
+	anonMW := ratelimit.AnonymousCookieMiddleware(nil, false)
 	e.GET("/test", func(c *echo.Context) error {
 		return c.String(http.StatusOK, "ok")
 	}, anonMW)
@@ -169,7 +169,7 @@ func TestAnonymousCookieMiddlewareSetsCookieAttributes(t *testing.T) {
 func TestAnonymousCookieMiddlewareReusesExistingCookie(t *testing.T) {
 	e, rl, _ := setupEchoWithRateLimiter(t, 10)
 
-	anonMW := ratelimit.AnonymousCookieMiddleware(nil)
+	anonMW := ratelimit.AnonymousCookieMiddleware(nil, false)
 	anonRLMW := ratelimit.AnonymousRateLimitMiddleware(rl)
 
 	e.GET("/test", func(c *echo.Context) error {
@@ -179,7 +179,7 @@ func TestAnonymousCookieMiddlewareReusesExistingCookie(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	req.AddCookie(&http.Cookie{
-		Name:  "anon_id",
+		Name:  "__Secure-anon_token",
 		Value: "existing-anon-id-123",
 	})
 	rec := httptest.NewRecorder()
@@ -310,7 +310,7 @@ func TestProviderRateLimitMiddlewareDifferentProvidersIndependent(t *testing.T) 
 func TestAnonymousRateLimitMiddlewareReturns429Exceeded(t *testing.T) {
 	e, rl, _ := setupEchoWithRateLimiter(t, 1)
 
-	anonMW := ratelimit.AnonymousCookieMiddleware(nil)
+	anonMW := ratelimit.AnonymousCookieMiddleware(nil, false)
 	anonRLMW := ratelimit.AnonymousRateLimitMiddleware(rl)
 
 	e.GET("/test", func(c *echo.Context) error {
@@ -318,7 +318,7 @@ func TestAnonymousRateLimitMiddlewareReturns429Exceeded(t *testing.T) {
 	}, anonMW, anonRLMW)
 
 	req1 := httptest.NewRequest(http.MethodGet, "/test", nil)
-	req1.AddCookie(&http.Cookie{Name: "anon_id", Value: "overlimit-anon"})
+	req1.AddCookie(&http.Cookie{Name: "__Secure-anon_token", Value: "overlimit-anon"})
 	rec1 := httptest.NewRecorder()
 	e.ServeHTTP(rec1, req1)
 	if rec1.Code != http.StatusOK {
@@ -326,7 +326,7 @@ func TestAnonymousRateLimitMiddlewareReturns429Exceeded(t *testing.T) {
 	}
 
 	req2 := httptest.NewRequest(http.MethodGet, "/test", nil)
-	req2.AddCookie(&http.Cookie{Name: "anon_id", Value: "overlimit-anon"})
+	req2.AddCookie(&http.Cookie{Name: "__Secure-anon_token", Value: "overlimit-anon"})
 	rec2 := httptest.NewRecorder()
 	e.ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusTooManyRequests {
@@ -364,7 +364,7 @@ func TestEchoContextMultipleMiddlewareComposition(t *testing.T) {
 			return c.String(http.StatusOK, "composed")
 		},
 		ratelimit.GlobalRateLimitMiddleware(rl),
-		ratelimit.AnonymousCookieMiddleware(nil),
+		ratelimit.AnonymousCookieMiddleware(nil, false),
 		ratelimit.AnonymousRateLimitMiddleware(rl),
 	)
 

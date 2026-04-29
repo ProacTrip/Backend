@@ -9,6 +9,7 @@ import (
 
 	"aidanwoods.dev/go-paseto/v2"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/ProacTrip/Backend/internal/modules/auth/domain"
 )
@@ -17,18 +18,19 @@ import (
 // Genera y valida access/refresh tokens cifrados.
 
 type PasetoConfig struct {
-	SymmetricKey []byte // 32 bytes exactos
-	AccessTTL    time.Duration
-	RefreshTTL   time.Duration
+	SymmetricKey    []byte // 32 bytes exactos
+	AccessTTL       time.Duration
+	RefreshTTL      time.Duration
+	DragonflyClient *redis.Client
 }
 
 type PasetoService struct {
 	symmetricKey paseto.V4SymmetricKey
 	accessTTL    time.Duration
 	refreshTTL   time.Duration
+	dragonfly    *redis.Client
 }
 
-// NewPasetoService crea el servicio de tokens usando PASETO V4 Local.
 func NewPasetoService(cfg PasetoConfig) (*PasetoService, error) {
 	if len(cfg.SymmetricKey) != 32 {
 		return nil, fmt.Errorf("la clave simétrica debe tener 32 bytes, tiene %d", len(cfg.SymmetricKey))
@@ -39,31 +41,30 @@ func NewPasetoService(cfg PasetoConfig) (*PasetoService, error) {
 		return nil, fmt.Errorf("error al crear clave PASETO: %w", err)
 	}
 
-	// Valores por defecto
 	accessTTL := cfg.AccessTTL
 	if accessTTL == 0 {
 		accessTTL = 15 * time.Minute
 	}
 	refreshTTL := cfg.RefreshTTL
 	if refreshTTL == 0 {
-		refreshTTL = 7 * 24 * time.Hour // 7 días
+		refreshTTL = 7 * 24 * time.Hour
 	}
 
 	return &PasetoService{
 		symmetricKey: key,
 		accessTTL:    accessTTL,
 		refreshTTL:   refreshTTL,
+		dragonfly:    cfg.DragonflyClient,
 	}, nil
 }
 
-// GenerateTokenPair genera access y refresh token (MVP).
 func (s *PasetoService) GenerateTokenPair(userID uuid.UUID, email string, roleID, sessionID uuid.UUID) (*TokenPair, error) {
 	accessToken, accessJTI, err := s.generateAccessToken(userID, email, roleID, sessionID)
 	if err != nil {
 		return nil, err
 	}
 
-	refreshToken, refreshJTI, err := s.generateRefreshToken(userID, sessionID)
+	refreshToken, refreshJTI, err := s.generateRefreshToken(userID, email, roleID, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -84,9 +85,8 @@ func (s *PasetoService) GenerateAccessToken(userID uuid.UUID, email string, role
 	return tokenStr, err
 }
 
-// GenerateRefreshToken genera solo un refresh token.
-func (s *PasetoService) GenerateRefreshToken(userID, sessionID uuid.UUID) (string, error) {
-	tokenStr, _, err := s.generateRefreshToken(userID, sessionID)
+func (s *PasetoService) GenerateRefreshToken(userID uuid.UUID, email string, roleID, sessionID uuid.UUID) (string, error) {
+	tokenStr, _, err := s.generateRefreshToken(userID, email, roleID, sessionID)
 	return tokenStr, err
 }
 
@@ -156,7 +156,6 @@ func (s *PasetoService) ValidateAccessToken(ctx context.Context, tokenString str
 	}, nil
 }
 
-// ValidateRefreshToken valida un refresh token y devuelve sus claims.
 func (s *PasetoService) ValidateRefreshToken(ctx context.Context, tokenString string) (*RefreshClaims, error) {
 	parser := paseto.NewParser()
 
@@ -182,6 +181,11 @@ func (s *PasetoService) ValidateRefreshToken(ctx context.Context, tokenString st
 		return nil, domain.ErrTokenInvalid
 	}
 
+	email, _ := pasetoToken.GetString("email")
+
+	roleIDStr, _ := pasetoToken.GetString("role_id")
+	roleID, _ := uuid.Parse(roleIDStr)
+
 	sessionIDStr, err := pasetoToken.GetString("session_id")
 	if err != nil {
 		return nil, domain.ErrTokenInvalid
@@ -200,11 +204,64 @@ func (s *PasetoService) ValidateRefreshToken(ctx context.Context, tokenString st
 		return nil, domain.ErrTokenInvalid
 	}
 
-	return &RefreshClaims{
+	claims := &RefreshClaims{
 		UserID:    userID,
+		Email:     email,
+		RoleID:    roleID,
 		SessionID: sessionID,
 		JTI:       jtiUUID,
-	}, nil
+	}
+
+	if blacklisted, err := s.isJTIBlacklisted(ctx, jtiUUID); err != nil || blacklisted {
+		return nil, domain.ErrTokenRevoked
+	}
+
+	return claims, nil
+}
+
+// ValidateAndRotateRefresh valida el refresh token, blacklistea el JTI anterior
+// y genera un nuevo par de tokens (access + refresh). Implementa rotación silenciosa.
+func (s *PasetoService) ValidateAndRotateRefresh(ctx context.Context, refreshToken string) (*RefreshClaims, string, string, error) {
+	claims, err := s.ValidateRefreshToken(ctx, refreshToken)
+	if err != nil {
+		return nil, "", "", err
+	}
+
+	if err := s.blacklistJTI(ctx, claims.JTI); err != nil {
+		return nil, "", "", fmt.Errorf("blacklist JTI: %w", err)
+	}
+
+	newAccess, err := s.GenerateAccessToken(claims.UserID, claims.Email, claims.RoleID, claims.SessionID)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("generate access token: %w", err)
+	}
+
+	newRefresh, err := s.GenerateRefreshToken(claims.UserID, claims.Email, claims.RoleID, claims.SessionID)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("generate refresh token: %w", err)
+	}
+
+	return claims, newAccess, newRefresh, nil
+}
+
+func (s *PasetoService) blacklistJTI(ctx context.Context, jti uuid.UUID) error {
+	if s.dragonfly == nil {
+		return nil
+	}
+	key := fmt.Sprintf("auth:blacklist:jti:%s", jti.String())
+	return s.dragonfly.Set(ctx, key, "1", s.refreshTTL).Err()
+}
+
+func (s *PasetoService) isJTIBlacklisted(ctx context.Context, jti uuid.UUID) (bool, error) {
+	if s.dragonfly == nil {
+		return false, nil
+	}
+	key := fmt.Sprintf("auth:blacklist:jti:%s", jti.String())
+	result, err := s.dragonfly.Exists(ctx, key).Result()
+	if err != nil {
+		return false, err
+	}
+	return result > 0, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -227,11 +284,13 @@ func (s *PasetoService) generateAccessToken(userID uuid.UUID, email string, role
 	return encrypted, jti, nil
 }
 
-func (s *PasetoService) generateRefreshToken(userID, sessionID uuid.UUID) (string, uuid.UUID, error) {
+func (s *PasetoService) generateRefreshToken(userID uuid.UUID, email string, roleID, sessionID uuid.UUID) (string, uuid.UUID, error) {
 	jti := uuid.Must(uuid.NewV7())
 
 	token := paseto.NewToken()
 	token.SetSubject(userID.String())
+	token.SetString("email", email)
+	token.SetString("role_id", roleID.String())
 	token.SetString("session_id", sessionID.String())
 	token.SetJti(jti.String())
 	token.SetString("type", "refresh")
@@ -264,6 +323,8 @@ type AccessClaims struct {
 
 type RefreshClaims struct {
 	UserID    uuid.UUID
+	Email     string
+	RoleID    uuid.UUID
 	SessionID uuid.UUID
 	JTI       uuid.UUID
 }
