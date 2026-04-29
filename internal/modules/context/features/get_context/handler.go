@@ -35,6 +35,15 @@ func extractLanguage(c *echo.Context) string {
 	}
 	parts := strings.SplitN(header, ",", 2)
 	first := strings.TrimSpace(parts[0])
+
+	if idx := strings.IndexByte(first, ';'); idx != -1 {
+		first = strings.TrimSpace(first[:idx])
+	}
+
+	if idx := strings.IndexByte(first, '-'); idx != -1 {
+		first = first[:idx]
+	}
+
 	if len(first) >= 2 {
 		return strings.ToLower(first[:2])
 	}

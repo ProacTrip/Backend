@@ -49,6 +49,11 @@ func (uc *UseCase) Execute(ctx context.Context, ip, lang string) (*domain.Contex
 	}
 
 	location.Currency = domain.CurrencyForCountry(location.CountryCode)
+	if lang == "en" {
+		if countryLang := domain.LanguageForCountry(location.CountryCode); countryLang != "en" {
+			lang = countryLang
+		}
+	}
 	location.Language = lang
 
 	result, err := uc.rateLimiter.ProviderAllow(ctx, "openweather")
