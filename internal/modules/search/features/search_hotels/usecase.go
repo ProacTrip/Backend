@@ -74,6 +74,11 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 	// 3. Generate cache key (exclude page_token from key — different pages are different requests)
 	cacheKey := generateCacheKey(adapterParams)
 
+	slog.ErrorContext(ctx, "DEBUG: checking cache for hotel search",
+		slog.String("key", cacheKey),
+		slog.String("query", cmd.Query),
+	)
+
 	// 4. Try cache
 	if cached, err := uc.cache.Get(ctx, cacheKey); err == nil && cached != "" {
 		var resp Response
@@ -82,6 +87,11 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 				slog.String("key", cacheKey),
 				slog.String("query", cmd.Query),
 				slog.Int("property_count", len(resp.Properties)),
+			)
+			slog.ErrorContext(ctx, "DEBUG: cache HIT, returning cached response",
+				slog.String("key", cacheKey),
+				slog.Int("property_count", len(resp.Properties)),
+				slog.Bool("from_cache", true),
 			)
 			resp.FromCache = true
 			cachedAt := time.Now().UTC().Format(time.RFC3339)
@@ -100,6 +110,10 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 			slog.String("check_out", cmd.CheckOutDate),
 			slog.Int("adults", cmd.Adults),
 		)
+		slog.ErrorContext(ctx, "DEBUG: cache MISS, will call SerpAPI",
+			slog.String("key", cacheKey),
+			slog.String("query", cmd.Query),
+		)
 	}
 
 	// 5. Cache miss — call SerpAPI
@@ -107,6 +121,12 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		slog.String("query", cmd.Query),
 		slog.String("check_in", cmd.CheckInDate),
 		slog.String("check_out", cmd.CheckOutDate),
+	)
+	slog.ErrorContext(ctx, "DEBUG: calling SerpAPI adapter NOW",
+		slog.String("query", cmd.Query),
+		slog.String("check_in", cmd.CheckInDate),
+		slog.String("check_out", cmd.CheckOutDate),
+		slog.Int("adults", cmd.Adults),
 	)
 	serpResp, err := uc.serpapiAdapter.SearchHotels(ctx, adapterParams)
 	if err != nil {
@@ -119,7 +139,14 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 
 	slog.InfoContext(ctx, "hotel search SerpAPI response received",
 		slog.String("query", cmd.Query),
+		slog.Int("properties_count", len(serpResp.Properties)),
 		slog.Int("non_matching_properties_count", len(serpResp.NonMatchingProperties)),
+		slog.String("results_state", serpResp.SearchInformation.HotelsResultsState),
+	)
+	slog.ErrorContext(ctx, "DEBUG: SerpAPI response received",
+		slog.String("query", cmd.Query),
+		slog.Int("properties_count", len(serpResp.Properties)),
+		slog.Int("non_matching_count", len(serpResp.NonMatchingProperties)),
 		slog.String("results_state", serpResp.SearchInformation.HotelsResultsState),
 	)
 
@@ -130,6 +157,13 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		slog.String("query", cmd.Query),
 		slog.Int("property_count", len(resp.Properties)),
 		slog.String("results_state", resp.ResultsState),
+	)
+	slog.ErrorContext(ctx, "DEBUG: mapped response, saving to cache",
+		slog.String("query", cmd.Query),
+		slog.Int("property_count", len(resp.Properties)),
+		slog.String("results_state", resp.ResultsState),
+		slog.String("cache_key", cacheKey),
+		slog.Duration("ttl", uc.searchTTL),
 	)
 
 	// 7. Save to cache async — fire-and-forget with WaitGroup tracking
@@ -199,10 +233,10 @@ func generateCacheKey(params serpapi.HotelSearchParams) string {
 	raw, err := json.Marshal(params)
 	if err != nil {
 		// Fallback: limited key
-		return fmt.Sprintf("hotels:fallback:%s:%s:%s:%s",
+		return fmt.Sprintf("hotels:v2:fallback:%s:%s:%s:%s",
 			params.Query, params.CheckInDate, params.CheckOutDate, params.Currency)
 	}
-	return "hotels:" + domain.HashKey(raw)
+	return "hotels:v2:" + domain.HashKey(raw)
 }
 
 // =============================================================================
@@ -224,10 +258,12 @@ func mapSearchResponse(raw *serpapi.HotelSearchResponse, vacationRentals bool, c
 	// Map results state
 	if raw.SearchInformation.HotelsResultsState == "Non-matching results only" {
 		resp.ResultsState = "non_matching_only"
+		// Non-matching results only — use near matches as properties
+		resp.Properties = mapProperties(raw.NonMatchingProperties, currency)
+	} else {
+		// Matching results — use the main properties array
+		resp.Properties = mapProperties(raw.Properties, currency)
 	}
-
-	// Map properties
-	resp.Properties = mapProperties(raw.NonMatchingProperties, currency)
 
 	// Map brands
 	resp.Brands = mapBrands(raw.Brands)

@@ -15,9 +15,10 @@ import (
 
 // HotelSearchResponse is the top-level SerpAPI google_hotels search response.
 type HotelSearchResponse struct {
-	SearchInformation    HotelSearchInfo  `json:"search_information"`
-	NonMatchingProperties []HotelProperty `json:"non_matching_properties"`
-	Brands               []HotelBrand     `json:"brands"`
+	SearchInformation     HotelSearchInfo  `json:"search_information"`
+	Properties            []HotelProperty  `json:"properties"`
+	NonMatchingProperties []HotelProperty  `json:"non_matching_properties"`
+	Brands                []HotelBrand     `json:"brands"`
 }
 
 // HotelSearchInfo contains search metadata from SerpAPI hotel response.

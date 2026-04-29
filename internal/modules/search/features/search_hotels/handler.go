@@ -37,6 +37,13 @@ func (h *Handler) Handle(c *echo.Context) error {
 		return httperr.MapError(c, err)
 	}
 
+	slog.Error("DEBUG: handler called, body bound",
+		slog.String("query", cmd.Query),
+		slog.String("check_in", cmd.CheckInDate),
+		slog.String("check_out", cmd.CheckOutDate),
+		slog.Int("adults", cmd.Adults),
+	)
+
 	// Quick validation before passing to use case
 	if cmd.Query == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "query is required")
@@ -48,6 +55,8 @@ func (h *Handler) Handle(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "check_out_date is required")
 	}
 
+	slog.Error("DEBUG: validation passed, calling usecase")
+
 	resp, err := h.usecase.Execute(c.Request().Context(), cmd)
 	if err != nil {
 		slog.ErrorContext(c.Request().Context(), "search_hotels failed",
@@ -56,6 +65,12 @@ func (h *Handler) Handle(c *echo.Context) error {
 		)
 		return httperr.MapError(c, err)
 	}
+
+	slog.Error("DEBUG: usecase returned response",
+		slog.Int("property_count", len(resp.Properties)),
+		slog.Bool("from_cache", resp.FromCache),
+		slog.String("results_state", resp.ResultsState),
+	)
 
 	c.Response().Header().Set("Cache-Control", "public, max-age=300, s-maxage=300, stale-while-revalidate=300")
 	return c.JSON(http.StatusOK, resp)
