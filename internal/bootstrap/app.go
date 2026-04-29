@@ -55,6 +55,10 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	e := echo.New()
 	e.Logger = logger
 
+	// Echo v5.1.0: RealIP() no confía en X-Forwarded-For por defecto.
+	// LegacyIPExtractor mantiene compatibilidad con proxies (Docker, nginx, Cloudflare)
+	e.IPExtractor = echo.LegacyIPExtractor()
+
 	// Middleware: request ID, traceparent, logging, recovery, CORS
 	e.Use(middleware.RequestID())
 
