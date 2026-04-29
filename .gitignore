@@ -17,7 +17,7 @@ Thumbs.db
 # Binaries
 *.exe
 *.test
-api
+/api
 tmp/
 
 # Go
