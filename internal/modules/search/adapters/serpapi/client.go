@@ -93,6 +93,12 @@ func (c *Client) doRequestWithEngine(ctx context.Context, params map[string]stri
 	q.Set("api_key", c.apiKey)
 	u.RawQuery = q.Encode()
 
+	slog.InfoContext(ctx, "serpapi request",
+		slog.String("engine", engine),
+		slog.String("url", maskSensitiveURL(u.String())),
+		slog.Bool("has_api_key", c.apiKey != ""),
+	)
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("create serpapi request: %w", err)
@@ -102,6 +108,11 @@ func (c *Client) doRequestWithEngine(ctx context.Context, params map[string]stri
 	if err != nil {
 		return nil, fmt.Errorf("serpapi request: %w", err)
 	}
+
+	slog.InfoContext(ctx, "serpapi response",
+		slog.String("engine", engine),
+		slog.Int("status", resp.StatusCode),
+	)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -118,6 +129,20 @@ func (c *Client) doRequestWithEngine(ctx context.Context, params map[string]stri
 	}
 
 	return result, nil
+}
+
+// maskSensitiveURL masks the api_key query parameter in a URL for safe logging.
+func maskSensitiveURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	q := u.Query()
+	if q.Get("api_key") != "" {
+		q.Set("api_key", "***")
+		u.RawQuery = q.Encode()
+	}
+	return u.String()
 }
 
 // getErrorFromResponse extracts an error message from a SerpAPI response map.

@@ -78,6 +78,11 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 	if cached, err := uc.cache.Get(ctx, cacheKey); err == nil && cached != "" {
 		var resp Response
 		if err := json.Unmarshal([]byte(cached), &resp); err == nil {
+			slog.InfoContext(ctx, "hotel search cache hit",
+				slog.String("key", cacheKey),
+				slog.String("query", cmd.Query),
+				slog.Int("property_count", len(resp.Properties)),
+			)
 			resp.FromCache = true
 			cachedAt := time.Now().UTC().Format(time.RFC3339)
 			resp.CachedAt = &cachedAt
@@ -87,16 +92,45 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 			slog.String("key", cacheKey),
 			slog.Any("err", err),
 		)
+	} else {
+		slog.InfoContext(ctx, "hotel search cache miss, calling SerpAPI",
+			slog.String("key", cacheKey),
+			slog.String("query", cmd.Query),
+			slog.String("check_in", cmd.CheckInDate),
+			slog.String("check_out", cmd.CheckOutDate),
+			slog.Int("adults", cmd.Adults),
+		)
 	}
 
 	// 5. Cache miss — call SerpAPI
+	slog.InfoContext(ctx, "hotel search calling SerpAPI",
+		slog.String("query", cmd.Query),
+		slog.String("check_in", cmd.CheckInDate),
+		slog.String("check_out", cmd.CheckOutDate),
+	)
 	serpResp, err := uc.serpapiAdapter.SearchHotels(ctx, adapterParams)
 	if err != nil {
+		slog.ErrorContext(ctx, "hotel search SerpAPI call failed",
+			slog.String("query", cmd.Query),
+			slog.Any("error", err),
+		)
 		return nil, fmt.Errorf("hotel search: %w", err)
 	}
 
+	slog.InfoContext(ctx, "hotel search SerpAPI response received",
+		slog.String("query", cmd.Query),
+		slog.Int("non_matching_properties_count", len(serpResp.NonMatchingProperties)),
+		slog.String("results_state", serpResp.SearchInformation.HotelsResultsState),
+	)
+
 	// 6. Map SerpAPI response to our Response
 	resp := mapSearchResponse(serpResp, cmd.VacationRentals, cmd.Currency)
+
+	slog.InfoContext(ctx, "hotel search mapped response",
+		slog.String("query", cmd.Query),
+		slog.Int("property_count", len(resp.Properties)),
+		slog.String("results_state", resp.ResultsState),
+	)
 
 	// 7. Save to cache async — fire-and-forget with WaitGroup tracking
 	bgCtx := context.WithoutCancel(ctx)

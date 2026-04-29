@@ -28,6 +28,10 @@ func NewClient(apiKey string) *Client {
 }
 
 func (c *Client) GetCurrentWeather(ctx context.Context, lat, lon float64, lang string) (*domain.WeatherData, error) {
+	if c.apiKey == "" {
+		return nil, nil
+	}
+
 	u, err := url.Parse(openWeatherBaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse openweather URL: %w", err)

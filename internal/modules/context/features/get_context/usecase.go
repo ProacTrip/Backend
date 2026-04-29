@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net"
 	"time"
 
 	"github.com/ProacTrip/Backend/internal/modules/context/domain"
@@ -43,7 +44,7 @@ func NewUseCase(deps UseCaseDeps) *UseCase {
 }
 
 func (uc *UseCase) Execute(ctx context.Context, ip, lang string) (*domain.ContextResponse, error) {
-	location, err := uc.locationProvider.ResolveIP(ctx, ip)
+	location, err := uc.resolveLocation(ctx, ip)
 	if err != nil {
 		return nil, fmt.Errorf("resolve ip: %w", err)
 	}
@@ -56,6 +57,25 @@ func (uc *UseCase) Execute(ctx context.Context, ip, lang string) (*domain.Contex
 	}
 	location.Language = lang
 
+	weather, err := uc.fetchWeather(ctx, location.Latitude, location.Longitude, lang)
+	if err != nil {
+		return nil, fmt.Errorf("get weather: %w", err)
+	}
+
+	return &domain.ContextResponse{
+		Location: *location,
+		Weather:  weather,
+	}, nil
+}
+
+func (uc *UseCase) resolveLocation(ctx context.Context, ip string) (*domain.LocationData, error) {
+	if isLocalOrPrivate(ip) {
+		return domain.DefaultLocation(), nil
+	}
+	return uc.locationProvider.ResolveIP(ctx, ip)
+}
+
+func (uc *UseCase) fetchWeather(ctx context.Context, lat, lon float64, lang string) (*domain.WeatherData, error) {
 	result, err := uc.rateLimiter.ProviderAllow(ctx, "openweather")
 	if err != nil {
 		return nil, fmt.Errorf("rate limit: %w", err)
@@ -64,23 +84,23 @@ func (uc *UseCase) Execute(ctx context.Context, ip, lang string) (*domain.Contex
 		return nil, fmt.Errorf("openweather rate limit exceeded: %d/%d", result.Current, result.Limit)
 	}
 
-	roundedLat := math.Round(location.Latitude*100) / 100
-	roundedLon := math.Round(location.Longitude*100) / 100
+	roundedLat := math.Round(lat*100) / 100
+	roundedLon := math.Round(lon*100) / 100
 	cacheKey := fmt.Sprintf("weather:%.2f:%.2f:%s", roundedLat, roundedLon, lang)
 
 	if cached, err := uc.cache.Get(ctx, cacheKey); err == nil && cached != "" {
 		var weather domain.WeatherData
 		if err := json.Unmarshal([]byte(cached), &weather); err == nil {
-			return &domain.ContextResponse{
-				Location: *location,
-				Weather:  weather,
-			}, nil
+			return &weather, nil
 		}
 	}
 
-	weather, err := uc.weatherProvider.GetCurrentWeather(ctx, location.Latitude, location.Longitude, lang)
+	weather, err := uc.weatherProvider.GetCurrentWeather(ctx, lat, lon, lang)
 	if err != nil {
 		return nil, fmt.Errorf("get weather: %w", err)
+	}
+	if weather == nil {
+		return nil, nil
 	}
 
 	weatherBytes, marshalErr := json.Marshal(weather)
@@ -88,8 +108,13 @@ func (uc *UseCase) Execute(ctx context.Context, ip, lang string) (*domain.Contex
 		_ = uc.cache.Set(ctx, cacheKey, string(weatherBytes), uc.cacheTTL)
 	}
 
-	return &domain.ContextResponse{
-		Location: *location,
-		Weather:  *weather,
-	}, nil
+	return weather, nil
+}
+
+func isLocalOrPrivate(ip string) bool {
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return true
+	}
+	return parsed.IsLoopback() || parsed.IsPrivate() || parsed.IsUnspecified()
 }

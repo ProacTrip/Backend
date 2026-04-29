@@ -283,8 +283,8 @@ type WeatherData struct {
 }
 
 type ContextResponse struct {
-	Location LocationData `json:"location"`
-	Weather  WeatherData  `json:"weather"`
+	Location LocationData  `json:"location"`
+	Weather  *WeatherData  `json:"weather,omitzero"`
 }
 
 type LocationProvider interface {
@@ -293,4 +293,16 @@ type LocationProvider interface {
 
 type WeatherProvider interface {
 	GetCurrentWeather(ctx context.Context, lat, lon float64, lang string) (*WeatherData, error)
+}
+
+func DefaultLocation() *LocationData {
+	return &LocationData{
+		Country:     "Argentina",
+		CountryCode: "AR",
+		City:        "Buenos Aires",
+		Currency:    "ARS",
+		Language:    "es",
+		Latitude:    -34.6037,
+		Longitude:   -58.3816,
+	}
 }
