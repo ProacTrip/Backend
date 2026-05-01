@@ -1,5 +1,5 @@
 // Handler HTTP para búsqueda de vuelos.
-// expuesta en POST /api/v1/flights/search.
+// Expuesto en POST /v1/search/flights.
 package search_flights
 
 import (
@@ -25,7 +25,7 @@ func NewHandler(usecase *UseCase) *Handler {
 }
 
 // Handle processes the flight search request.
-// Route: POST /api/v1/flights/search
+// Route: POST /v1/search/flights
 func (h *Handler) Handle(c *echo.Context) error {
 	var cmd Command
 

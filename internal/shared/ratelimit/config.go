@@ -1,5 +1,5 @@
 // Paquete de rate limiting: configura límites por tipo de usuario y proveedor.
-// Proporciona默认值 y carga desde variables de entorno.
+// Proporciona valores por defecto y carga desde variables de entorno.
 package ratelimit
 
 import (

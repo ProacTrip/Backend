@@ -400,21 +400,21 @@ POST /v1/search/hotels
 
 La ubicación del usuario la resuelve **siempre el backend** a partir de la IP de la request. El frontend nunca llama a APIs externas de geolocalización directamente.
 
-**Usuarios no autenticados:** Al cargar la página por primera vez, el frontend llama a `GET /v1/context` para obtener la ubicación y el clima detectados desde la IP. Con esa respuesta, el frontend envía `gl`, `hl` y `currency` en las búsquedas posteriores.
+**Usuarios no autenticados:** Al cargar la página por primera vez, el frontend llama a `GET /v1/environment` para obtener la ubicación y el clima detectados desde la IP. Con esa respuesta, el frontend muestra un mensaje al usuario indicando la ubicación y el clima detectados y pone por defecto `gl`, `hl` y `currency` en las búsquedas posteriores pero el usuario puede cambiarlos.
 
 ```
-Frontend (primera carga)
+Frontend (primera carga en cualquier página)
   │
-  ├── GET /v1/context  →  { location: {...}, weather: {...} }
+  ├── GET /v1/environment  →  { location: {...}, weather: {...} }
   │
   └── POST /v1/search/hotels  { query:"...", gl:"ES", hl:"es", currency:"EUR", ... }
 ```
 
-El endpoint `/v1/context` usa ipquery.io internamente para resolver la IP y OpenWeather para el clima. Devuelve la misma estructura `context` que el login de usuarios autenticados.
+El endpoint `/v1/environment` usa ipquery.io internamente para resolver la IP y OpenWeather para el clima.
 
 Si se necesita buscar hoteles cerca de la ubicación del usuario, se pasa `gl` y en `query` se pasa código postal y municipio/distrito. Ej: `"cerca de 28938, Móstoles"`. `query` y `gl` deben estar relacionados — no se puede buscar hoteles en Miami con `gl: "ES"`.
 
-**Usuarios autenticados:** El backend usa los datos guardados en el perfil (país, idioma, moneda) y el `context` recibido durante el login. Los parámetros `gl`, `hl`, `currency` pueden omitirse o usarse para sobrescribir temporalmente las preferencias.
+**Usuarios autenticados:** El backend usa los datos guardados en el perfil (país, idioma, moneda) y el `environment` recibido cacheados o no. Los parámetros `gl`, `hl`, `currency` pueden omitirse o usarse para sobrescribir temporalmente las preferencias.
 
 ### Ejemplos curl
 
@@ -575,7 +575,40 @@ curl -X POST {base_url}/hotels \
       ],
       "free_cancellation": false,
       "special_offer": true,
-      "eco_certified": true
+      "eco_certified": true,
+      "ratings": [
+        { "stars": 5, "count": 4321 },
+        { "stars": 4, "count": 3890 },
+        { "stars": 3, "count": 987 },
+        { "stars": 2, "count": 156 },
+        { "stars": 1, "count": 80 }
+      ],
+      "reviews_breakdown": [
+        {
+          "name": "Service",
+          "description": "Guest satisfaction with hotel staff and service",
+          "total_mentioned": 5200,
+          "positive": 4100,
+          "negative": 600,
+          "neutral": 500
+        },
+        {
+          "name": "Cleanliness",
+          "description": "Guest satisfaction with room and property cleanliness",
+          "total_mentioned": 4800,
+          "positive": 4300,
+          "negative": 250,
+          "neutral": 250
+        },
+        {
+          "name": "Location",
+          "description": "Guest satisfaction with the property's location",
+          "total_mentioned": 3900,
+          "positive": 3500,
+          "negative": 200,
+          "neutral": 200
+        }
+      ]
     }
   ],
   "brands": [
@@ -673,7 +706,46 @@ traceparent: 00-019ef5439cb43716d90b551dcbe980908-a1b2c3d4e5f67890-01
         "bathrooms": 1,
         "beds": null,
         "area": "45 ft²"
-      }
+      },
+      "ratings": [
+        { "stars": 5, "count": 45 },
+        { "stars": 4, "count": 52 },
+        { "stars": 3, "count": 18 },
+        { "stars": 2, "count": 5 },
+        { "stars": 1, "count": 3 }
+      ],
+      "reviews_breakdown": [
+        {
+          "name": "Cleanliness",
+          "description": "Guest satisfaction with room and property cleanliness",
+          "total_mentioned": 110,
+          "positive": 95,
+          "negative": 8,
+          "neutral": 7
+        },
+        {
+          "name": "Value for money",
+          "description": "Guest satisfaction with the value received",
+          "total_mentioned": 98,
+          "positive": 80,
+          "negative": 10,
+          "neutral": 8
+        }
+      ],
+      "prices": [
+        {
+          "source": "Booking.com",
+          "logo": "https://www.gstatic.com/travel-hotels/branding/icon_booking.png",
+          "num_guests": 2,
+          "rate_per_night": { "amount": 49.0, "before_taxes": 44.0 }
+        },
+        {
+          "source": "Agoda",
+          "logo": "https://www.gstatic.com/travel-hotels/branding/icon_agoda.png",
+          "num_guests": 2,
+          "rate_per_night": { "amount": 51.0, "before_taxes": 46.0 }
+        }
+      ]
     }
   ],
   "brands": null,
@@ -717,7 +789,9 @@ Cuando los filtros son demasiado restrictivos, el proveedor devuelve resultados 
       "nearby_places": [],
       "free_cancellation": false,
       "special_offer": true,
-      "eco_certified": true
+      "eco_certified": true,
+      "ratings": [],
+      "reviews_breakdown": []
     }
   ],
   "brands": null,
@@ -775,20 +849,36 @@ Cuando los filtros son demasiado restrictivos, el proveedor devuelve resultados 
 | `free_cancellation` | boolean | Cancelación gratuita disponible |
 | `special_offer` | boolean | Oferta especial activa |
 | `eco_certified` | boolean | Certificación ecológica |
+| `ratings` | array | Distribución de puntuaciones por estrellas (histograma de ratings) |
+| `ratings[].stars` | integer | Cantidad de estrellas (1–5) |
+| `ratings[].count` | integer | Número de reseñas con esa puntuación |
+| `reviews_breakdown` | array | Desglose de reseñas por categoría con análisis de sentimiento |
+| `reviews_breakdown[].name` | string | Nombre de la categoría. Ej: `"Service"`, `"Cleanliness"`, `"Location"` |
+| `reviews_breakdown[].description` | string | Descripción de la categoría |
+| `reviews_breakdown[].total_mentioned` | integer | Total de reseñas que mencionan esta categoría |
+| `reviews_breakdown[].positive` | integer | Reseñas con sentimiento positivo en esta categoría |
+| `reviews_breakdown[].negative` | integer | Reseñas con sentimiento negativo en esta categoría |
+| `reviews_breakdown[].neutral` | integer | Reseñas con sentimiento neutral en esta categoría |
 
 #### Property Object (Vacation Rental)
 
-Todos los campos de Hotel más:
+Todos los campos de Hotel más (incluye `ratings` y `reviews_breakdown`, heredados de Hotel):
 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
-| `excluded_amenities` | string[] | Servicios que NO tiene la propiedad |
+| `excluded_amenities` | string[] | Servicios que NO tiene la propiedad. Lista de amenities ausentes en formato legible (ej: `"No hay servicio de traslado al aeropuerto"`, `"No outdoor pool"`). Los amenities presentes van en el array `amenities` |
 | `capacity.unit_type` | string | Tipo de unidad. Ej: `"Villa completa"`, `"Entire house"` |
 | `capacity.guests` | integer\|null | Capacidad máxima de huéspedes |
 | `capacity.bedrooms` | integer\|null | Número de dormitorios |
 | `capacity.bathrooms` | integer\|null | Número de baños |
 | `capacity.beds` | integer\|null | Número de camas |
 | `capacity.area` | string\|null | Superficie. Ej: `"45 ft²"` |
+| `prices` | array | Precios por fuente de reserva (comparación de OTAs). Permite mostrar tarifas por plataforma |
+| `prices[].source` | string | Nombre de la plataforma. Ej: `"Booking.com"`, `"Agoda"`, `"Expedia"` |
+| `prices[].logo` | string\|null | URL del logo de la plataforma |
+| `prices[].num_guests` | integer\|null | Número de huéspedes para esa tarifa |
+| `prices[].rate_per_night.amount` | number | Precio por noche con impuestos en esa plataforma |
+| `prices[].rate_per_night.before_taxes` | number\|null | Precio por noche sin impuestos en esa plataforma |
 
 Y los siguientes campos están **ausentes** en VR:
 - `hotel_class` — no aplica (no hay estrellas)
@@ -1126,6 +1216,39 @@ curl -X POST {base_url}/hotel-details \
       ]
     }
   ],
+  "ratings": [
+    { "stars": 5, "count": 2100 },
+    { "stars": 4, "count": 1200 },
+    { "stars": 3, "count": 450 },
+    { "stars": 2, "count": 150 },
+    { "stars": 1, "count": 77 }
+  ],
+  "reviews_breakdown": [
+    {
+      "name": "Service",
+      "description": "Guest satisfaction with hotel staff and service",
+      "total_mentioned": 2800,
+      "positive": 2100,
+      "negative": 450,
+      "neutral": 250
+    },
+    {
+      "name": "Cleanliness",
+      "description": "Guest satisfaction with room and property cleanliness",
+      "total_mentioned": 2500,
+      "positive": 2200,
+      "negative": 150,
+      "neutral": 150
+    },
+    {
+      "name": "Location",
+      "description": "Guest satisfaction with the property's location",
+      "total_mentioned": 2100,
+      "positive": 1800,
+      "negative": 150,
+      "neutral": 150
+    }
+  ],
   "from_cache": false,
   "cached_at": null
 }
@@ -1253,6 +1376,12 @@ curl -X POST {base_url}/hotel-details \
       ]
     }
   ],
+  "ratings": [
+    { "stars": 5, "count": 3 },
+    { "stars": 4, "count": 3 },
+    { "stars": 3, "count": 1 }
+  ],
+  "reviews_breakdown": null,
   "from_cache": false,
   "cached_at": null
 }
@@ -1283,7 +1412,10 @@ curl -X POST {base_url}/hotel-details \
 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
-| `price_range` **H** | object\|null | Rango de precios típico del hotel (`min`, `max`, `currency`). Sin fechas específicas |
+| `price_range` **H** | object\|null | Rango de precios típico del hotel. Sin fechas específicas |
+| `price_range.currency` | string | Código ISO 4217 de la moneda |
+| `price_range.min` | number | Precio mínimo típico por noche |
+| `price_range.max` | number | Precio máximo típico por noche |
 | `price` **VR** | object\|null | Precio específico para las fechas solicitadas |
 | `price.currency` | string | Código ISO 4217 |
 | `price.per_night.amount` | number | Precio por noche con impuestos |
@@ -1310,6 +1442,16 @@ curl -X POST {base_url}/hotel-details \
 | `external_reviews[].featured_review.score` | number | Puntuación de la reseña |
 | `external_reviews[].featured_review.comment` | string | Texto de la reseña |
 | `external_reviews[].featured_review.url` | string\|null | URL de la reseña |
+| `ratings` | array | Distribución de puntuaciones por estrellas (histograma de ratings) |
+| `ratings[].stars` | integer | Cantidad de estrellas (1–5) |
+| `ratings[].count` | integer | Número de reseñas con esa puntuación |
+| `reviews_breakdown` | array\|null | Desglose de reseñas por categoría con análisis de sentimiento. `null` en VR sin suficientes datos |
+| `reviews_breakdown[].name` | string | Nombre de la categoría. Ej: `"Service"`, `"Cleanliness"`, `"Location"` |
+| `reviews_breakdown[].description` | string | Descripción de la categoría |
+| `reviews_breakdown[].total_mentioned` | integer | Total de reseñas que mencionan esta categoría |
+| `reviews_breakdown[].positive` | integer | Reseñas con sentimiento positivo en esta categoría |
+| `reviews_breakdown[].negative` | integer | Reseñas con sentimiento negativo en esta categoría |
+| `reviews_breakdown[].neutral` | integer | Reseñas con sentimiento neutral en esta categoría |
 
 #### Imágenes y Amenities
 
@@ -1423,7 +1565,7 @@ Rate limiting multi-tier con DragonflyDB y scripts Lua atómicos. Distribuido y 
 |------|-------|--------|----------|
 | **Tier 1 — Global** | IP | 100 req/min | Todos los endpoints (DDoS shield) |
 | **Tier 2 — Authenticated** | UUID del usuario | 10 req/min | Usuarios autenticados que realizan búsquedas |
-| **Tier 3 — Anonymous** | Cookie `anon_id` | 5 req/min | Usuarios no autenticados (la mayoría de las búsquedas) |
+| **Tier 3 — Anonymous** | Cookie `__Secure-anon_token` | 5 req/min | Usuarios no autenticados (la mayoría de las búsquedas) |
 
 ### Provider-Aware Rate Limiting
 
@@ -1432,18 +1574,18 @@ Rate limiting multi-tier con DragonflyDB y scripts Lua atómicos. Distribuido y 
 | SerpAPI | 50/hour | Límite por IP para llamadas al proveedor externo. El backend cachea resultados para reducir consumo |
 | Resend (email) | 100/day | Límite del plan gratuito de Resend |
 
-### Cookie Anónima (`anon_id`)
+### Cookie Anónima (`__Secure-anon_token`)
 
 Para búsquedas sin autenticación, el backend establece una cookie anónima para rate limiting:
 
 ```
-Set-Cookie: anon_id=019d5439-cb43-716d-90b5-51dcbe980908; HttpOnly; Secure; SameSite=Lax; Path=/
+Set-Cookie: __Secure-anon_token=019d5439-cb43-716d-90b5-51dcbe980908; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=315360000
 ```
 
 | Atributo | Valor | Propósito |
 |----------|-------|-----------|
-| Nombre | `anon_id` | Identificador anónimo (UUID v7) |
-| TTL | Sin expiración (session cookie) | Persiste durante la sesión del navegador |
+| Nombre | `__Secure-anon_token` | Identificador anónimo (UUID v7) |
+| TTL | 10 años (Max-Age=315360000) | Persiste entre sesiones — permite rate limiting consistente en usuarios no autenticados |
 | `HttpOnly` | `true` | Inaccesible vía JavaScript |
 | `Secure` | `true` | Solo HTTPS en producción |
 | `SameSite` | `Lax` | Se envía en navegación top-level |

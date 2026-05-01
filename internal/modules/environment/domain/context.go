@@ -1,6 +1,9 @@
 package domain
 
-import "context"
+import (
+	"context"
+	"os"
+)
 
 type LocationData struct {
 	Country     string  `json:"country"`
@@ -282,7 +285,7 @@ type WeatherData struct {
 	WindSpeed   float64 `json:"wind_speed"`
 }
 
-type ContextResponse struct {
+type EnvironmentResponse struct {
 	Location LocationData  `json:"location"`
 	Weather  *WeatherData  `json:"weather,omitzero"`
 }
@@ -296,6 +299,16 @@ type WeatherProvider interface {
 }
 
 func DefaultLocation() *LocationData {
+	if cc := os.Getenv("DEFAULT_COUNTRY_CODE"); cc != "" {
+		if info, ok := CountryMetadata[cc]; ok {
+			return &LocationData{
+				Country:     info.Country,
+				CountryCode: cc,
+				Currency:    info.Currency,
+				Language:    info.Language,
+			}
+		}
+	}
 	return &LocationData{
 		Country:     "Argentina",
 		CountryCode: "AR",

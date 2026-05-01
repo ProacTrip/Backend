@@ -438,19 +438,19 @@ Los aeropuertos pueden ser múltiples, separados por coma: `"departure": "LAX,SF
 
 La ubicación del usuario la resuelve **siempre el backend** a partir de la IP de la request. El frontend nunca llama a APIs externas de geolocalización directamente.
 
-**Usuarios no autenticados:** Al cargar la página por primera vez, el frontend llama a `GET /v1/context` para obtener la ubicación y el clima detectados desde la IP. Con esa respuesta, el frontend envía `gl`, `hl` y `currency` en las búsquedas posteriores.
+**Usuarios no autenticados:** Al cargar la página por primera vez, el frontend llama a `GET /v1/environment` para obtener la ubicación y el clima detectados desde la IP. Con esa respuesta, el frontend muestra un mensaje al usuario indicando la ubicación y el clima detectados y pone por defecto `gl`, `hl` y `currency` en las búsquedas posteriores pero el usuario puede cambiarlos.
 
 ```
-Frontend (primera carga)
+Frontend (primera carga en cualquier página)
   │
-  ├── GET /v1/context  →  { location: {...}, weather: {...} }
+  ├── GET /v1/environment  →  { location: {...}, weather: {...} }
   │
   └── POST /v1/search/flights  { departure:"MAD", gl:"ES", hl:"es", currency:"EUR", ... }
 ```
 
-El endpoint `/v1/context` usa ipquery.io internamente para resolver la IP y OpenWeather para el clima. Devuelve la misma estructura `context` que el login de usuarios autenticados.
+El endpoint `/v1/environment` usa ipquery.io internamente para resolver la IP y OpenWeather para el clima. 
 
-**Usuarios autenticados:** El backend usa los datos guardados en el perfil (país, idioma, moneda) y el `context` recibido durante el login. Los parámetros `gl`, `hl`, `currency` pueden omitirse o usarse para sobrescribir temporalmente las preferencias.
+**Usuarios autenticados:** El backend usa los datos guardados en el perfil (país, idioma, moneda) y el `environment` recibido cacheados o no. Los parámetros `gl`, `hl`, `currency` pueden omitirse o usarse para sobrescribir temporalmente las preferencias.
 
 ### Ejemplos curl
 
@@ -1607,7 +1607,7 @@ Rate limiting multi-tier con DragonflyDB y scripts Lua atómicos. Distribuido y 
 |------|-------|--------|----------|
 | **Tier 1 — Global** | IP | 100 req/min | Todos los endpoints (DDoS shield) |
 | **Tier 2 — Authenticated** | UUID del usuario | 10 req/min | Usuarios autenticados que realizan búsquedas |
-| **Tier 3 — Anonymous** | Cookie `anon_id` | 5 req/min | Usuarios no autenticados (la mayoría de las búsquedas) |
+| **Tier 3 — Anonymous** | Cookie `__Secure-anon_token` | 5 req/min | Usuarios no autenticados (la mayoría de las búsquedas) |
 
 ### Provider-Aware Rate Limiting
 
@@ -1616,18 +1616,18 @@ Rate limiting multi-tier con DragonflyDB y scripts Lua atómicos. Distribuido y 
 | SerpAPI | 50/hour | Límite por IP para llamadas al proveedor externo. El backend cachea resultados para reducir consumo |
 | Resend (email) | 100/day | Límite del plan gratuito de Resend |
 
-### Cookie Anónima (`anon_id`)
+### Cookie Anónima (`__Secure-anon_token`)
 
 Para búsquedas sin autenticación, el backend establece una cookie anónima para rate limiting:
 
 ```
-Set-Cookie: anon_id=019d5439-cb43-716d-90b5-51dcbe980908; HttpOnly; Secure; SameSite=Lax; Path=/
+Set-Cookie: __Secure-anon_token=019d5439-cb43-716d-90b5-51dcbe980908; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=315360000
 ```
 
 | Atributo | Valor | Propósito |
 |----------|-------|-----------|
-| Nombre | `anon_id` | Identificador anónimo (UUID v7) |
-| TTL | Sin expiración (session cookie) | Persiste durante la sesión del navegador |
+| Nombre | `__Secure-anon_token` | Identificador anónimo (UUID v7) |
+| TTL | 10 años (Max-Age=315360000) | Persiste entre sesiones — permite rate limiting consistente en usuarios no autenticados |
 | `HttpOnly` | `true` | Inaccesible vía JavaScript |
 | `Secure` | `true` | Solo HTTPS en producción |
 | `SameSite` | `Lax` | Se envía en navegación top-level |

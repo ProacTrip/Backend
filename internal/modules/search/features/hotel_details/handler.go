@@ -30,7 +30,7 @@ func (h *Handler) Handle(c *echo.Context) error {
 	var cmd Command
 
 	// Set defaults before binding so they act as fallbacks
-	cmd.Adults = 1
+	cmd.Adults = 2
 	cmd.Currency = "USD"
 
 	if err := c.Bind(&cmd); err != nil {

@@ -2,6 +2,21 @@
 // Contiene los tipos específicos del feature (Property, Price, Rating, etc).
 package search_hotels
 
+import "github.com/ProacTrip/Backend/internal/modules/search/domain"
+
+// =============================================================================
+// Shared type aliases (defined once in domain, reused across features)
+// =============================================================================
+
+type GPS = domain.GPS
+type Transport = domain.Transport
+type Image = domain.Image
+type NearbyPlace = domain.NearbyPlace
+type PriceDetail = domain.PriceDetail
+type Capacity = domain.Capacity
+type HotelRatingResponse = domain.HotelRatingResponse
+type HotelReviewBreakdownResponse = domain.HotelReviewBreakdownResponse
+
 // =============================================================================
 // Response — DTO de salida para search hotels
 // =============================================================================
@@ -41,12 +56,12 @@ type Property struct {
 	// VR-only
 	ExcludedAmenities []string  `json:"excluded_amenities,omitempty"`
 	Capacity          *Capacity `json:"capacity,omitempty"`
-}
-
-// GPS holds latitude and longitude coordinates.
-type GPS struct {
-	Lat float64 `json:"lat"`
-	Lng float64 `json:"lng"`
+	// Star ratings distribution
+	Ratings          []HotelRatingResponse          `json:"ratings,omitempty"`
+	// Review categories breakdown
+	ReviewsBreakdown []HotelReviewBreakdownResponse `json:"reviews_breakdown,omitempty"`
+	// Multi-source pricing (VR only)
+	Prices           []HotelPriceSourceResponse     `json:"prices,omitempty"`
 }
 
 // Rating holds overall and location ratings for a property.
@@ -60,40 +75,6 @@ type Price struct {
 	Currency string      `json:"currency"`
 	PerNight PriceDetail `json:"per_night"`
 	Total    PriceDetail `json:"total"`
-}
-
-// PriceDetail holds amount and optional before-taxes value.
-type PriceDetail struct {
-	Amount      float64  `json:"amount"`
-	BeforeTaxes *float64 `json:"before_taxes,omitempty"`
-}
-
-// Image holds thumbnail and original image URLs.
-type Image struct {
-	Thumbnail string `json:"thumbnail"`
-	Original  string `json:"original"`
-}
-
-// NearbyPlace represents a nearby attraction or POI with transport info.
-type NearbyPlace struct {
-	Name      string      `json:"name"`
-	Transport []Transport `json:"transport,omitempty"`
-}
-
-// Transport represents a transport option for a nearby place.
-type Transport struct {
-	Type     string `json:"type"`
-	Duration string `json:"duration"`
-}
-
-// Capacity holds unit type and capacity info (vacation rentals only).
-type Capacity struct {
-	UnitType  string `json:"unit_type"`
-	Guests    *int   `json:"guests,omitempty"`
-	Bedrooms  *int   `json:"bedrooms,omitempty"`
-	Bathrooms *int   `json:"bathrooms,omitempty"`
-	Beds      *int   `json:"beds,omitempty"`
-	Area      string `json:"area,omitempty"`
 }
 
 // Brand represents a hotel brand.
@@ -113,4 +94,12 @@ type Chain struct {
 type Pagination struct {
 	NextToken string `json:"next_token"`
 	HasMore   bool   `json:"has_more"`
+}
+
+// HotelPriceSourceResponse represents pricing from a specific OTA in VR results.
+type HotelPriceSourceResponse struct {
+	Source       string       `json:"source"`
+	Logo         string       `json:"logo,omitempty"`
+	NumGuests    *int         `json:"num_guests,omitempty"`
+	RatePerNight *PriceDetail `json:"rate_per_night,omitempty"`
 }

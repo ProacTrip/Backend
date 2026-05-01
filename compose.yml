@@ -79,7 +79,6 @@ services:
     env_file: .env
     ports:
       - "${SERVER_PORT:-8080}:8080"
-      - "6060:6060"  # pprof
     volumes:
       - .:/app
       - go-cache:/root/.cache/go-build

@@ -4,8 +4,10 @@ go 1.26.1
 
 require (
 	aidanwoods.dev/go-paseto/v2 v2.0.0-alpha1
+	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.9.2
+	github.com/joho/godotenv v1.5.1
 	github.com/labstack/echo/v5 v5.1.0
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/resend/resend-go/v3 v3.6.0
@@ -15,7 +17,6 @@ require (
 
 require (
 	aidanwoods.dev/go-result v0.1.0 // indirect
-	github.com/alicebob/miniredis/v2 v2.37.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect

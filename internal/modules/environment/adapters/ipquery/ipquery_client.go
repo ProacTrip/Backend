@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ProacTrip/Backend/internal/modules/context/domain"
+	"github.com/ProacTrip/Backend/internal/modules/environment/domain"
 )
 
 type Client struct {
@@ -25,7 +25,10 @@ func NewClient(baseURL string) *Client {
 }
 
 func (c *Client) ResolveIP(ctx context.Context, ip string) (*domain.LocationData, error) {
-	url := fmt.Sprintf("%s/%s", c.baseURL, ip)
+	url := c.baseURL
+	if ip != "" {
+		url = fmt.Sprintf("%s/%s", c.baseURL, ip)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

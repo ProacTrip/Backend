@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
 
-	"github.com/ProacTrip/Backend/internal/modules/context/domain"
+	"github.com/ProacTrip/Backend/internal/modules/environment/domain"
 )
 
 const openWeatherBaseURL = "https://api.openweathermap.org/data/3.0/onecall"
@@ -58,7 +59,8 @@ func (c *Client) GetCurrentWeather(ctx context.Context, lat, lon float64, lang s
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("openweather returned HTTP %d", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("openweather returned HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
 	var raw owOneCallResponse

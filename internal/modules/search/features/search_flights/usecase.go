@@ -1,5 +1,5 @@
 // Lógica de negocio para búsqueda de vuelos.
-// Orkesta cache, proveedor externo e historial de búsquedas.
+// Orquesta cache, proveedor externo e historial de búsquedas.
 package search_flights
 
 import (

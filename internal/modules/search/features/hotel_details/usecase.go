@@ -1,5 +1,5 @@
 // Lógica de negocio para obtener detalles de un hotel.
-// Orkesta cache y proveedor externo SerpAPI.
+// Orquesta cache y proveedor externo SerpAPI.
 package hotel_details
 
 import (
@@ -12,6 +12,7 @@ import (
 
 	"github.com/ProacTrip/Backend/internal/modules/search/adapters/serpapi"
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
+	"github.com/ProacTrip/Backend/internal/modules/search/domain/hotelmapping"
 )
 
 // =============================================================================
@@ -172,7 +173,7 @@ func mapDetailsResponse(detail *serpapi.HotelPropertyDetail, vacationRentals boo
 			Lat: p.GPSCoordinates.Latitude,
 			Lng: p.GPSCoordinates.Longitude,
 		},
-		HotelClass: p.HotelClass,
+		HotelClass: p.ExtractedHotelClass,
 		CheckIn:    p.CheckInTime,
 		CheckOut:   p.CheckOutTime,
 		Rating: Rating{
@@ -182,20 +183,24 @@ func mapDetailsResponse(detail *serpapi.HotelPropertyDetail, vacationRentals boo
 		TotalReviews: p.Reviews,
 		Price: Price{
 			Currency: currency,
-			PerNight: mapPriceDetail(p.RatePerNight),
-			Total:    mapPriceDetail(p.TotalRate),
+			PerNight: hotelmapping.MapPriceDetail(p.RatePerNight),
+			Total:    hotelmapping.MapPriceDetail(p.TotalRate),
 		},
-		Images:       mapImages(p.Images),
+		Images:       hotelmapping.MapImages(p.Images),
 		Amenities:    p.Amenities,
-		NearbyPlaces: mapNearbyPlaces(p.NearbyPlaces),
+		NearbyPlaces: hotelmapping.MapNearbyPlaces(p.NearbyPlaces),
 
 		// Hotel-only detail fields
 		Address:         detail.Address,
 		DirectionsURL:   detail.DirectionsURL,
-		PriceRange:      detail.PriceRange,
-		ExternalReviews: mapExternalReviews(detail.ExternalReviews),
-		HealthAndSafety: detail.HealthAndSafety,
-		Sustainability:  detail.Sustainability,
+		PriceRange:      mapTypicalPriceRange(detail.TypicalPriceRange, currency),
+		ExternalReviews: mapOtherReviews(detail.OtherReviews),
+		HealthAndSafety: mapHealthAndSafety(detail.HealthAndSafety),
+		Sustainability:  mapSustainability(detail.Sustainability),
+
+		// New fields from embedded HotelProperty
+		Ratings:          hotelmapping.MapRatings(p.Ratings),
+		ReviewsBreakdown: hotelmapping.MapReviewsBreakdown(p.ReviewsBreakdown),
 
 		// Hotel-only base fields
 		FreeCancellation: p.FreeCancellation,
@@ -207,114 +212,99 @@ func mapDetailsResponse(detail *serpapi.HotelPropertyDetail, vacationRentals boo
 	_ = vacationRentals // type already set from p.Type
 	if p.Type == "vacation_rental" {
 		resp.ExcludedAmenities = p.ExcludedAmenities
-		resp.Capacity = mapCapacity(p.EssentialInfo)
+		resp.Capacity = hotelmapping.MapCapacity([]serpapi.HotelEssentialKV(p.EssentialInfo))
 	}
 
 	return resp
-}
-
-func mapPriceDetail(sd serpapi.HotelRateDetail) PriceDetail {
-	pd := PriceDetail{}
-	if sd.ExtractedLowest != nil {
-		pd.Amount = *sd.ExtractedLowest
-	} else if sd.Lowest != nil {
-		pd.Amount = *sd.Lowest
-	}
-	pd.BeforeTaxes = sd.BeforeTaxesFees
-	return pd
-}
-
-func mapImages(serpImages []serpapi.HotelImage) []Image {
-	if serpImages == nil {
-		return nil
-	}
-	imgs := make([]Image, len(serpImages))
-	for i, si := range serpImages {
-		imgs[i] = Image{
-			Thumbnail: si.Thumbnail,
-			Original:  si.OriginalImage,
-		}
-	}
-	return imgs
-}
-
-func mapNearbyPlaces(serpPlaces []serpapi.HotelNearbyPlace) []NearbyPlace {
-	if serpPlaces == nil {
-		return nil
-	}
-	places := make([]NearbyPlace, len(serpPlaces))
-	for i, sp := range serpPlaces {
-		np := NearbyPlace{
-			Name: sp.Name,
-		}
-		if len(sp.Transportations) > 0 {
-			np.Transport = make([]Transport, len(sp.Transportations))
-			for j, t := range sp.Transportations {
-				np.Transport[j] = Transport{
-					Type:     t.Type,
-					Duration: t.Duration,
-				}
-			}
-		}
-		places[i] = np
-	}
-	return places
-}
-
-func mapExternalReviews(serpReviews []serpapi.HotelExternalReview) []ExternalReview {
-	if serpReviews == nil {
-		return nil
-	}
-	reviews := make([]ExternalReview, len(serpReviews))
-	for i, sr := range serpReviews {
-		reviews[i] = ExternalReview{
-			Source: sr.Source,
-			Rating: sr.Rating,
-			Count:  sr.Count,
-			Link:   sr.Link,
-		}
-	}
-	return reviews
-}
-
-func mapCapacity(essentialInfo []serpapi.HotelEssentialKV) *Capacity {
-	if len(essentialInfo) == 0 {
-		return nil
-	}
-	c := &Capacity{}
-	for _, kv := range essentialInfo {
-		switch kv.Key {
-		case "unit_type":
-			c.UnitType = kv.Value
-		case "guests":
-			if n, err := parseInt(kv.Value); err == nil {
-				c.Guests = &n
-			}
-		case "bedrooms":
-			if n, err := parseInt(kv.Value); err == nil {
-				c.Bedrooms = &n
-			}
-		case "bathrooms":
-			if n, err := parseInt(kv.Value); err == nil {
-				c.Bathrooms = &n
-			}
-		case "beds":
-			if n, err := parseInt(kv.Value); err == nil {
-				c.Beds = &n
-			}
-		case "area":
-			c.Area = kv.Value
-		}
-	}
-	return c
 }
 
 // =============================================================================
 // Utilidades
 // =============================================================================
 
-func parseInt(s string) (int, error) {
-	var n int
-	_, err := fmt.Sscanf(s, "%d", &n)
-	return n, err
+func mapTypicalPriceRange(tpr *serpapi.HotelTypicalPriceRange, currency string) *HotelPriceRangeResponse {
+	if tpr == nil {
+		return nil
+	}
+	return &HotelPriceRangeResponse{
+		Currency: currency,
+		Min:      tpr.ExtractedLowest,
+		Max:      tpr.ExtractedHighest,
+	}
+}
+
+func mapOtherReviews(serpReviews []serpapi.HotelOtherReview) []OtherReviewResponse {
+	if serpReviews == nil {
+		return nil
+	}
+	out := make([]OtherReviewResponse, len(serpReviews))
+	for i, sr := range serpReviews {
+		or := OtherReviewResponse{
+			Source:       sr.Source,
+			LogoURL:      sr.SourceIcon,
+			TotalReviews: sr.Reviews,
+		}
+		if sr.SourceRating != nil {
+			or.Score = sr.SourceRating.Score
+			or.MaxScore = sr.SourceRating.MaxScore
+		}
+		if sr.UserReview != nil {
+			fr := FeaturedReviewResponse{
+				Author:  sr.UserReview.Username,
+				Date:    sr.UserReview.Date,
+				Comment: sr.UserReview.Comment,
+			}
+			if sr.UserReview.Rating != nil {
+				fr.Score = sr.UserReview.Rating.Score
+			}
+			if sr.UserReview.URL != "" {
+				fr.URL = new(sr.UserReview.URL)
+			}
+			or.FeaturedReview = &fr
+		}
+		out[i] = or
+	}
+	return out
+}
+
+func mapSustainability(s *serpapi.SustainabilityObject) []SustainabilityCategoryResponse {
+	if s == nil {
+		return nil
+	}
+	groups := make([]SustainabilityCategoryResponse, len(s.Groups))
+	for i, g := range s.Groups {
+		items := make([]SustainabilityItemResponse, len(g.List))
+		for j, item := range g.List {
+			items[j] = SustainabilityItemResponse{
+				Name:      item.Title,
+				Available: item.Available,
+			}
+		}
+		groups[i] = SustainabilityCategoryResponse{
+			Category: g.Title,
+			Items:    items,
+		}
+	}
+	return groups
+}
+
+func mapHealthAndSafety(hs *serpapi.HealthAndSafetyObject) []HealthAndSafetyCategoryResponse {
+	if hs == nil {
+		return nil
+	}
+	groups := make([]HealthAndSafetyCategoryResponse, len(hs.Groups))
+	for i, g := range hs.Groups {
+		items := make([]HealthAndSafetyItemResponse, len(g.List))
+		for j, item := range g.List {
+			items[j] = HealthAndSafetyItemResponse{
+				Name:      item.Title,
+				Available: item.Available,
+			}
+		}
+		groups[i] = HealthAndSafetyCategoryResponse{
+			Category: g.Title,
+			Items:    items,
+		}
+	}
+	return groups
 }

@@ -302,35 +302,14 @@ curl -X POST {base_url}/verify-email \
 
 ```json
 {
-  "user": {
+"user": {
     "email": "user@example.com",
     "email_verified": true,
     "role_name": "client"
-  },
-  "context": {
-    "location": {
-      "country": "Spain",
-      "country_code": "ES",
-      "city": "Madrid",
-      "state": "Madrid",
-      "timezone": "Europe/Madrid",
-      "currency": "EUR",
-      "language": "es",
-      "latitude": "40.4168",
-      "longitude": "-3.7038"
-    },
-    "weather": {
-      "temp": 18.5,
-      "feels_like": 17.2,
-      "description": "cielo claro",
-      "icon": "01d",
-      "icon_url": "https://openweathermap.org/img/wn/01d@4x.png",
-      "humidity": 45,
-      "wind_speed": 3.5
-    }
   }
 }
 ```
+> **Nota:** El `environment` NO se devuelve en verify-email. El frontend debe managejarlo por separado vía `GET /v1/environment` (ver [ENVIRONMENT_API](./ENVIRONMENT_API.md)).
 
 **Set-Cookie Headers (actualiza la sesión):**
 
@@ -386,24 +365,11 @@ curl -X POST {base_url}/login \
     "email": "user@example.com",
     "email_verified": true,
     "role_name": "client"
-  },
-  "context": {
-    "location": {
-      "country": "AR",
-      "country_name": "Argentina",
-      "city": "Buenos Aires",
-      "timezone": "America/Argentina/Buenos_Aires",
-      "currency": "ARS",
-      "language": "es"
-    },
-    "weather": {
-      "temperature_c": 22.5,
-      "condition": "Clear",
-      "humidity_percent": 65
-    }
   }
 }
 ```
+
+> **Nota:** El `environment` NO se devuelve en login. El frontend debe managejarlo por separado vía `GET /v1/environment` (ver [ENVIRONMENT_API](./ENVIRONMENT_API.md)).
 
 **Set-Cookie Headers:**
 
@@ -544,7 +510,7 @@ Rate limiting multi-tier con DragonflyDB y scripts Lua atómicos. Distribuido y 
 |------|-------|--------|----------|
 | **Tier 1 — Global** | IP | 100 req/min | Todos los endpoints (DDoS shield) |
 | **Tier 2 — Authenticated** | UUID del usuario | 10 req/min | Endpoints protegidos con auth (`/v1/auth/*` autenticados) |
-| **Tier 3 — Anonymous** | Cookie `anon_id` | 5 req/min | Endpoints públicos sin autenticación |
+| **Tier 3 — Anonymous** | Cookie `__Secure-anon_token` | 5 req/min | Endpoints públicos sin autenticación |
 
 ### Provider-Aware Rate Limiting
 
@@ -553,18 +519,18 @@ Rate limiting multi-tier con DragonflyDB y scripts Lua atómicos. Distribuido y 
 | Resend (email) | 100/day | Límite del plan gratuito de Resend. Se aplica por IP |
 | SerpAPI | 50/hour | Límite por IP para llamadas al proveedor externo de búsqueda |
 
-### Cookie Anónima (`anon_id`)
+### Cookie Anónima (`__Secure-anon_token`)
 
 Para endpoints públicos donde no hay sesión de usuario, el backend establece una cookie anónima con UUID v7 para rate limiting:
 
 ```
-Set-Cookie: anon_id=019d5439-cb43-716d-90b5-51dcbe980908; HttpOnly; Secure; SameSite=Lax; Path=/
+Set-Cookie: __Secure-anon_token=019d5439-cb43-716d-90b5-51dcbe980908; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=315360000
 ```
 
 | Atributo | Valor | Propósito |
 |----------|-------|-----------|
-| Nombre | `anon_id` | Identificador anónimo para rate limiting |
-| TTL | Sin expiración (session cookie) | Persiste durante la sesión del navegador |
+| Nombre | `__Secure-anon_token` | Identificador anónimo para rate limiting |
+| TTL | 10 años (Max-Age=315360000) | Persiste entre sesiones del navegador — permite rate limiting consistente en usuarios no autenticados |
 | `HttpOnly` | `true` | Inaccesible vía JavaScript |
 | `Secure` | `true` | Solo HTTPS en producción |
 | `SameSite` | `Lax` | Se envía en navegación top-level |
@@ -645,10 +611,10 @@ Cada vez que el backend refresca un `__Secure-access_token`, rota también el `_
 
 ### GeoIP y Weather
 
-- Resueltos desde la IP de conexión.
+- Resueltos desde la IP de conexión vía `GET /v1/environment` (ver [ENVIRONMENT_API](./ENVIRONMENT_API.md)).
 - No se requiere header `X-Real-IP` manual.
-- En verify-email, si la IP cacheada del registro expiró, se obtiene de la conexión actual.
-- Los datos GeoIP/Weather se devuelven en el campo `context` de las respuestas de autenticación exitosa.
+- El backend cachea estos datos 10 min para evitar llamadas repetidas a APIs externas.
+- Los endpoints de auth (`/v1/auth/*`) NO devuelven `environment` — es responsabilidad del frontend.
 
 ### MFA
 

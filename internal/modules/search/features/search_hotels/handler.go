@@ -30,14 +30,14 @@ func (h *Handler) Handle(c *echo.Context) error {
 	var cmd Command
 
 	// Set defaults before binding so they act as fallbacks
-	cmd.Adults = 1
+	cmd.Adults = 2
 	cmd.Currency = "USD"
 
 	if err := c.Bind(&cmd); err != nil {
 		return httperr.MapError(c, err)
 	}
 
-	slog.Error("DEBUG: handler called, body bound",
+	slog.Debug("handler called, body bound",
 		slog.String("query", cmd.Query),
 		slog.String("check_in", cmd.CheckInDate),
 		slog.String("check_out", cmd.CheckOutDate),
@@ -55,7 +55,7 @@ func (h *Handler) Handle(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "check_out_date is required")
 	}
 
-	slog.Error("DEBUG: validation passed, calling usecase")
+	slog.Debug("validation passed, calling usecase")
 
 	resp, err := h.usecase.Execute(c.Request().Context(), cmd)
 	if err != nil {
@@ -66,7 +66,7 @@ func (h *Handler) Handle(c *echo.Context) error {
 		return httperr.MapError(c, err)
 	}
 
-	slog.Error("DEBUG: usecase returned response",
+	slog.Debug("usecase returned response",
 		slog.Int("property_count", len(resp.Properties)),
 		slog.Bool("from_cache", resp.FromCache),
 		slog.String("results_state", resp.ResultsState),

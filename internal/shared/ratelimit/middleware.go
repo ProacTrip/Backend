@@ -28,7 +28,7 @@ func GlobalRateLimitMiddleware(rl *RateLimiter) echo.MiddlewareFunc {
 
 			setRateLimitHeaders(c, result)
 			if !result.Allowed {
-				return rateLimitExceeded(result)
+				return rateLimitExceeded(c, result)
 			}
 
 			return next(c)
@@ -51,7 +51,7 @@ func AuthenticatedRateLimitMiddleware(rl *RateLimiter, extractor IdentifierFunc)
 
 			setRateLimitHeaders(c, result)
 			if !result.Allowed {
-				return rateLimitExceeded(result)
+				return rateLimitExceeded(c, result)
 			}
 
 			return next(c)
@@ -74,7 +74,7 @@ func AnonymousRateLimitMiddleware(rl *RateLimiter) echo.MiddlewareFunc {
 
 			setRateLimitHeaders(c, result)
 			if !result.Allowed {
-				return rateLimitExceeded(result)
+				return rateLimitExceeded(c, result)
 			}
 
 			return next(c)
@@ -92,7 +92,7 @@ func ProviderRateLimitMiddleware(rl *RateLimiter, provider string) echo.Middlewa
 
 			setRateLimitHeaders(c, result)
 			if !result.Allowed {
-				return rateLimitExceeded(result)
+				return rateLimitExceeded(c, result)
 			}
 
 			return next(c)
@@ -107,11 +107,13 @@ func setRateLimitHeaders(c *echo.Context, result RateLimitResult) {
 	h.Set("RateLimit-Reset", strconv.FormatInt(int64(result.ResetTTL.Seconds()), 10))
 }
 
-func rateLimitExceeded(result RateLimitResult) *echo.HTTPError {
+func rateLimitExceeded(c *echo.Context, result RateLimitResult) *echo.HTTPError {
 	retryAfter := int(result.ResetTTL.Seconds())
 	if retryAfter < 1 {
 		retryAfter = 1
 	}
+
+	c.Response().Header().Set("Retry-After", strconv.Itoa(retryAfter))
 
 	return echo.NewHTTPError(http.StatusTooManyRequests,
 		fmt.Sprintf("rate limit exceeded: %d/%d, retry after %ds",

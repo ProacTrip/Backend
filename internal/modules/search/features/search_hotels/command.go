@@ -57,7 +57,7 @@ func (cmd *Command) Validate() error {
 	}
 
 	if cmd.Adults < 1 {
-		cmd.Adults = 1
+		cmd.Adults = 2
 	}
 
 	// children_ages must match children count

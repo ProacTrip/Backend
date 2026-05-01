@@ -16,7 +16,7 @@ import (
 
 	"github.com/ProacTrip/Backend/internal/config"
 	authModule "github.com/ProacTrip/Backend/internal/modules/auth"
-	contextModule "github.com/ProacTrip/Backend/internal/modules/context"
+	environmentModule "github.com/ProacTrip/Backend/internal/modules/environment"
 	notifModule "github.com/ProacTrip/Backend/internal/modules/notification"
 	searchModule "github.com/ProacTrip/Backend/internal/modules/search"
 	userModule "github.com/ProacTrip/Backend/internal/modules/user"
@@ -48,7 +48,10 @@ type App struct {
 	UserModule         *userModule.Module
 	NotificationModule *notifModule.Module
 	SearchModule       *searchModule.Module
-	ContextModule      *contextModule.Module
+	EnvironmentModule  *environmentModule.Module
+
+	// Lifecycle
+	appCancel context.CancelFunc // cancels background consumers on shutdown
 }
 
 func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
@@ -119,6 +122,9 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		},
 		MaxAge: 86400,
 	}))
+
+	// Security headers (CSP, HSTS, X-Frame-Options, etc.) — required by all API docs
+	e.Use(sharedmiddleware.SecurityHeaders())
 
 	// HTTPErrorHandler: errores RFC 7807
 	e.HTTPErrorHandler = func(c *echo.Context, err error) {
@@ -211,6 +217,13 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	e.Use(ratelimit.GlobalRateLimitMiddleware(rateLimiter))
 
 	ctx := context.Background()
+	appCtx, appCancel := context.WithCancel(ctx)
+	var cancelOnError = true
+	defer func() {
+		if cancelOnError {
+			appCancel()
+		}
+	}()
 
 	// Event Bus (Streams)
 	eventBus := eventbus.NewEventBus(rdb)
@@ -257,13 +270,13 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	}
 
 	// Start notification consumer (BACKGROUND - consume eventos de Dragonfly Streams)
-	if err := notifMod.EventConsumer.Start(ctx); err != nil {
+	if err := notifMod.EventConsumer.Start(appCtx); err != nil {
 		slog.Warn("notification consumer failed to start", "error", err)
 		// No es fatal - el servidor puede iniciar sin el consumer
 	}
 
 	// Start user consumer (BACKGROUND - consume eventos de Dragonfly Streams)
-	if err := userMod.EventConsumer.Start(ctx); err != nil {
+	if err := userMod.EventConsumer.Start(appCtx); err != nil {
 		slog.Warn("user event consumer failed to start", "error", err)
 		// No es fatal - el servidor puede iniciar sin el consumer
 	}
@@ -289,8 +302,8 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		return nil, err
 	}
 
-	// Context Module (IP geolocation + weather)
-	contextMod := contextModule.NewModule(contextModule.Config{
+	// Environment Module (IP geolocation + weather)
+	environmentMod := environmentModule.NewModule(environmentModule.Config{
 		OpenWeatherAPIKey:   cfg.Context.OpenWeatherAPIKey,
 		OpenWeatherCacheTTL: cfg.Context.OpenWeatherCacheTTL,
 		IpQueryBaseURL:      cfg.Context.IpQueryBaseURL,
@@ -372,9 +385,9 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	searchGroup.POST("/hotels", searchMod.SearchHotelsHandler.Handle)
 	searchGroup.POST("/hotel-details", searchMod.HotelDetailsHandler.Handle)
 
-	// Context route: location + weather (public, no auth required)
-	contextGroup := e.Group("/v1")
-	contextGroup.GET("/context", contextMod.GetContextHandler.Handle)
+	// Environment route: location + weather (public, no auth required)
+	environmentGroup := e.Group("/v1")
+	environmentGroup.GET("/environment", environmentMod.GetEnvironmentHandler.Handle)
 
 	// === App Structure ===
 	app := &App{
@@ -387,10 +400,13 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		UserModule:         userMod,
 		NotificationModule: notifMod,
 		SearchModule:       searchMod,
-		ContextModule:      contextMod,
+		EnvironmentModule:  environmentMod,
+		appCancel:          appCancel,
 	}
 
-	slog.Info("App initialized", "modules", []string{"auth", "user", "notification", "search", "context"})
+	cancelOnError = false // app owns the cancel now — Shutdown will call it
+
+	slog.Info("App initialized", "modules", []string{"auth", "user", "notification", "search", "environment"})
 
 	return app, nil
 }
@@ -455,6 +471,16 @@ func (app *App) Start(ctx context.Context) error {
 // Shutdown hace cleanup de recursos
 func (app *App) Shutdown(ctx context.Context) error {
 	slog.Info("Shutting down app...")
+
+	// Cancel background consumers (notification, user event handlers)
+	if app.appCancel != nil {
+		app.appCancel()
+	}
+
+	// Wait for in-flight fire-and-forget goroutines (cache writes, history saves)
+	if app.SearchModule != nil {
+		app.SearchModule.Wait()
+	}
 
 	if app.RedisClient != nil {
 		app.RedisClient.Close()

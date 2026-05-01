@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 	"time"
 
 	"github.com/ProacTrip/Backend/internal/bootstrap"
 	"github.com/ProacTrip/Backend/internal/config"
+	"github.com/joho/godotenv"
 )
 
 var (
@@ -24,6 +26,10 @@ func main() {
 	if *showVersion {
 		slog.Info("ProacTrip Backend", "version", version, "build_time", buildTime)
 		os.Exit(0)
+	}
+
+	if err := godotenv.Load(); err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: .env file not loaded (running without Docker?): %v\n", err)
 	}
 
 	// Environment: CLI flag > env var > default

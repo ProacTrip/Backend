@@ -43,7 +43,7 @@ func (cmd *Command) Validate() error {
 	}
 
 	if cmd.Adults < 1 {
-		cmd.Adults = 1
+		cmd.Adults = 2
 	}
 
 	return nil

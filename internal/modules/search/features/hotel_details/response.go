@@ -2,6 +2,21 @@
 // Contiene campos específicos de hotel y vacation rental.
 package hotel_details
 
+import "github.com/ProacTrip/Backend/internal/modules/search/domain"
+
+// =============================================================================
+// Shared type aliases (defined once in domain, reused across features)
+// =============================================================================
+
+type GPS = domain.GPS
+type Transport = domain.Transport
+type Image = domain.Image
+type NearbyPlace = domain.NearbyPlace
+type PriceDetail = domain.PriceDetail
+type Capacity = domain.Capacity
+type HotelRatingResponse = domain.HotelRatingResponse
+type HotelReviewBreakdownResponse = domain.HotelReviewBreakdownResponse
+
 // =============================================================================
 // Response — DTO de salida para hotel details
 // =============================================================================
@@ -25,12 +40,14 @@ type Response struct {
 	Amenities         []string         `json:"amenities"`
 	NearbyPlaces      []NearbyPlace    `json:"nearby_places"`
 	// Hotel-only detail fields
-	Address          *string           `json:"address,omitempty"`
-	DirectionsURL    *string           `json:"directions_url,omitempty"`
-	PriceRange       *string           `json:"price_range,omitempty"`
-	ExternalReviews  []ExternalReview  `json:"external_reviews,omitempty"`
-	HealthAndSafety  *string            `json:"health_and_safety,omitempty"`
-	Sustainability   *string            `json:"sustainability,omitempty"`
+	Address          *string                         `json:"address,omitempty"`
+	DirectionsURL    *string                         `json:"directions_url,omitempty"`
+	PriceRange       *HotelPriceRangeResponse        `json:"price_range,omitempty"`
+	ExternalReviews  []OtherReviewResponse           `json:"external_reviews,omitempty"`
+	HealthAndSafety  []HealthAndSafetyCategoryResponse `json:"health_and_safety,omitempty"`
+	Sustainability   []SustainabilityCategoryResponse  `json:"sustainability,omitempty"`
+	Ratings          []HotelRatingResponse             `json:"ratings,omitempty"`
+	ReviewsBreakdown []HotelReviewBreakdownResponse    `json:"reviews_breakdown,omitempty"`
 	FreeCancellation *bool             `json:"free_cancellation,omitempty"`
 	SpecialOffer     *bool             `json:"special_offer,omitempty"`
 	EcoCertified     *bool             `json:"eco_certified,omitempty"`
@@ -40,12 +57,6 @@ type Response struct {
 	// Metadata
 	FromCache bool    `json:"from_cache"`
 	CachedAt  *string `json:"cached_at,omitempty"`
-}
-
-// GPS holds latitude and longitude coordinates.
-type GPS struct {
-	Lat float64 `json:"lat"`
-	Lng float64 `json:"lng"`
 }
 
 // Rating holds overall and location ratings for a property.
@@ -61,44 +72,52 @@ type Price struct {
 	Total    PriceDetail `json:"total"`
 }
 
-// PriceDetail holds amount and optional before-taxes value.
-type PriceDetail struct {
-	Amount      float64  `json:"amount"`
-	BeforeTaxes *float64 `json:"before_taxes,omitempty"`
+// OtherReviewResponse holds a review from an external source.
+type OtherReviewResponse struct {
+	Source         string                  `json:"source"`
+	LogoURL        string                  `json:"logo_url,omitempty"`
+	Score          float64                 `json:"score"`
+	MaxScore       float64                 `json:"max_score"`
+	TotalReviews   int                     `json:"total_reviews"`
+	FeaturedReview *FeaturedReviewResponse `json:"featured_review,omitempty"`
 }
 
-// Image holds thumbnail and original image URLs.
-type Image struct {
-	Thumbnail string `json:"thumbnail"`
-	Original  string `json:"original"`
+// FeaturedReviewResponse is a featured user review within an external review.
+type FeaturedReviewResponse struct {
+	Author  string  `json:"author"`
+	Date    string  `json:"date"`
+	Score   float64 `json:"score"`
+	Comment string  `json:"comment"`
+	URL     *string `json:"url,omitempty"`
 }
 
-// NearbyPlace represents a nearby attraction or POI with transport info.
-type NearbyPlace struct {
-	Name      string      `json:"name"`
-	Transport []Transport `json:"transport,omitempty"`
+// HotelPriceRangeResponse represents the typical price range for a hotel.
+type HotelPriceRangeResponse struct {
+	Currency string  `json:"currency"`
+	Min      float64 `json:"min"`
+	Max      float64 `json:"max"`
 }
 
-// Transport represents a transport option for a nearby place.
-type Transport struct {
-	Type     string `json:"type"`
-	Duration string `json:"duration"`
+// HealthAndSafetyCategoryResponse is a category group within health_and_safety.
+type HealthAndSafetyCategoryResponse struct {
+	Category string                        `json:"category"`
+	Items    []HealthAndSafetyItemResponse `json:"items"`
 }
 
-// ExternalReview holds a review from an external source.
-type ExternalReview struct {
-	Source string  `json:"source"`
-	Rating float64 `json:"rating"`
-	Count  int     `json:"count"`
-	Link   string  `json:"link,omitempty"`
+// HealthAndSafetyItemResponse is a single health/safety measure.
+type HealthAndSafetyItemResponse struct {
+	Name      string `json:"name"`
+	Available bool   `json:"available"`
 }
 
-// Capacity holds unit type and capacity info (vacation rentals only).
-type Capacity struct {
-	UnitType  string `json:"unit_type"`
-	Guests    *int   `json:"guests,omitempty"`
-	Bedrooms  *int   `json:"bedrooms,omitempty"`
-	Bathrooms *int   `json:"bathrooms,omitempty"`
-	Beds      *int   `json:"beds,omitempty"`
-	Area      string `json:"area,omitempty"`
+// SustainabilityCategoryResponse is a category group within sustainability.
+type SustainabilityCategoryResponse struct {
+	Category string                      `json:"category"`
+	Items    []SustainabilityItemResponse `json:"items"`
+}
+
+// SustainabilityItemResponse is a single sustainability measure.
+type SustainabilityItemResponse struct {
+	Name      string `json:"name"`
+	Available bool   `json:"available"`
 }

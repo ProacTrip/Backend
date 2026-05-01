@@ -1,4 +1,4 @@
-package get_context
+package get_environment
 
 import (
 	"log/slog"
@@ -18,27 +18,27 @@ func NewHandler(useCase *UseCase) *Handler {
 }
 
 func (h *Handler) Handle(c *echo.Context) error {
-	slog.Error("get_context handler: request received")
+	slog.Debug("get_environment handler: request received")
 
 	if h.useCase == nil {
-		slog.Error("get_context handler: FATAL — useCase is nil")
-		return httperr.MapError(c, echo.NewHTTPError(http.StatusInternalServerError, "context service unavailable"))
+		slog.Error("get_environment handler: FATAL — useCase is nil")
+		return httperr.MapError(c, echo.NewHTTPError(http.StatusInternalServerError, "environment service unavailable"))
 	}
 
 	ip := c.RealIP()
-	slog.Error("get_context handler: extracted IP", "ip", ip)
+	slog.Debug("get_environment handler: extracted IP", "ip", ip)
 
 	lang := extractLanguage(c)
-	slog.Error("get_context handler: extracted language", "lang", lang)
+	slog.Debug("get_environment handler: extracted language", "lang", lang)
 
-	slog.Error("get_context handler: calling useCase.Execute", "ip", ip, "lang", lang)
+	slog.Debug("get_environment handler: calling useCase.Execute", "ip", ip, "lang", lang)
 	result, err := h.useCase.Execute(c.Request().Context(), ip, lang)
 	if err != nil {
-		slog.Error("get_context handler: useCase.Execute failed", "error", err)
+		slog.Error("get_environment handler: useCase.Execute failed", "error", err)
 		return httperr.MapError(c, err)
 	}
 
-	slog.Error("get_context handler: returning 200 OK")
+	slog.Debug("get_environment handler: returning 200 OK")
 	return c.JSON(http.StatusOK, result)
 }
 

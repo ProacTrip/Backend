@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"regexp"
 	"strings"
 )
 
@@ -34,7 +36,8 @@ type HotelProperty struct {
 	Link              string           `json:"link,omitempty"`
 	PropertyToken     string           `json:"property_token"`
 	GPSCoordinates    HotelGPS         `json:"gps_coordinates"`
-	HotelClass        *int             `json:"hotel_class,omitempty"`
+	HotelClass        *string          `json:"hotel_class,omitempty"`
+	ExtractedHotelClass *int            `json:"extracted_hotel_class,omitempty"`
 	CheckInTime       string           `json:"check_in_time,omitempty"`
 	CheckOutTime      string           `json:"check_out_time,omitempty"`
 	OverallRating     *float64         `json:"overall_rating,omitempty"`
@@ -45,24 +48,27 @@ type HotelProperty struct {
 	Images            []HotelImage     `json:"images,omitempty"`
 	Amenities         []string         `json:"amenities,omitempty"`
 	NearbyPlaces      []HotelNearbyPlace `json:"nearby_places,omitempty"`
+	Ratings           []HotelRating      `json:"ratings,omitempty"`
+	ReviewsBreakdown  []HotelReviewBreakdown `json:"reviews_breakdown,omitempty"`
 	// Hotel-only
 	FreeCancellation *bool `json:"free_cancellation,omitempty"`
 	SpecialOffer     *bool `json:"special_offer,omitempty"`
 	EcoCertified     *bool `json:"eco_certified,omitempty"`
 	// VR-only
 	ExcludedAmenities []string       `json:"excluded_amenities,omitempty"`
-	EssentialInfo     []HotelEssentialKV `json:"essential_info,omitempty"`
+	EssentialInfo     EssentialInfoField `json:"essential_info,omitempty"`
+	Prices            []HotelPriceSource  `json:"prices,omitempty"`
 }
 
 // HotelPropertyDetail is the extended single-property response for hotel details.
 type HotelPropertyDetail struct {
 	HotelProperty            // embed base property
-	Address         *string  `json:"address,omitempty"`
-	DirectionsURL   *string  `json:"directions_url,omitempty"`
-	PriceRange      *string  `json:"price_range,omitempty"`
-	ExternalReviews []HotelExternalReview `json:"external_reviews,omitempty"`
-	HealthAndSafety *string  `json:"health_and_safety,omitempty"`
-	Sustainability  *string  `json:"sustainability,omitempty"`
+	Address          *string                 `json:"address,omitempty"`
+	DirectionsURL    *string                 `json:"directions,omitempty"`
+	TypicalPriceRange *HotelTypicalPriceRange `json:"typical_price_range,omitempty"`
+	OtherReviews     []HotelOtherReview      `json:"other_reviews,omitempty"`
+	HealthAndSafety  *HealthAndSafetyObject  `json:"health_and_safety,omitempty"`
+	Sustainability   *SustainabilityObject   `json:"sustainability,omitempty"`
 }
 
 // HotelGPS holds latitude and longitude from SerpAPI.
@@ -73,9 +79,10 @@ type HotelGPS struct {
 
 // HotelRateDetail holds rate information from SerpAPI.
 type HotelRateDetail struct {
-	Lowest          *float64 `json:"lowest,omitempty"`
-	ExtractedLowest *float64 `json:"extracted_lowest,omitempty"`
-	BeforeTaxesFees *float64 `json:"before_taxes_fees,omitempty"`
+	Lowest                   *string  `json:"lowest,omitempty"`
+	ExtractedLowest          *float64 `json:"extracted_lowest,omitempty"`
+	BeforeTaxesFees          *string  `json:"before_taxes_fees,omitempty"`
+	ExtractedBeforeTaxesFees *float64 `json:"extracted_before_taxes_fees,omitempty"`
 }
 
 // HotelImage holds image URLs from SerpAPI.
@@ -87,6 +94,13 @@ type HotelImage struct {
 // HotelNearbyPlace represents a nearby POI from SerpAPI.
 type HotelNearbyPlace struct {
 	Name            string                `json:"name"`
+	Category        *string               `json:"category,omitempty"`
+	Description     *string               `json:"description,omitempty"`
+	Rating          *float64              `json:"rating,omitempty"`
+	Reviews         *int                  `json:"reviews,omitempty"`
+	Thumbnail       *string               `json:"thumbnail,omitempty"`
+	Link            *string               `json:"link,omitempty"`
+	GPSCoordinates  *HotelGPS             `json:"gps_coordinates,omitempty"`
 	Transportations []HotelTransportation `json:"transportations,omitempty"`
 }
 
@@ -102,25 +116,159 @@ type HotelEssentialKV struct {
 	Value string `json:"value"`
 }
 
-// HotelExternalReview is an external review from SerpAPI hotel details.
-type HotelExternalReview struct {
-	Source string  `json:"source"`
-	Rating float64 `json:"rating"`
-	Count  int     `json:"count"`
-	Link   string  `json:"link,omitempty"`
+// EssentialInfoField handles SerpAPI's inconsistent essential_info format.
+// It can be a JSON array of key-value objects (old format) or a plain string (new format).
+type EssentialInfoField []HotelEssentialKV
+
+// UnmarshalJSON implements json.Unmarshaler to handle both array and string formats
+// for the essential_info field returned by SerpAPI.
+func (e *EssentialInfoField) UnmarshalJSON(data []byte) error {
+	// Case 1: array of key-value objects [{key: "...", value: "..."}]
+	var kvs []HotelEssentialKV
+	if err := json.Unmarshal(data, &kvs); err == nil {
+		*e = EssentialInfoField(kvs)
+		return nil
+	}
+
+	// Case 2: array of plain strings ["Villa completa", "Capacidad para 2", ...]
+	var strArr []string
+	if err := json.Unmarshal(data, &strArr); err == nil {
+		result := make(EssentialInfoField, 0, len(strArr))
+		for _, s := range strArr {
+			kv := parseEssentialInfoString(s)
+			result = append(result, kv)
+		}
+		*e = result
+		return nil
+	}
+
+	// Case 3: single string (legacy format — log and return empty)
+	var rawStr string
+	if err := json.Unmarshal(data, &rawStr); err != nil {
+		return fmt.Errorf("essential_info: expected array of objects, array of strings, or string, got: %s", string(data))
+	}
+
+	slog.Warn("SerpAPI essential_info returned as string instead of array",
+		slog.String("raw_value", rawStr),
+	)
+
+	*e = nil
+	return nil
 }
 
 // HotelBrand represents a brand from SerpAPI hotel search.
 type HotelBrand struct {
 	ID     int          `json:"id"`
 	Name   string       `json:"name"`
-	Chains []HotelChain `json:"chains"`
+	Chains []HotelChain `json:"children"`
 }
 
 // HotelChain represents a brand chain from SerpAPI.
 type HotelChain struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
+}
+
+// =============================================================================
+// DTOs Auxiliares — google_hotels
+// =============================================================================
+
+// HotelRating represents a star rating distribution bucket from SerpAPI's ratings array.
+type HotelRating struct {
+	Stars int `json:"stars"`
+	Count int `json:"count"`
+}
+
+// HotelReviewBreakdown represents a review category from SerpAPI's reviews_breakdown.
+type HotelReviewBreakdown struct {
+	Name           string `json:"name"`
+	Description    string `json:"description"`
+	TotalMentioned int    `json:"total_mentioned"`
+	Positive       int    `json:"positive"`
+	Negative       int    `json:"negative"`
+	Neutral        int    `json:"neutral"`
+	CategoryToken  string `json:"category_token,omitempty"`
+	SerpapiLink    string `json:"serpapi_link,omitempty"`
+}
+
+// HotelPriceSource represents a pricing option from a specific OTA in VR results.
+type HotelPriceSource struct {
+	Source       string           `json:"source"`
+	Logo         string           `json:"logo,omitempty"`
+	Link         string           `json:"link,omitempty"`
+	NumGuests    *int             `json:"num_guests,omitempty"`
+	RatePerNight *HotelRateDetail `json:"rate_per_night,omitempty"`
+	TotalRate    *HotelRateDetail `json:"total_rate,omitempty"`
+}
+
+// HotelTypicalPriceRange matches SerpAPI's typical_price_range object in hotel details.
+type HotelTypicalPriceRange struct {
+	ExtractedLowest  float64 `json:"extracted_lowest"`
+	ExtractedHighest float64 `json:"extracted_highest"`
+}
+
+// HotelOtherReview matches SerpAPI's other_reviews array in hotel details.
+type HotelOtherReview struct {
+	Source       string             `json:"source"`
+	SourceIcon   string             `json:"source_icon,omitempty"`
+	SourceRating *HotelRatingScore  `json:"source_rating,omitempty"`
+	Reviews      int                `json:"reviews"`
+	UserReview   *HotelUserReview   `json:"user_review,omitempty"`
+	SourceNumber int                `json:"source_number,omitempty"`
+	SerpapiLink  string             `json:"serpapi_link,omitempty"`
+}
+
+// HotelRatingScore is a score with a max value (used in source_rating and user_review.rating).
+type HotelRatingScore struct {
+	Score    float64 `json:"score"`
+	MaxScore float64 `json:"max_score"`
+}
+
+// HotelUserReview is a featured user review within an other_reviews entry.
+type HotelUserReview struct {
+	Username string            `json:"username"`
+	Date     string            `json:"date"`
+	Rating   *HotelRatingScore `json:"rating"`
+	Comment  string            `json:"comment"`
+	URL      string            `json:"url,omitempty"`
+}
+
+// HealthAndSafetyObject matches SerpAPI's health_and_safety field in hotel/VR details.
+type HealthAndSafetyObject struct {
+	Groups      []HealthAndSafetyGroup `json:"groups"`
+	DetailsLink string                 `json:"details_link,omitempty"`
+}
+
+// HealthAndSafetyGroup is a category group within health_and_safety.
+type HealthAndSafetyGroup struct {
+	Title string                `json:"title"`
+	List  []HealthAndSafetyItem `json:"list"`
+}
+
+// HealthAndSafetyItem is a single health/safety measure.
+type HealthAndSafetyItem struct {
+	Title     string `json:"title"`
+	Label     string `json:"label,omitempty"`
+	Available bool   `json:"available"`
+}
+
+// SustainabilityObject matches SerpAPI's sustainability field in hotel/VR details.
+type SustainabilityObject struct {
+	Groups      []SustainabilityGroup `json:"groups"`
+	DetailsLink string                `json:"details_link,omitempty"`
+}
+
+// SustainabilityGroup is a category group within sustainability.
+type SustainabilityGroup struct {
+	Title string               `json:"title"`
+	List  []SustainabilityItem `json:"list"`
+}
+
+// SustainabilityItem is a single sustainability measure.
+type SustainabilityItem struct {
+	Title     string `json:"title"`
+	Label     string `json:"label,omitempty"`
+	Available bool   `json:"available"`
 }
 
 // =============================================================================
@@ -390,4 +538,42 @@ func joinInts(vals []int) string {
 		strs[i] = itoa(v)
 	}
 	return strings.Join(strs, ",")
+}
+
+// parseEssentialInfoString parses a single essential_info string into key-value pairs.
+// Examples:
+//
+//	"Villa completa" → {Key: "unit_type", Value: "Villa completa"}
+//	"Capacidad para 2" → {Key: "guests", Value: "2"}
+//	"1 dormitorio" → {Key: "bedrooms", Value: "1"}
+//	"2.153 ft²" → {Key: "area", Value: "2.153 ft²"}
+func parseEssentialInfoString(s string) HotelEssentialKV {
+	// Spanish patterns
+	if strings.Contains(strings.ToLower(s), "villa completa") || strings.Contains(strings.ToLower(s), "casa") || strings.Contains(strings.ToLower(s), "entire") {
+		return HotelEssentialKV{Key: "unit_type", Value: s}
+	}
+	if strings.Contains(strings.ToLower(s), "capacidad para") || strings.Contains(strings.ToLower(s), "guests") || strings.Contains(strings.ToLower(s), "sleeps") {
+		re := regexp.MustCompile(`\d+`)
+		num := re.FindString(s)
+		return HotelEssentialKV{Key: "guests", Value: num}
+	}
+	if strings.Contains(strings.ToLower(s), "dormitorio") || strings.Contains(strings.ToLower(s), "bedroom") {
+		re := regexp.MustCompile(`\d+`)
+		num := re.FindString(s)
+		return HotelEssentialKV{Key: "bedrooms", Value: num}
+	}
+	if strings.Contains(strings.ToLower(s), "baño") || strings.Contains(strings.ToLower(s), "bathroom") {
+		re := regexp.MustCompile(`\d+`)
+		num := re.FindString(s)
+		return HotelEssentialKV{Key: "bathrooms", Value: num}
+	}
+	if strings.Contains(strings.ToLower(s), "cama") || strings.Contains(strings.ToLower(s), "bed") {
+		re := regexp.MustCompile(`\d+`)
+		num := re.FindString(s)
+		return HotelEssentialKV{Key: "beds", Value: num}
+	}
+	if strings.Contains(s, "ft²") || strings.Contains(s, "m²") || strings.Contains(s, "sq") {
+		return HotelEssentialKV{Key: "area", Value: s}
+	}
+	return HotelEssentialKV{} // unknown — mapCapacity ignores empty Key
 }

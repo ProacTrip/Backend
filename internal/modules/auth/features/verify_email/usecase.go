@@ -72,23 +72,5 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 			EmailVerified: true,
 			RoleName:      user.RoleName,
 		},
-		Context: defaultContext(),
 	}, nil
-}
-
-func defaultContext() ContextResponse {
-	return ContextResponse{
-		Location: LocationResponse{
-			Country:     "Unknown",
-			CountryCode: "XX",
-			City:        "Unknown",
-			Timezone:    "UTC",
-			Currency:    "USD",
-			Language:    "en",
-		},
-		Weather: WeatherResponse{
-			Temp:        20.0,
-			Description: "clear",
-		},
-	}
 }

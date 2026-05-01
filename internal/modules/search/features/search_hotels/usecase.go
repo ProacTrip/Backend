@@ -1,5 +1,5 @@
 // Lógica de negocio para búsqueda de hoteles y vacation rentals.
-// Orkesta cache y proveedor externo SerpAPI.
+// Orquesta cache y proveedor externo SerpAPI.
 package search_hotels
 
 import (
@@ -12,6 +12,7 @@ import (
 
 	"github.com/ProacTrip/Backend/internal/modules/search/adapters/serpapi"
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
+	"github.com/ProacTrip/Backend/internal/modules/search/domain/hotelmapping"
 )
 
 // =============================================================================
@@ -74,7 +75,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 	// 3. Generate cache key (exclude page_token from key — different pages are different requests)
 	cacheKey := generateCacheKey(adapterParams)
 
-	slog.ErrorContext(ctx, "DEBUG: checking cache for hotel search",
+	slog.DebugContext(ctx, "checking cache for hotel search",
 		slog.String("key", cacheKey),
 		slog.String("query", cmd.Query),
 	)
@@ -88,7 +89,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 				slog.String("query", cmd.Query),
 				slog.Int("property_count", len(resp.Properties)),
 			)
-			slog.ErrorContext(ctx, "DEBUG: cache HIT, returning cached response",
+			slog.DebugContext(ctx, "cache HIT, returning cached response",
 				slog.String("key", cacheKey),
 				slog.Int("property_count", len(resp.Properties)),
 				slog.Bool("from_cache", true),
@@ -110,7 +111,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 			slog.String("check_out", cmd.CheckOutDate),
 			slog.Int("adults", cmd.Adults),
 		)
-		slog.ErrorContext(ctx, "DEBUG: cache MISS, will call SerpAPI",
+		slog.DebugContext(ctx, "cache MISS, will call SerpAPI",
 			slog.String("key", cacheKey),
 			slog.String("query", cmd.Query),
 		)
@@ -122,7 +123,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		slog.String("check_in", cmd.CheckInDate),
 		slog.String("check_out", cmd.CheckOutDate),
 	)
-	slog.ErrorContext(ctx, "DEBUG: calling SerpAPI adapter NOW",
+	slog.DebugContext(ctx, "calling SerpAPI adapter",
 		slog.String("query", cmd.Query),
 		slog.String("check_in", cmd.CheckInDate),
 		slog.String("check_out", cmd.CheckOutDate),
@@ -143,7 +144,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		slog.Int("non_matching_properties_count", len(serpResp.NonMatchingProperties)),
 		slog.String("results_state", serpResp.SearchInformation.HotelsResultsState),
 	)
-	slog.ErrorContext(ctx, "DEBUG: SerpAPI response received",
+	slog.DebugContext(ctx, "SerpAPI response received",
 		slog.String("query", cmd.Query),
 		slog.Int("properties_count", len(serpResp.Properties)),
 		slog.Int("non_matching_count", len(serpResp.NonMatchingProperties)),
@@ -158,7 +159,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		slog.Int("property_count", len(resp.Properties)),
 		slog.String("results_state", resp.ResultsState),
 	)
-	slog.ErrorContext(ctx, "DEBUG: mapped response, saving to cache",
+	slog.DebugContext(ctx, "mapped response, saving to cache",
 		slog.String("query", cmd.Query),
 		slog.Int("property_count", len(resp.Properties)),
 		slog.String("results_state", resp.ResultsState),
@@ -293,7 +294,7 @@ func mapProperty(sp serpapi.HotelProperty, currency string) Property {
 			Lat: sp.GPSCoordinates.Latitude,
 			Lng: sp.GPSCoordinates.Longitude,
 		},
-		HotelClass: sp.HotelClass,
+		HotelClass: sp.ExtractedHotelClass,
 		CheckIn:    sp.CheckInTime,
 		CheckOut:   sp.CheckOutTime,
 		Rating: Rating{
@@ -303,12 +304,16 @@ func mapProperty(sp serpapi.HotelProperty, currency string) Property {
 		TotalReviews: sp.Reviews,
 		Price: Price{
 			Currency: currency,
-			PerNight: mapPriceDetail(sp.RatePerNight),
-			Total:    mapPriceDetail(sp.TotalRate),
+			PerNight: hotelmapping.MapPriceDetail(sp.RatePerNight),
+			Total:    hotelmapping.MapPriceDetail(sp.TotalRate),
 		},
-		Images:       mapImages(sp.Images),
+		Images:       hotelmapping.MapImages(sp.Images),
 		Amenities:    sp.Amenities,
-		NearbyPlaces: mapNearbyPlaces(sp.NearbyPlaces),
+		NearbyPlaces: hotelmapping.MapNearbyPlaces(sp.NearbyPlaces),
+		// New SerpAPI fields
+		Ratings:          hotelmapping.MapRatings(sp.Ratings),
+		ReviewsBreakdown: hotelmapping.MapReviewsBreakdown(sp.ReviewsBreakdown),
+		Prices:           mapPrices(sp.Prices),
 		// Hotel-only
 		FreeCancellation: sp.FreeCancellation,
 		SpecialOffer:     sp.SpecialOffer,
@@ -318,90 +323,10 @@ func mapProperty(sp serpapi.HotelProperty, currency string) Property {
 	// VR-only
 	if sp.Type == "vacation_rental" {
 		p.ExcludedAmenities = sp.ExcludedAmenities
-		p.Capacity = mapCapacity(sp.EssentialInfo)
+		p.Capacity = hotelmapping.MapCapacity([]serpapi.HotelEssentialKV(sp.EssentialInfo))
 	}
 
 	return p
-}
-
-func mapPriceDetail(sd serpapi.HotelRateDetail) PriceDetail {
-	pd := PriceDetail{}
-	if sd.ExtractedLowest != nil {
-		pd.Amount = *sd.ExtractedLowest
-	} else if sd.Lowest != nil {
-		pd.Amount = *sd.Lowest
-	}
-	pd.BeforeTaxes = sd.BeforeTaxesFees
-	return pd
-}
-
-func mapImages(serpImages []serpapi.HotelImage) []Image {
-	if serpImages == nil {
-		return nil
-	}
-	imgs := make([]Image, len(serpImages))
-	for i, si := range serpImages {
-		imgs[i] = Image{
-			Thumbnail: si.Thumbnail,
-			Original:  si.OriginalImage,
-		}
-	}
-	return imgs
-}
-
-func mapNearbyPlaces(serpPlaces []serpapi.HotelNearbyPlace) []NearbyPlace {
-	if serpPlaces == nil {
-		return nil
-	}
-	places := make([]NearbyPlace, len(serpPlaces))
-	for i, sp := range serpPlaces {
-		np := NearbyPlace{
-			Name: sp.Name,
-		}
-		if len(sp.Transportations) > 0 {
-			np.Transport = make([]Transport, len(sp.Transportations))
-			for j, t := range sp.Transportations {
-				np.Transport[j] = Transport{
-					Type:     t.Type,
-					Duration: t.Duration,
-				}
-			}
-		}
-		places[i] = np
-	}
-	return places
-}
-
-func mapCapacity(essentialInfo []serpapi.HotelEssentialKV) *Capacity {
-	if len(essentialInfo) == 0 {
-		return nil
-	}
-	c := &Capacity{}
-	for _, kv := range essentialInfo {
-		switch kv.Key {
-		case "unit_type":
-			c.UnitType = kv.Value
-		case "guests":
-			if n, err := parseInt(kv.Value); err == nil {
-				c.Guests = &n
-			}
-		case "bedrooms":
-			if n, err := parseInt(kv.Value); err == nil {
-				c.Bedrooms = &n
-			}
-		case "bathrooms":
-			if n, err := parseInt(kv.Value); err == nil {
-				c.Bathrooms = &n
-			}
-		case "beds":
-			if n, err := parseInt(kv.Value); err == nil {
-				c.Beds = &n
-			}
-		case "area":
-			c.Area = kv.Value
-		}
-	}
-	return c
 }
 
 func mapBrands(serpBrands []serpapi.HotelBrand) []Brand {
@@ -428,13 +353,22 @@ func mapBrands(serpBrands []serpapi.HotelBrand) []Brand {
 	return brands
 }
 
-// =============================================================================
-// Utilidades
-// =============================================================================
-
-// parseInt is a helper to parse integer strings from essential_info values.
-func parseInt(s string) (int, error) {
-	var n int
-	_, err := fmt.Sscanf(s, "%d", &n)
-	return n, err
+func mapPrices(serpPrices []serpapi.HotelPriceSource) []HotelPriceSourceResponse {
+	if serpPrices == nil {
+		return nil
+	}
+	out := make([]HotelPriceSourceResponse, len(serpPrices))
+	for i, p := range serpPrices {
+		ps := HotelPriceSourceResponse{
+			Source:    p.Source,
+			Logo:      p.Logo,
+			NumGuests: p.NumGuests,
+		}
+		if p.RatePerNight != nil {
+			pd := hotelmapping.MapPriceDetail(*p.RatePerNight)
+			ps.RatePerNight = &pd
+		}
+		out[i] = ps
+	}
+	return out
 }
