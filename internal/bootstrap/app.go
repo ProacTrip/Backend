@@ -416,12 +416,16 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 // healthCheckHandler returns basic liveness info (version, uptime, env).
 func (app *App) healthCheckHandler() echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		uptime := time.Since(app.startTime).String()
-		return c.JSON(http.StatusOK, map[string]string{
-			"status":      "ok",
-			"version":     "0.1.0",
-			"environment": app.Cfg.Server.Env,
-			"uptime":      uptime,
+		return c.JSON(http.StatusOK, struct {
+			Status      string `json:"status"`
+			Environment string `json:"environment"`
+			Version     string `json:"version"`
+			Uptime      string `json:"uptime"`
+		}{
+			Status:      "ok",
+			Environment: app.Cfg.Server.Env,
+			Version:     "0.1.0",
+			Uptime:      time.Since(app.startTime).String(),
 		})
 	}
 }
@@ -486,10 +490,14 @@ func (app *App) readyCheckHandler(rdb *redis.Client, poolMgr *database.PoolManag
 			overall = "degraded"
 		}
 
-		return c.JSON(statusCode, map[string]interface{}{
-			"status":   overall,
-			"checks":   checks,
-			"failures": failed,
+		return c.JSON(statusCode, struct {
+			Status   string            `json:"status"`
+			Checks   map[string]string `json:"checks"`
+			Failures []string          `json:"failures"`
+		}{
+			Status:   overall,
+			Checks:   checks,
+			Failures: failed,
 		})
 	}
 }
