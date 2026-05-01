@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,6 +27,7 @@ type NotificationConsumer struct {
 	group      string
 	consumer   string
 	streamName string
+	running    atomic.Bool // true while the main consume loop is alive
 }
 
 // =============================================================================
@@ -49,12 +51,23 @@ func (c *NotificationConsumer) Start(ctx context.Context) error {
 		return fmt.Errorf("ensure consumer group: %w", err)
 	}
 
-	go c.consume(ctx)
+	c.running.Store(true)
+	go func() {
+		defer c.running.Store(false)
+		c.consume(ctx)
+	}()
 	go c.rescueOrphans(ctx)
 
 	slog.Info("notification consumer started", "group", c.group, "consumer", c.consumer)
 	return nil
 }
+
+// IsRunning reports whether the main consume goroutine is alive.
+// Used by /ready health checks.
+func (c *NotificationConsumer) IsRunning() bool { return c.running.Load() }
+
+// Name returns a human-readable identifier for health check reporting.
+func (c *NotificationConsumer) Name() string { return "notification-consumer" }
 
 // =============================================================================
 // Worker loop

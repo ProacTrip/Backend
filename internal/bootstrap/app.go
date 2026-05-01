@@ -42,6 +42,7 @@ type App struct {
 	EventBus    *eventbus.EventBus
 	Cfg         *config.Config
 	DB          *database.PoolManager // Pool manager con DB por módulo
+	startTime   time.Time             // server start time for health checks
 
 	// Modules
 	AuthModule         *authModule.Module
@@ -321,10 +322,6 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 
 	// Rutas
 
-	// Health checks
-	e.GET("/health", healthCheckHandler(rdb, poolMgr))
-	e.GET("/ready", readyCheckHandler(rdb, poolMgr))
-
 	// Middleware: cookie anónimo (GLOBAL — todas las rutas)
 	// Skipper: no setear si el usuario ya tiene access_token
 	anonSkipper := func(c *echo.Context) bool {
@@ -402,51 +399,98 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		SearchModule:       searchMod,
 		EnvironmentModule:  environmentMod,
 		appCancel:          appCancel,
+		startTime:          time.Now(),
 	}
 
 	cancelOnError = false // app owns the cancel now — Shutdown will call it
+
+	// Health checks (registered after app creation so methods can access modules)
+	e.GET("/health", app.healthCheckHandler())
+	e.GET("/ready", app.readyCheckHandler(rdb, poolMgr))
 
 	slog.Info("App initialized", "modules", []string{"auth", "user", "notification", "search", "environment"})
 
 	return app, nil
 }
 
-func healthCheckHandler(rdb *redis.Client, poolMgr *database.PoolManager) echo.HandlerFunc {
+// healthCheckHandler returns basic liveness info (version, uptime, env).
+func (app *App) healthCheckHandler() echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+		uptime := time.Since(app.startTime).String()
+		return c.JSON(http.StatusOK, map[string]string{
+			"status":      "ok",
+			"version":     "0.1.0",
+			"environment": app.Cfg.Server.Env,
+			"uptime":      uptime,
+		})
 	}
 }
 
-func readyCheckHandler(rdb *redis.Client, poolMgr *database.PoolManager) echo.HandlerFunc {
+// readyCheckHandler verifies all infrastructure dependencies are healthy:
+// Redis ping, all PostgreSQL pools, and event consumer goroutines.
+func (app *App) readyCheckHandler(rdb *redis.Client, poolMgr *database.PoolManager) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
 		defer cancel()
 
+		checks := make(map[string]string)
+
 		// Check Redis
 		if err := rdb.Ping(ctx).Err(); err != nil {
-			return c.JSON(http.StatusServiceUnavailable, map[string]string{
-				"status": "unavailable",
-				"error":  "redis",
-			})
+			checks["redis"] = fmt.Sprintf("error: %v", err)
+		} else {
+			checks["redis"] = "ok"
 		}
 
 		// Check all DBs via PoolManager
 		dbResults := poolMgr.HealthCheck(ctx)
-		var failedDBs []string
 		for dbType, err := range dbResults {
 			if err != nil {
-				failedDBs = append(failedDBs, string(dbType))
+				checks[string(dbType)] = fmt.Sprintf("error: %v", err)
+			} else {
+				checks[string(dbType)] = "ok"
 			}
 		}
-		if len(failedDBs) > 0 {
-			return c.JSON(http.StatusServiceUnavailable, map[string]interface{}{
-				"status":     "unavailable",
-				"error":      "postgres",
-				"failed_dbs": failedDBs,
-			})
+
+		// Check event consumers (notification + user)
+		if app.NotificationModule != nil && app.NotificationModule.EventConsumer != nil {
+			nc := app.NotificationModule.EventConsumer
+			if nc.IsRunning() {
+				checks[nc.Name()] = "ok"
+			} else {
+				checks[nc.Name()] = "error: consumer not running"
+			}
 		}
 
-		return c.JSON(http.StatusOK, map[string]string{"status": "ready"})
+		if app.UserModule != nil && app.UserModule.EventConsumer != nil {
+			uc := app.UserModule.EventConsumer
+			if uc.IsRunning() {
+				checks[uc.Name()] = "ok"
+			} else {
+				checks[uc.Name()] = "error: consumer not running"
+			}
+		}
+
+		// Determine overall status
+		var failed []string
+		for component, status := range checks {
+			if status != "ok" {
+				failed = append(failed, component)
+			}
+		}
+
+		statusCode := http.StatusOK
+		overall := "ready"
+		if len(failed) > 0 {
+			statusCode = http.StatusServiceUnavailable
+			overall = "degraded"
+		}
+
+		return c.JSON(statusCode, map[string]interface{}{
+			"status":   overall,
+			"checks":   checks,
+			"failures": failed,
+		})
 	}
 }
 

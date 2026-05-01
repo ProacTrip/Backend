@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -28,6 +29,7 @@ type UserEventConsumer struct {
 	group      string
 	consumer   string
 	streamName string
+	running    atomic.Bool // true while the main consume loop is alive
 }
 
 // =============================================================================
@@ -57,7 +59,11 @@ func (c *UserEventConsumer) Start(ctx context.Context) error {
 	}
 
 	// Start worker loop
-	go c.consume(ctx)
+	c.running.Store(true)
+	go func() {
+		defer c.running.Store(false)
+		c.consume(ctx)
+	}()
 
 	// Start orphan rescue worker (XAUTOCLAIM)
 	go c.rescueOrphans(ctx)
@@ -65,6 +71,13 @@ func (c *UserEventConsumer) Start(ctx context.Context) error {
 	slog.Info("user event consumer started", "group", c.group, "consumer", c.consumer)
 	return nil
 }
+
+// IsRunning reports whether the main consume goroutine is alive.
+// Used by /ready health checks.
+func (c *UserEventConsumer) IsRunning() bool { return c.running.Load() }
+
+// Name returns a human-readable identifier for health check reporting.
+func (c *UserEventConsumer) Name() string { return "user-consumer" }
 
 // =============================================================================
 // Worker loop

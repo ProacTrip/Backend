@@ -7,7 +7,7 @@
 [![Docker](https://img.shields.io/badge/Docker-✓-2496ED?logo=docker)](https://www.docker.com/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-API server for the **Proactrip** travel platform — flight search, user authentication, and email notifications.
+API server for the **Proactrip** travel platform — flight + hotel search, user authentication, email notifications, and environment detection.
 
 ---
 
@@ -23,6 +23,9 @@ API server for the **Proactrip** travel platform — flight search, user authent
 | **Hashing**    | Blake3                | —            |
 | **Email**      | Resend                | v3           |
 | **Flights**    | SerpAPI (HTTP client) | —            |
+| **Hotels**     | SerpAPI (HTTP client) | —            |
+| **GeoIP**      | IPQuery (HTTP client) | —            |
+| **Weather**    | OpenWeather (HTTP client) | —        |
 | **DevOps**     | Docker + Compose      | —            |
 
 ---
@@ -39,13 +42,18 @@ internal/
 ├── modules/
 │   ├── auth/             # Authentication (register, login, logout, verify email)
 │   │   ├── domain/       # Entities, repository interfaces, domain errors
-│   │   ├── features/     # Use cases: register, login, logout, verify_email, current_user
+│   │   ├── features/     # Use cases: register, login, logout, verify_email
 │   │   ├── adapters/     # Postgres repo, PASETO, Argon2id, Blake3, encryption
 │   │   └── migrations/   # SQL migrations
-│   ├── search/           # Flight search (SerpAPI adapter, cache, pagination)
-│   │   ├── domain/       # Flight entities, provider interface, errors
-│   │   ├── features/     # search_flights, flight_details
-│   │   ├── adapters/     # SerpAPI HTTP client, Postgres repo
+│   ├── environment/      # Geolocation + weather from client IP (IPQuery + OpenWeather)
+│   │   ├── domain/       # CountryMetadata, WeatherData, Geolocation types
+│   │   ├── features/     # get_environment
+│   │   ├── adapters/     # IPQuery HTTP client, OpenWeather HTTP client
+│   │   └── migrations/
+│   ├── search/           # Flight + hotel search (SerpAPI adapter, cache, pagination)
+│   │   ├── domain/       # Flight entities, provider interface, errors, hotel mappers
+│   │   ├── features/     # search_flights, flight_details, search_hotels, hotel_details
+│   │   ├── adapters/     # SerpAPI HTTP client (flights + hotels)
 │   │   └── migrations/
 │   ├── notification/     # Email notifications (Resend, event consumer)
 │   │   ├── adapters/     # Postgres repo, Resend email provider
@@ -100,16 +108,16 @@ POST /v1/auth/login
     ├─────────────────────────┐
     ▼                         ▼
 ┌─────────────────┐   ┌─────────────────┐
-│  PostgreSQL      │   │  DragonflyDB    │
-│  (pgx pool/DB)   │   │  Cache + Streams│
+│  PostgreSQL     │   │  DragonflyDB    │
+│  (pgx pool/DB)  │   │  Cache + Streams│
 └─────────────────┘   └─────────────────┘
     │                         │
     ▼                         ▼
 ┌─────────────────┐   ┌─────────────────┐
-│  JSON Response   │   │  Event Bus      │
-│  (RFC 7807 errs) │   │  user.registered│
-└─────────────────┘   │  → notification  │
-                      │    consumer      │
+│  JSON Response  │   │  Event Bus      │
+│ (RFC 7807 errs) │   │  user.registered│
+└─────────────────┘   │  → notification │
+                      │    consumer     │
                       └─────────────────┘
 ```
 
@@ -151,8 +159,10 @@ register()                     │                      │
 
 | API          | Docs                                | Base Path   |
 | ------------ | ----------------------------------- | ----------- |
-| Auth         | [docs/AUTH_API.md](docs/AUTH_API.md)         | `/v1/auth`  |
+| Auth         | [docs/AUTH_API.md](docs/AUTH_API.md)           | `/v1/auth`  |
 | Flight Search| [docs/search_flights_api.md](docs/search_flights_api.md) | `/v1/search` |
+| Hotel Search | [docs/search_hotels_api.md](docs/search_hotels_api.md) | `/v1/search` |
+| Environment  | [docs/ENVIRONMENT_API.md](docs/ENVIRONMENT_API.md) | `/v1/environment` |
 
 All errors follow **RFC 7807 Problem JSON** format with `type`, `title`, `status`, `detail`, and `instance` fields.
 
@@ -163,7 +173,6 @@ All errors follow **RFC 7807 Problem JSON** format with `type`, `title`, `status
 | POST   | `/v1/auth/register`    | No            | Global + Anon    |
 | POST   | `/v1/auth/verify-email`| No            | Global + Anon    |
 | POST   | `/v1/auth/login`       | No            | Global + Anon    |
-| GET    | `/v1/auth/current-user`| PASETO        | Auth (10 req/min)|
 | POST   | `/v1/auth/logout`      | PASETO        | Auth (10 req/min)|
 | POST   | `/v1/auth/logout/all`  | PASETO        | Auth (10 req/min)|
 
@@ -173,6 +182,14 @@ All errors follow **RFC 7807 Problem JSON** format with `type`, `title`, `status
 | ------ | --------------------------- | -------------------------------------- |
 | POST   | `/v1/search/flights`        | Anon (5 req/min) + SerpAPI (50 req/hr) |
 | POST   | `/v1/search/flight-details` | Anon (5 req/min) + SerpAPI (50 req/hr) |
+| POST   | `/v1/search/hotels`         | Anon (5 req/min) + SerpAPI (50 req/hr) |
+| POST   | `/v1/search/hotel-details`  | Anon (5 req/min) + SerpAPI (50 req/hr) |
+
+### Environment Endpoint
+
+| Method | Path               | Rate Limit              |
+| ------ | ----------------- | ---------------------- |
+| GET    | `/v1/environment` | Global + Anon          |
 
 ### Health
 
@@ -194,6 +211,7 @@ Multi-tier rate limiting using DragonflyDB with Lua scripts for atomic counters.
 | **Anonymous**      | 5 req/min per cookie | `ratelimit:anon:{anonID}` |
 | **Resend**         | 100 req/day          | `ratelimit:provider:resend` |
 | **SerpAPI**        | 50 req/hour          | `ratelimit:provider:serpapi` |
+| **OpenWeather**    | 1000 req/day         | `ratelimit:provider:openweather` |
 
 All tiers expose `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`, and `Retry-After` response headers (RFC 6585 `429 Too Many Requests` on violation).
 
@@ -254,8 +272,10 @@ docker run -p 8080:8080 --env-file .env proactrip-backend
 | `DRAGONFLY_PORT`                       | `6379`            | DragonflyDB port                                |
 | `DRAGONFLY_PASSWORD`                   | *(optional)*      | DragonflyDB password                            |
 | `PASETO_KEY`                           | *(required)*      | 32-byte key (64 hex chars) — `openssl rand -hex 32` |
-| `SERPAPI_KEY`                          | *(required)*      | SerpAPI key for flight search                   |
-| `RESEND_API_KEY`                       | *(required)*      | Resend API key for email delivery               |
+| `SERPAPI_KEY`                          | *(required)*      | SerpAPI key for flight + hotel search              |
+| `RESEND_API_KEY`                       | *(required)*      | Resend API key for email delivery                  |
+| `IPQUERY_API_KEY`                      | *(optional)*      | IPQuery API key for IP geolocation                 |
+| `OPENWEATHER_API_KEY`                  | *(optional)*      | OpenWeather API key for weather data               |
 | `FRONTEND_URL_DEV`                     | `http://localhost:3000` | Frontend URL (development)                 |
 | `FRONTEND_URL_PROD`                    | `https://proactrip.com` | Frontend URL (production)                 |
 | `RATELIMIT_GLOBAL_PER_MINUTE`          | `100`             | Global rate limit (req/min per IP)              |
@@ -279,6 +299,7 @@ cp .env.example .env
 
 # 3. Edit .env — add your API keys
 #    Required: DB_PASSWORD, PASETO_KEY, SERPAPI_KEY, RESEND_API_KEY
+#    Optional: IPQUERY_API_KEY, OPENWEATHER_API_KEY
 #    Generate PASETO_KEY: openssl rand -hex 32
 
 # 4. Start infrastructure (PostgreSQL + DragonflyDB)
