@@ -25,6 +25,9 @@ var (
 	ErrInvalidPassword    = errors.New("INVALID_PASSWORD: formato de contraseña inválido")
 	ErrPasswordTooShort   = errors.New("PASSWORD_TOO_SHORT: la contraseña debe tener al menos 8 caracteres")
 
+	// Autenticación
+	ErrNotAuthenticated = errors.New("NOT_AUTHENTICATED: se requiere autenticación")
+
 	// Tokens
 	ErrTokenExpired             = errors.New("TOKEN_EXPIRED: token expirado")
 	ErrTokenInvalid             = errors.New("TOKEN_INVALID: token inválido")
@@ -34,10 +37,15 @@ var (
 	ErrSessionExpired           = errors.New("SESSION_EXPIRED: sesión expirada")
 	ErrSessionNotFound          = errors.New("SESSION_NOT_FOUND: sesión no encontrada")
 
-	// OAuth / Identidad
+	// OAuth
 	ErrOAuthProviderNotFound = errors.New("OAUTH_PROVIDER_NOT_FOUND: proveedor OAuth no soportado")
-	ErrOAuthCodeInvalid      = errors.New("OAUTH_CODE_INVALID: código OAuth inválido")
-	ErrOAuthExchangeFailed   = errors.New("OAUTH_EXCHANGE_FAILED: error al intercambiar código OAuth")
+	ErrOAuthCodeMissing      = errors.New("OAUTH_CODE_MISSING: el parámetro code no fue proporcionado por el proveedor")
+	ErrOAuthStateMissing     = errors.New("OAUTH_STATE_MISSING: el parámetro state no fue proporcionado por el proveedor")
+	ErrOAuthStateInvalid     = errors.New("OAUTH_STATE_INVALID: state inválido o expirado (posible CSRF)")
+	ErrOAuthAccessDenied     = errors.New("OAUTH_ACCESS_DENIED: el usuario denegó el acceso o hubo un error del proveedor")
+	ErrOAuthExchangeFailed   = errors.New("OAUTH_EXCHANGE_FAILED: fallo al intercambiar code por token con el proveedor")
+
+	// Identidad
 	ErrIdentityNotFound      = errors.New("IDENTITY_NOT_FOUND: identidad externa no encontrada")
 	ErrIdentityAlreadyExists = errors.New("IDENTITY_ALREADY_EXISTS: ya existe una identidad vinculada a este proveedor")
 

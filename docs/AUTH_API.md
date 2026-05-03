@@ -24,6 +24,7 @@
 - [Reset Password](#reset-password)
 - [OAuth Google](#oauth-google)
 - [OAuth Google Callback](#oauth-google-callback)
+- [Current User (Me)](#current-user-me)
 - [MFA — List Active Methods](#mfa--list-active-methods)
 - [MFA — Setup TOTP](#mfa--setup-totp)
 - [MFA — Verify TOTP Setup](#mfa--verify-totp-setup)
@@ -80,20 +81,19 @@ El frontend NO almacena ni lee tokens.
 | `Secure` | `true` | Solo HTTPS en producción |
 | `SameSite` | `Lax` | Protección CSRF. Permite navegación top-level (OAuth callbacks) |
 | `Path` | `/` | Disponible en todas las rutas |
-| `Partitioned` | `true` | CHIPS — permite cookies en contextos de terceros sin third-party cookies |
 | `Domain` | `.proactrip.com` | Compartido entre subdominios (omitir si usas `__Host-`) |
 
 ### Formatos de Producción
 
 **Multi-subdominio (recomendado para ProacTrip):**
 ```
-Set-Cookie: __Secure-access_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=900; Partitioned
-Set-Cookie: __Secure-refresh_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=604800; Partitioned
+Set-Cookie: __Secure-access_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=900
+Set-Cookie: __Secure-refresh_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=604800
 ```
 
 **Single domain (máxima seguridad):**
 ```
-Set-Cookie: __Host-access_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=900; Partitioned
+Set-Cookie: __Host-access_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=900
 ```
 
 ### Limpieza de Cookies (Logout)
@@ -121,11 +121,11 @@ Todos los ejemplos usan `{base_url}` como placeholder.
 
 ## Errores Estándar
 
-Formato **RFC 7807 Problem Details**:
+Formato **RFC 9457 Problem Details**. Todas las respuestas de error usan `Content-Type: application/problem+json`.
 
 ```json
 {
-  "type": "validation_error",
+  "type": "https://api.proactrip.com/errors/validation-error",
   "title": "Validation Error",
   "status": 400,
   "detail": "Specific detail about what went wrong",
@@ -209,8 +209,8 @@ curl -X POST {base_url}/register \
 **Set-Cookie Headers:**
 
 ```
-Set-Cookie: __Secure-access_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=900; Partitioned
-Set-Cookie: __Secure-refresh_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=604800; Partitioned
+Set-Cookie: __Secure-access_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=900
+Set-Cookie: __Secure-refresh_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=604800
 ```
 
 #### Posibles Errores
@@ -302,7 +302,8 @@ curl -X POST {base_url}/verify-email \
 
 ```json
 {
-"user": {
+  "user": {
+    "id": "019d5439-cb43-716d-90b5-51dcbe980908",
     "email": "user@example.com",
     "email_verified": true,
     "role_name": "client"
@@ -314,8 +315,8 @@ curl -X POST {base_url}/verify-email \
 **Set-Cookie Headers (actualiza la sesión):**
 
 ```
-Set-Cookie: __Secure-access_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=900; Partitioned
-Set-Cookie: __Secure-refresh_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=604800; Partitioned
+Set-Cookie: __Secure-access_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=900
+Set-Cookie: __Secure-refresh_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=604800
 ```
 
 #### Posibles Errores
@@ -362,6 +363,7 @@ curl -X POST {base_url}/login \
 ```json
 {
   "user": {
+    "id": "019d5439-cb43-716d-90b5-51dcbe980908",
     "email": "user@example.com",
     "email_verified": true,
     "role_name": "client"
@@ -374,8 +376,8 @@ curl -X POST {base_url}/login \
 **Set-Cookie Headers:**
 
 ```
-Set-Cookie: __Secure-access_token=...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=900; Partitioned
-Set-Cookie: __Secure-refresh_token=...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=604800; Partitioned
+Set-Cookie: __Secure-access_token=...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=900
+Set-Cookie: __Secure-refresh_token=...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=604800
 ```
 
 #### 200 OK — MFA Requerido
@@ -486,6 +488,210 @@ Clear-Site-Data: "cookies"
 
 ---
 
+## OAuth Google
+
+Inicia el flujo de autenticación OAuth con Google. El frontend debe llamar este endpoint y redirigir al usuario a la URL de autorización devuelta por el backend.
+
+### Request
+
+```
+GET /v1/auth/oauth/:provider
+```
+
+**Path Params:**
+
+| Parámetro | Tipo | Requerido | Descripción |
+|-----------|------|-----------|-------------|
+| `provider` | string | Sí | Proveedor OAuth. Actualmente solo `google`. |
+
+**Headers:**
+
+| Header | Tipo | Requerido | Descripción |
+|--------|------|-----------|-------------|
+| (ninguno requerido) | — | — | Endpoint público sin autenticación |
+
+**Ejemplo:**
+
+```bash
+curl -X GET {base_url}/oauth/google
+```
+
+### Responses
+
+#### 200 OK
+
+```json
+{
+  "auth_url": "https://accounts.google.com/o/oauth2/v2/auth?..."
+}
+```
+
+> **Flujo:** El frontend debe redirigir al navegador a `auth_url` con `window.location.href = data.auth_url`. El backend genera un `state` anti-CSRF one-time en cada llamada — **no cachear esta respuesta**.
+
+#### Posibles Errores
+
+| Código | HTTP | Cuándo |
+|--------|------|--------|
+| `OAUTH_PROVIDER_NOT_FOUND` | 400 | Proveedor no soportado (ej: `facebook`) |
+| `INTERNAL_ERROR` | 500 | Error inesperado |
+
+---
+
+## OAuth Google Callback
+
+Callback llamado por Google después de que el usuario autoriza la aplicación. **Este endpoint NO debe ser llamado directamente por el frontend.** El navegador sigue la redirección automáticamente desde Google.
+
+### Flujo Completo
+
+```
+┌──────────┐   GET /oauth/:provider    ┌──────────┐
+│ Frontend │ ────────────────────────> │ Backend  │
+└──────────┘                           └──────────┘
+     │                                      │
+     │  { auth_url }                        │
+     │<─────────────────────────────────────│
+     │                                      │
+     │  window.location.href = auth_url     │
+     │─────────────────────────────────────>│
+     │                                      │
+     │           ┌──────────┐               │
+     │           │  Google  │               │
+     │           └──────────┘               │
+     │                │                     │
+     │  (usuario autoriza)                  │
+     │                │                     │
+     │   Google redirige al backend         │
+     │   GET /oauth/google/callback         │
+     │   ?code=xxx&state=yyy                │
+     │                │────────────────────>│
+     │                │                     │ (intercambia código,
+     │                │                     │  crea/víncula usuario,
+     │                │                     │  genera tokens)
+     │                │                     │
+     │  302 → /auth/callback?status=success │
+     │  + cookies: __Secure-access_token    │
+     │  + cookies: __Secure-refresh_token   │
+     │<─────────────────────────────────────│
+```
+
+### Request
+
+```
+GET /v1/auth/oauth/:provider/callback
+```
+
+**Path Params:**
+
+| Parámetro | Tipo | Requerido | Descripción |
+|-----------|------|-----------|-------------|
+| `provider` | string | Sí | Proveedor OAuth. Debe coincidir con el usado en `/oauth/:provider`. |
+
+**Query Params (enviados por Google):**
+
+| Parámetro | Tipo | Requerido | Descripción |
+|-----------|------|-----------|-------------|
+| `code` | string | Sí | Código de autorización de Google |
+| `state` | string | Sí | Token anti-CSRF generado por el backend en `/oauth/:provider` |
+
+> **Nota:** El frontend no necesita leer estos parámetros. Google los añade automáticamente a la URL de callback registrada.
+
+### Responses
+
+#### 302 Found — Éxito
+
+El backend redirige al frontend:
+
+```
+Location: {FRONTEND_URL}/auth/callback?status=success
+```
+
+**Set-Cookie Headers:**
+
+```
+Set-Cookie: __Secure-access_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=900
+Set-Cookie: __Secure-refresh_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=604800
+```
+
+| Cookie | HttpOnly | TTL | Contenido |
+|--------|----------|-----|-----------|
+| `__Secure-access_token` | Sí | 15 min | PASETO v4 access token (opaco) |
+| `__Secure-refresh_token` | Sí | 7 días | PASETO v4 refresh token (opaco) |
+
+> **Importante:** Después del callback OAuth, el frontend debe llamar a `GET /v1/auth/me` para obtener los datos del usuario (`id`, `email`, `email_verified`, `role_name`). Login, register y verify-email ya incluyen estos datos en su respuesta.
+
+#### 302 Found — Error
+
+El backend redirige al frontend con el código de error:
+
+```
+Location: {FRONTEND_URL}/auth/callback?status=error&code=OAUTH_EXCHANGE_FAILED
+```
+
+> El frontend debe leer `status` y `code` de los query params en la URL de callback para mostrar el error adecuado al usuario. Si `status=success`, el usuario ya está autenticado y las cookies están disponibles.
+
+#### Posibles Errores (vía redirect)
+
+Todos los errores se devuelven como `302 Found` con `status=error&code=XXX`. El frontend nunca recibe un JSON de error en este endpoint.
+
+| Código | Cuándo |
+|--------|--------|
+| `OAUTH_CODE_MISSING` | Falta el parámetro `code` en el callback (Google no lo envió) |
+| `OAUTH_STATE_MISSING` | Falta el parámetro `state` en el callback (Google no lo envió) |
+| `OAUTH_STATE_INVALID` | State inválido, expirado o reutilizado (posible ataque CSRF o replay) |
+| `OAUTH_ACCESS_DENIED` | El usuario denegó el acceso en Google o hubo un error del proveedor |
+| `OAUTH_EXCHANGE_FAILED` | Error al intercambiar el código por tokens con Google, o error interno inesperado |
+| `OAUTH_PROVIDER_NOT_FOUND` | Proveedor no soportado |
+| `EMAIL_NOT_VERIFIED` | El email de la cuenta de Google no está verificado |
+| `ACCOUNT_LOCKED` | Cuenta bloqueada por intentos fallidos |
+| `ACCOUNT_SUSPENDED` | Cuenta suspendida |
+| `ACCOUNT_INACTIVE` | Cuenta inactiva |
+
+---
+
+## Current User (Me)
+
+Retorna los datos del usuario autenticado. Usa la cookie `__Secure-access_token` (o `access_token` en dev) para identificar al usuario.
+
+> **Cuándo llamarlo:** Este endpoint se usa después de OAuth callback para obtener los datos del usuario. Login, register y verify-email ya devuelven los datos del usuario en su respuesta.
+
+### Request
+
+```
+GET /v1/auth/me
+```
+
+> El navegador envía las cookies automáticamente. No requiere body ni headers adicionales.
+
+### Responses
+
+#### 200 OK
+
+```json
+{
+  "user": {
+    "id": "019d5439-cb43-716d-90b5-51dcbe980908",
+    "email": "user@example.com",
+    "email_verified": true,
+    "role_name": "client"
+  }
+}
+```
+
+**Headers:**
+
+| Header | Valor |
+|--------|-------|
+| `Cache-Control` | `no-store, private` |
+
+#### Posibles Errores
+
+| HTTP | Cuándo |
+|------|--------|
+| 401 | No autenticado — falta cookie de access token |
+| 500 | Usuario no encontrado en base de datos |
+
+---
+
 ## Configuración CORS
 
 | Setting | Valor |
@@ -543,7 +749,7 @@ Formato **RFC 7807 Problem Details**:
 
 ```json
 {
-  "type": "rate_limit_exceeded",
+  "type": "https://api.proactrip.com/errors/rate-limit-exceeded",
   "title": "Too Many Requests",
   "status": 429,
   "detail": "Demasiadas peticiones. Esperá 60 segundos antes de reintentar.",
@@ -582,6 +788,7 @@ Esto previene almacenamiento en caches compartidos o del navegador.
 | `POST /v1/auth/verify-email` | `no-store, private` | Datos de usuario + sesión |
 | `POST /v1/auth/logout` | `no-store, private` | Invalidación de sesión |
 | `POST /v1/auth/logout/all` | `no-store, private` | Invalidación masiva de sesiones |
+| `GET /v1/auth/me` | `no-store, private` | Datos de usuario sensibles |
 
 ---
 
@@ -636,8 +843,12 @@ Cada vez que el backend refresca un `__Secure-access_token`, rota también el `_
 | CSRF | `SameSite=Lax` + cookies automáticas |
 | Token Exposure in SSE | SSE authenticated via HttpOnly cookies (no tokens in URL or storage) |
 | Replay de refresh | Rotación continua + invalidación total ante reúso |
-| Third-party cookies | `Partitioned` (CHIPS) |
+| Third-party cookies | No se usa Partitioned (CHIPS) — SameSite=Lax + Domain=.proactrip.com es suficiente para subdominios |
 | Rate limiting abuse | Multi-tier con DragonflyDB + Lua scripts atómicos (IP, usuario autenticado, cookie anónima) |
+
+### Compartición de Cookies entre Subdominios
+
+Las cookies de autenticación se comparten entre `api.proactrip.com` y `app.proactrip.com` usando `Domain=.proactrip.com` con `SameSite=Lax`. NO se usa `Partitioned` (CHIPS) porque CHIPS está diseñado para iframes y cross-site embedding, no para subdominios. Con `Partitioned` + un `Domain` amplio, las cookies no se envían entre subdominios, rompiendo la autenticación cruzada.
 
 ### Headers de Seguridad
 

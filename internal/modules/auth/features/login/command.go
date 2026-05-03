@@ -1,5 +1,7 @@
 package login
 
+import "github.com/google/uuid"
+
 // DTOs del login según AUTH_API.md.
 
 type Command struct {
@@ -14,7 +16,8 @@ type Response struct {
 }
 
 type UserResponse struct {
-	Email         string `json:"email"`
-	EmailVerified bool   `json:"email_verified"`
-	RoleName      string `json:"role_name"`
+	ID            uuid.UUID `json:"id"`
+	Email         string    `json:"email"`
+	EmailVerified bool      `json:"email_verified"`
+	RoleName      string    `json:"role_name"`
 }

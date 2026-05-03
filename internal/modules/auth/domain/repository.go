@@ -35,3 +35,23 @@ type Role struct {
 	IsSystem    bool
 	Permissions []string
 }
+
+// ---------------------------------------------------------------------------
+// OAuthRepository — interfaz de persistencia para identidades de autenticación
+// Implementación: adapters/postgres/oauth_repository.go
+// ---------------------------------------------------------------------------
+
+// OAuthRepository define los métodos necesarios para persistencia de identidades OAuth.
+type OAuthRepository interface {
+	// CreateAuthIdentity crea una nueva identidad de autenticación externa.
+	CreateAuthIdentity(ctx context.Context, identity *AuthIdentity) error
+
+	// GetAuthIdentityByProvider obtiene una identidad por proveedor y provider_user_id.
+	GetAuthIdentityByProvider(ctx context.Context, providerCode, providerUserID string) (*AuthIdentity, error)
+
+	// GetAuthIdentitiesByUser obtiene todas las identidades vinculadas a un usuario.
+	GetAuthIdentitiesByUser(ctx context.Context, userID uuid.UUID) ([]*AuthIdentity, error)
+
+	// UpdateAuthIdentity actualiza una identidad de autenticación existente.
+	UpdateAuthIdentity(ctx context.Context, identity *AuthIdentity) error
+}

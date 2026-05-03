@@ -16,25 +16,27 @@ import (
 // Headers: X-Trace-Id, traceparent
 // =============================================================================
 
-// MapError convierte errores a HTTP responses con formato RFC 7807.
+// MapError convierte errores a HTTP responses con formato RFC 9457.
 // Maneja tanto errores del domain como errores ya convertidos a Problems.
 func MapError(c *echo.Context, err error) error {
 	if err == nil {
 		return nil
 	}
 
-	// 1. Check for shared Problem (RFC 7807) - ya convertido
+	// 1. Check for shared Problem (RFC 9457) - ya convertido
 	var sp *serrors.Problem
 	if errors.As(err, &sp) {
 		c.Response().Header().Set("X-Trace-Id", sp.TraceID)
+		c.Response().Header().Set(echo.HeaderContentType, "application/problem+json")
 		setTraceparentFromContext(c)
 		return c.JSON(sp.Status, sp)
 	}
 
-	// 2. Check for echo.HTTPError y convertir a RFC 7807
+	// 2. Check for echo.HTTPError y convertir a RFC 9457
 	if he, ok := errors.AsType[*echo.HTTPError](err); ok {
 		traceID := uuid.Must(uuid.NewV7()).String()
 		c.Response().Header().Set("X-Trace-Id", traceID)
+		c.Response().Header().Set(echo.HeaderContentType, "application/problem+json")
 		setTraceparentFromContext(c)
 
 		// Message es un string en Echo v5
@@ -76,6 +78,7 @@ func MapError(c *echo.Context, err error) error {
 	// 3. Check for registered domain error mappers (registry pattern)
 	if problem := serrors.MapDomainError(err); problem != nil {
 		c.Response().Header().Set("X-Trace-Id", problem.TraceID)
+		c.Response().Header().Set(echo.HeaderContentType, "application/problem+json")
 		setTraceparentFromContext(c)
 		return c.JSON(problem.Status, problem)
 	}
@@ -83,6 +86,7 @@ func MapError(c *echo.Context, err error) error {
 	// Fallback: generic internal error con trace_id
 	traceID := uuid.Must(uuid.NewV7()).String()
 	c.Response().Header().Set("X-Trace-Id", traceID)
+	c.Response().Header().Set(echo.HeaderContentType, "application/problem+json")
 	setTraceparentFromContext(c)
 	return c.JSON(http.StatusInternalServerError, &serrors.Problem{
 		Type:    serrors.ProblemTypeInternalError,

@@ -29,10 +29,18 @@ func generateSecureKey() (string, error) {
 	return hex.EncodeToString(bytes), nil
 }
 
-type ContextConfig struct {
-	OpenWeatherAPIKey    string
-	OpenWeatherCacheTTL  time.Duration
-	IpQueryBaseURL       string
+type EnvironmentConfig struct {
+	OpenWeatherAPIKey   string
+	OpenWeatherCacheTTL time.Duration
+	IpQueryBaseURL      string
+}
+
+// OAuthConfig contiene las credenciales OAuth por proveedor.
+// Google → backend → 302 redirect al frontend.
+type OAuthConfig struct {
+	GoogleClientID     string
+	GoogleClientSecret string
+	GoogleRedirectURL  string // URL donde Google redirige después de autorizar (backend callback)
 }
 
 // Configuración principal que agrupa todos los componentes de la aplicación
@@ -43,7 +51,8 @@ type Config struct {
 	Frontend       FrontendConfig
 	Security       SecurityConfig
 	Email          EmailConfig
-	Context        ContextConfig
+	Environment    EnvironmentConfig
+	OAuth          OAuthConfig               // Credenciales OAuth por proveedor
 	SerpAPIKey     string                    // API key de SerpAPI para búsqueda de vuelos
 	PasetoKeyBytes []byte                    // Bytes decodificados de PASETO_KEY (para uso directo)
 	RateLimit      *ratelimit.RateLimitConfig // Configuración de rate limiting
@@ -171,10 +180,15 @@ func Load() *Config {
 		Email: EmailConfig{
 			ResendAPIKey: getEnv("RESEND_API_KEY", ""),
 		},
-		Context: ContextConfig{
+		Environment: EnvironmentConfig{
 			OpenWeatherAPIKey:   getEnv("OPENWEATHER_API_KEY", ""),
-			OpenWeatherCacheTTL: getEnvDuration("CONTEXT_WEATHER_CACHE_TTL", 10*time.Minute),
+			OpenWeatherCacheTTL: getEnvDuration("ENVIRONMENT_WEATHER_CACHE_TTL", 10*time.Minute),
 			IpQueryBaseURL:      cmp.Or(getEnv("IPQUERY_BASE_URL", ""), "https://api.ipquery.io"),
+		},
+		OAuth: OAuthConfig{
+			GoogleClientID:     getEnv("GOOGLE_CLIENT_ID", ""),
+			GoogleClientSecret: getEnv("GOOGLE_CLIENT_SECRET", ""),
+			GoogleRedirectURL:  getEnv("GOOGLE_REDIRECT_URL", ""),
 		},
 		SerpAPIKey: getEnv("SERPAPI_KEY", ""),
 		RateLimit:  ratelimit.LoadRateLimitConfig(),

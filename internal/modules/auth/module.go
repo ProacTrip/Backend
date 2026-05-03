@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/ProacTrip/Backend/internal/config"
+	"github.com/ProacTrip/Backend/internal/modules/auth/adapters/oauth"
 	"github.com/ProacTrip/Backend/internal/modules/auth/adapters/password"
 	"github.com/ProacTrip/Backend/internal/modules/auth/adapters/postgres"
 	"github.com/ProacTrip/Backend/internal/modules/auth/adapters/token"
@@ -13,6 +15,9 @@ import (
 	"github.com/ProacTrip/Backend/internal/modules/auth/domain"
 	"github.com/ProacTrip/Backend/internal/modules/auth/features/login"
 	"github.com/ProacTrip/Backend/internal/modules/auth/features/logout"
+	oauthorize "github.com/ProacTrip/Backend/internal/modules/auth/features/oauth/authorize"
+	oacallback "github.com/ProacTrip/Backend/internal/modules/auth/features/oauth/callback"
+	"github.com/ProacTrip/Backend/internal/modules/auth/features/me"
 	"github.com/ProacTrip/Backend/internal/modules/auth/features/register"
 	"github.com/ProacTrip/Backend/internal/modules/auth/features/verify_email"
 	serrors "github.com/ProacTrip/Backend/internal/shared/errors"
@@ -25,12 +30,16 @@ import (
 
 type Module struct {
 	// Repository
-	Repository domain.UserRepository
+	Repository    domain.UserRepository
+	OAuthRepo     domain.OAuthRepository
 
 	// Adapters (implementaciones concretas)
 	PasswordHasher      *password.Hasher
 	TokenService        *token.PasetoService
 	VerificationService *verification.VerificationService
+
+	// OAuth
+	GoogleOAuth *oauth.GoogleOAuth
 
 	// Event Bus (for event-driven architecture)
 	EventPublisher *eventbus.EventBus
@@ -42,8 +51,15 @@ type Module struct {
 	VerifyEmailHandler func() *verify_email.Handler
 	Login              *login.UseCase
 	LoginHandler       *login.Handler
-	Logout        *logout.UseCase
-	LogoutHandler *logout.Handler
+	Logout             *logout.UseCase
+	LogoutHandler      *logout.Handler
+	MeHandler          *me.Handler
+
+	// OAuth Features
+	OAuthAuthorize *oauthorize.UseCase
+	OAuthAuthorizeHandler *oauthorize.Handler
+	OAuthCallback         *oacallback.UseCase
+	OAuthCallbackHandler  *oacallback.Handler
 }
 
 // Config contiene la configuración del módulo Auth
@@ -63,11 +79,16 @@ type Config struct {
 	EmailVerificationTTL time.Duration
 	PasswordResetTTL     time.Duration
 
+	// OAuth
+	OAuthConfig  config.OAuthConfig // credenciales OAuth de config.Config
+	FrontendURL  string             // URL del frontend para redirects (callback)
+	IsProduction bool
+
 	// Event Bus
 	EventPublisher *eventbus.EventBus
 
-	// Environment
-	IsProduction bool
+	// Environment (deprecated — usar IsProduction)
+	// IsProduction bool // movido arriba con FrontendURL
 }
 
 // NewModule crea e inicializa el módulo Auth con todas sus dependencias
@@ -76,6 +97,9 @@ func NewModule(cfg Config) (*Module, error) {
 
 	// 1. Inicializar Repository (PostgreSQL)
 	m.Repository = postgres.NewUserRepository(cfg.PostgresPool)
+
+	// 1b. Inicializar OAuth Repository (PostgreSQL)
+	m.OAuthRepo = postgres.NewOAuthRepository(cfg.PostgresPool)
 
 	// 2. Inicializar Password Hasher (Argon2id)
 	m.PasswordHasher = password.NewHasher()
@@ -104,6 +128,9 @@ func NewModule(cfg Config) (*Module, error) {
 
 	// 5. Event Publisher (Dragonfly Streams)
 	m.EventPublisher = cfg.EventPublisher
+
+	// 6. Inicializar GoogleOAuth adapter
+	m.GoogleOAuth = oauth.NewGoogleOAuth(cfg.OAuthConfig)
 
 	// ========== FEATURES ==========
 
@@ -145,10 +172,38 @@ func NewModule(cfg Config) (*Module, error) {
 	})
 	m.LogoutHandler = logout.NewHandler(m.Logout, cfg.IsProduction)
 
+	// Me (current user)
+	m.MeHandler = me.NewHandler(m.TokenService, m.Repository)
+
+	// ========== OAUTH FEATURES ==========
+
+	// Provider selector — resuelve el proveedor OAuth por código
+	providerSelector := newOAuthProviderSelector(m.GoogleOAuth)
+
+	// OAuth Authorize
+	m.OAuthAuthorize = oauthorize.NewUseCase(oauthorize.UseCaseDeps{
+		StateTokenSvc: m.TokenService,
+		ProviderSel:   providerSelector,
+		Dragonfly:     cfg.DragonflyClient,
+	})
+	m.OAuthAuthorizeHandler = oauthorize.NewHandler(m.OAuthAuthorize)
+
+	// OAuth Callback
+	m.OAuthCallback = oacallback.NewUseCase(oacallback.UseCaseDeps{
+		Repo:           m.Repository,
+		OAuthRepo:      m.OAuthRepo,
+		StateTokenSvc:  m.TokenService,
+		ProviderSel:    providerSelector,
+		TokenSvc:       m.TokenService,
+		Dragonfly:      cfg.DragonflyClient,
+		EventPublisher: m.EventPublisher,
+	})
+	m.OAuthCallbackHandler = oacallback.NewHandler(m.OAuthCallback, cfg.IsProduction, cfg.FrontendURL)
+
 	// Register domain error mappings
 	registerAuthErrorMappings()
 
-	slog.Info("Auth module initialized", "features", []string{"register", "verify_email", "login", "logout"})
+	slog.Info("Auth module initialized", "features", []string{"register", "verify_email", "login", "logout", "oauth_authorize", "oauth_callback"})
 
 	return m, nil
 }
@@ -177,6 +232,12 @@ func GeneratePasetoKey() ([]byte, error) {
 func registerAuthErrorMappings() {
 	serrors.RegisterDomainErrorMapper(func(err error) *serrors.Problem {
 		switch {
+		// Autenticación
+		case errors.Is(err, domain.ErrNotAuthenticated):
+			return serrors.ErrUnauthorized("se requiere autenticación", err)
+		case errors.Is(err, domain.ErrTokenInvalid):
+			return serrors.ErrUnauthorized("token inválido o expirado", err)
+
 		// Credenciales
 		case errors.Is(err, domain.ErrInvalidCredentials):
 			return serrors.ErrUnauthorized("Credenciales inválidas", err)
@@ -190,7 +251,7 @@ func registerAuthErrorMappings() {
 			return serrors.ErrUnauthorized("Email no verificado. Revisa tu bandeja de entrada.", err)
 		case errors.Is(err, domain.ErrUserAlreadyVerified):
 			return serrors.ErrConflict("El email ya fue verificado", err)
-		case errors.Is(err, domain.ErrInvalidVerificationToken), errors.Is(err, domain.ErrTokenInvalid):
+		case errors.Is(err, domain.ErrInvalidVerificationToken):
 			return serrors.ErrUnauthorized("Token de verificación inválido o expirado", err)
 		case errors.Is(err, domain.ErrTokenExpired):
 			return serrors.ErrUnauthorized("El token ha expirado. Solicita uno nuevo.", err)
@@ -235,11 +296,21 @@ func registerAuthErrorMappings() {
 		case errors.Is(err, domain.ErrMFARecoveryCodesExhausted):
 			return serrors.ErrBadRequest("Códigos de recuperación agotados", err)
 
-		// OAuth / Identidad
+		// OAuth
 		case errors.Is(err, domain.ErrOAuthProviderNotFound):
 			return serrors.ErrBadRequest("Proveedor OAuth no soportado", err)
-		case errors.Is(err, domain.ErrOAuthCodeInvalid), errors.Is(err, domain.ErrOAuthExchangeFailed):
+		case errors.Is(err, domain.ErrOAuthCodeMissing):
+			return serrors.ErrBadRequest("falta el parámetro code del proveedor OAuth", err)
+		case errors.Is(err, domain.ErrOAuthStateMissing):
+			return serrors.ErrBadRequest("falta el parámetro state del proveedor OAuth", err)
+		case errors.Is(err, domain.ErrOAuthStateInvalid):
+			return serrors.ErrBadRequest("state OAuth inválido o expirado", err)
+		case errors.Is(err, domain.ErrOAuthAccessDenied):
+			return serrors.ErrBadRequest("acceso OAuth denegado por el usuario", err)
+		case errors.Is(err, domain.ErrOAuthExchangeFailed):
 			return serrors.ErrUnauthorized("Error de autenticación OAuth", err)
+
+		// Identidad
 		case errors.Is(err, domain.ErrIdentityAlreadyExists):
 			return serrors.ErrConflict("Ya existe una cuenta vinculada a este proveedor", err)
 		case errors.Is(err, domain.ErrIdentityNotFound):
@@ -269,4 +340,32 @@ func DefaultTTLs() (access, refresh, emailVerif, passwordReset time.Duration) {
 	emailVerif = 24 * time.Hour
 	passwordReset = 1 * time.Hour
 	return
+}
+
+// =============================================================================
+// OAuth Provider Selector
+// =============================================================================
+
+// oauthProviderSelector implementa OAuthProviderSelector para resolver
+// proveedores por código (ej. "google" → GoogleOAuth).
+type oauthProviderSelector struct {
+	providers map[string]domain.OAuthProvider
+}
+
+func newOAuthProviderSelector(googleOAuth domain.OAuthProvider) *oauthProviderSelector {
+	return &oauthProviderSelector{
+		providers: map[string]domain.OAuthProvider{
+			"google": googleOAuth,
+		},
+	}
+}
+
+// GetProvider devuelve el proveedor OAuth por código.
+// Retorna ErrOAuthProviderNotFound si el proveedor no está soportado.
+func (s *oauthProviderSelector) GetProvider(code string) (domain.OAuthProvider, error) {
+	provider, ok := s.providers[code]
+	if !ok {
+		return nil, domain.ErrOAuthProviderNotFound
+	}
+	return provider, nil
 }

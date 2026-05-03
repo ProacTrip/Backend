@@ -91,21 +91,20 @@ vacation_rentals: true
 | `Secure` | `true` | Solo HTTPS en producción |
 | `SameSite` | `Lax` | Protección CSRF. Permite navegación top-level |
 | `Path` | `/` | Disponible en todas las rutas |
-| `Partitioned` | `true` | CHIPS — permite cookies en contextos de terceros sin third-party cookies |
 | `Domain` | `.proactrip.com` | Compartido entre subdominios (omitir si usas `__Host-`) |
 
 ### Formato de Producción
 
 ```
-Set-Cookie: __Secure-access_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=900; Partitioned
-Set-Cookie: __Secure-refresh_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=604800; Partitioned
+Set-Cookie: __Secure-access_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=900
+Set-Cookie: __Secure-refresh_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=604800
 ```
 
 ### Limpieza de Cookies (Logout)
 
 ```
-Set-Cookie: __Secure-access_token=; Max-Age=0; Path=/; Domain=.proactrip.com; Secure; Partitioned
-Set-Cookie: __Secure-refresh_token=; Max-Age=0; Path=/; Domain=.proactrip.com; Secure; Partitioned
+Set-Cookie: __Secure-access_token=; Max-Age=0; Path=/; Domain=.proactrip.com; Secure
+Set-Cookie: __Secure-refresh_token=; Max-Age=0; Path=/; Domain=.proactrip.com; Secure
 Clear-Site-Data: "cookies"
 ```
 
@@ -1719,7 +1718,7 @@ Cada vez que el backend refresca un `__Secure-access_token`, rota también el `_
 | CSRF | `SameSite=Lax` + cookies automáticas (sin `Authorization` manual) |
 | Token Exposure | Cookies HttpOnly — JavaScript no puede leerlas |
 | Replay de refresh | Rotación continua + invalidación total ante reúso |
-| Third-party cookies | `Partitioned` (CHIPS) |
+| Third-party cookies | No se usa Partitioned (CHIPS) — SameSite=Lax + Domain=.proactrip.com es suficiente para subdominios |
 | Rate limiting abuse | Multi-tier con DragonflyDB + Lua scripts atómicos (IP, usuario autenticado, cookie anónima) |
 | Cache poisoning | Clave de caché basada en hash de parámetros validados |
 

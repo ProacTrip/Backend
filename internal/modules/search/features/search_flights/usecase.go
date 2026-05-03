@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
-	"github.com/ProacTrip/Backend/internal/shared/encoding"
+	"github.com/ProacTrip/Backend/internal/shared/pagination"
 )
 
 // =============================================================================
@@ -221,7 +221,7 @@ func decodeCursorFromReq(cursor *string) int {
 	if cursor == nil || *cursor == "" {
 		return 0
 	}
-	offset, _ := encoding.DecodeCursor(*cursor)
+	offset, _ := pagination.DecodeCursor(*cursor)
 	return offset
 }
 
@@ -247,11 +247,11 @@ func buildMeta(offset, limit, total int) *domain.PaginationMeta {
 	}
 
 	if offset > 0 {
-		meta.PrevCursor = new(encoding.EncodeCursor(max(0, offset-limit)))
+		meta.PrevCursor = new(pagination.EncodeCursor(max(0, offset-limit)))
 	}
 
 	if meta.HasNext {
-		meta.NextCursor = new(encoding.EncodeCursor(offset + limit))
+		meta.NextCursor = new(pagination.EncodeCursor(offset + limit))
 	}
 
 	return meta

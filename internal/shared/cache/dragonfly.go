@@ -218,30 +218,4 @@ func (d *Dragonfly) Close() error {
 	return nil
 }
 
-// =============================================================================
-// Hashtag Utilities - CRÍTICO para evitar Global Lock en Lua scripts
-// =============================================================================
 
-// Convenção: usar {category}:identifier para que Dragonfly place las keys en el mismo shard
-const (
-	HashtagRateLimit = "{ratelimit}"
-	HashtagSession   = "{session}"
-	HashtagPerm      = "{perm}"
-	HashtagGeoIP     = "{geoip}"
-	HashtagSearch    = "{search}"
-)
-
-// RateLimitKey genera una key para rate limiting con hashtag correcto
-func RateLimitKey(identifier string) string {
-	return fmt.Sprintf("%s:%s", HashtagRateLimit, identifier)
-}
-
-// SessionKey genera una key para sesión
-func SessionKey(userID string) string {
-	return fmt.Sprintf("%s:user:%s", HashtagSession, userID)
-}
-
-// PermissionKey genera una key para permisos
-func PermissionKey(userID string) string {
-	return fmt.Sprintf("%s:%s", HashtagPerm, userID)
-}

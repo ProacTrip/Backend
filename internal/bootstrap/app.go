@@ -16,6 +16,7 @@ import (
 
 	"github.com/ProacTrip/Backend/internal/config"
 	authModule "github.com/ProacTrip/Backend/internal/modules/auth"
+	authmiddleware "github.com/ProacTrip/Backend/internal/modules/auth/adapters/middleware"
 	environmentModule "github.com/ProacTrip/Backend/internal/modules/environment"
 	notifModule "github.com/ProacTrip/Backend/internal/modules/notification"
 	searchModule "github.com/ProacTrip/Backend/internal/modules/search"
@@ -240,8 +241,10 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		RefreshTokenTTL:      7 * 24 * time.Hour,
 		EmailVerificationTTL: 24 * time.Hour,
 		PasswordResetTTL:     1 * time.Hour,
-		EventPublisher:       eventBus,
+		OAuthConfig:          cfg.OAuth,
+		FrontendURL:          cfg.Frontend.GetURL(),
 		IsProduction:         cfg.Server.Env == "production",
+		EventPublisher:       eventBus,
 	})
 	if err != nil {
 		return nil, err
@@ -305,15 +308,15 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 
 	// Environment Module (IP geolocation + weather)
 	environmentMod := environmentModule.NewModule(environmentModule.Config{
-		OpenWeatherAPIKey:   cfg.Context.OpenWeatherAPIKey,
-		OpenWeatherCacheTTL: cfg.Context.OpenWeatherCacheTTL,
-		IpQueryBaseURL:      cfg.Context.IpQueryBaseURL,
+		OpenWeatherAPIKey:   cfg.Environment.OpenWeatherAPIKey,
+		OpenWeatherCacheTTL: cfg.Environment.OpenWeatherCacheTTL,
+		IpQueryBaseURL:      cfg.Environment.IpQueryBaseURL,
 		Cache:               df,
 		RateLimiter:         rateLimiter,
 	})
 
 	// Auth Middleware (silent refresh token rotation)
-	authMiddleware := sharedmiddleware.NewAuthMiddleware(sharedmiddleware.AuthConfig{
+	authMiddleware := authmiddleware.NewAuthMiddleware(authmiddleware.AuthConfig{
 		IsProduction: cfg.Server.Env == "production",
 		TokenSvc:     authMod.TokenService,
 		UserRepo:     authMod.Repository,
@@ -374,6 +377,13 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	// Logout endpoints — auth middleware + authenticated rate limiting
 	authGroup.POST("/logout", authMod.LogoutHandler.Handle, authMiddleware.Handle, authRateLimitMW)
 	authGroup.POST("/logout/all", authMod.LogoutHandler.HandleAll, authMiddleware.Handle, authRateLimitMW)
+
+	// OAuth endpoints — públicas, sin auth middleware (obviamente)
+	authGroup.GET("/oauth/:provider", authMod.OAuthAuthorizeHandler.Handle)
+	authGroup.GET("/oauth/:provider/callback", authMod.OAuthCallbackHandler.Handle)
+
+	// Me endpoint — auth middleware + authenticated rate limiting
+	authGroup.GET("/me", authMod.MeHandler.Handle, authMiddleware.Handle, authRateLimitMW)
 
 	// Search routes: /v1/search (públicas con rate limit)
 	searchGroup := e.Group("/v1/search", anonRateLimitMW, serpapiRateLimitMW)

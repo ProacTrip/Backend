@@ -99,6 +99,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		AccessToken:  tokenPair.AccessToken,
 		RefreshToken: tokenPair.RefreshToken,
 		User: &UserResponse{
+			ID:            user.ID,
 			Email:         user.Email,
 			EmailVerified: true,
 			RoleName:      user.RoleName,

@@ -1,8 +1,8 @@
 package errors
 
 // =============================================================================
-// RFC 7807 Problem Details - Formato estándar de errores
-// https://www.rfc-editor.org/rfc/rfc7807
+// RFC 9457 Problem Details - Formato estándar de errores HTTP
+// https://www.rfc-editor.org/rfc/rfc9457
 // =============================================================================
 
 import (
@@ -11,22 +11,22 @@ import (
 	"github.com/google/uuid"
 )
 
-// ProblemType identifica categorías de errores (usa snake_case para consistencia)
+// ProblemType identifica categorías de errores como URIs absolutas (RFC 9457)
 type ProblemType string
 
 const (
 	// 4xx Client Errors
-	ProblemTypeBadRequest      ProblemType = "bad_request"
-	ProblemTypeUnauthorized    ProblemType = "unauthorized"
-	ProblemTypeForbidden       ProblemType = "forbidden"
-	ProblemTypeNotFound        ProblemType = "not_found"
-	ProblemTypeConflict        ProblemType = "conflict"
-	ProblemTypeValidationError ProblemType = "validation_error"
-	ProblemTypeTooManyRequests ProblemType = "rate_limit_exceeded"
+	ProblemTypeBadRequest      ProblemType = "https://api.proactrip.com/errors/bad-request"
+	ProblemTypeUnauthorized    ProblemType = "https://api.proactrip.com/errors/unauthorized"
+	ProblemTypeForbidden       ProblemType = "https://api.proactrip.com/errors/forbidden"
+	ProblemTypeNotFound        ProblemType = "https://api.proactrip.com/errors/not-found"
+	ProblemTypeConflict        ProblemType = "https://api.proactrip.com/errors/conflict"
+	ProblemTypeValidationError ProblemType = "https://api.proactrip.com/errors/validation-error"
+	ProblemTypeTooManyRequests ProblemType = "https://api.proactrip.com/errors/rate-limit-exceeded"
 
 	// 5xx Server Errors
-	ProblemTypeInternalError      ProblemType = "internal_error"
-	ProblemTypeServiceUnavailable ProblemType = "service_unavailable"
+	ProblemTypeInternalError      ProblemType = "https://api.proactrip.com/errors/internal-error"
+	ProblemTypeServiceUnavailable ProblemType = "https://api.proactrip.com/errors/service-unavailable"
 )
 
 // Problem es el formato RFC 7807 Problem Details

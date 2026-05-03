@@ -27,6 +27,9 @@ go.work.sum
 # Docker
 docker-compose.override.yml
 
+# Agent Teams
+.atl/
+
 # Docs (optional - uncomment if needed)
 # docs/
 # *.md

@@ -55,10 +55,10 @@ func extractOrGenerateAnonID(c *echo.Context, isProduction bool) string {
 
 	setCookieStr := func() string {
 		if isProduction {
-			return fmt.Sprintf("%s; Domain=%s; Partitioned",
+			return fmt.Sprintf("%s; Domain=%s",
 				cookie.String(), AnonCookieDomain)
 		}
-		return cookie.String() + "; Partitioned"
+		return cookie.String()
 	}()
 
 	c.Response().Header().Add("Set-Cookie", setCookieStr)

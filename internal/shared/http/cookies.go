@@ -31,7 +31,11 @@ const (
 // - HttpOnly: true (inaccesible vía JavaScript)
 // - Secure: true (solo HTTPS)
 // - SameSite: Lax (protección CSRF, permite OAuth callbacks)
-// - Partitioned: true (CHIPS - permite en contextos terceros)
+// NOTA: NO usamos Partitioned (CHIPS) porque:
+// 1. Proactrip usa subdominios (api.proactrip.com, app.proactrip.com)
+// 2. Partitioned es para iframes/cross-site embedding, no subdominios
+// 3. Con Partitioned + Domain amplio, las cookies no se envían entre subdominios
+// 4. SameSite=Lax + Domain=.proactrip.com es suficiente para compartir cookies
 // - Domain: .proactrip.com (compartido entre subdominios)
 func SetAuthCookiesFromTokens(c *echo.Context, accessToken, refreshToken string) error {
 	// Access token cookie - producción multi-subdominio
@@ -44,7 +48,6 @@ func SetAuthCookiesFromTokens(c *echo.Context, accessToken, refreshToken string)
 		HttpOnly: true,
 		Secure:   true,
 		SameSite: cookieSameSite,
-		// Partitioned: true // Go http.Cookie no tiene este campo directamente
 	}
 
 	// Refresh token cookie
@@ -59,10 +62,9 @@ func SetAuthCookiesFromTokens(c *echo.Context, accessToken, refreshToken string)
 		SameSite: cookieSameSite,
 	}
 
-	// Production: usar solo Header().Add() con el string completo incluyendo Partitioned
-	// NO usar SetCookie() porque enviaría duplicate Set-Cookie headers
-	c.Response().Header().Add("Set-Cookie", accessCookie.String()+"; Partitioned")
-	c.Response().Header().Add("Set-Cookie", refreshCookie.String()+"; Partitioned")
+	// Production: usar Header().Add() con el string completo
+	c.Response().Header().Add("Set-Cookie", accessCookie.String())
+	c.Response().Header().Add("Set-Cookie", refreshCookie.String())
 
 	return nil
 }
@@ -96,7 +98,7 @@ func SetAuthCookiesDev(c *echo.Context, accessToken, refreshToken string) error 
 }
 
 // ClearAuthCookies limpia las cookies de autenticación (logout)
-// Envía Clear-Site-Data header + cookies con Max-Age=0 y Partitioned
+// Envía Clear-Site-Data header + cookies con Max-Age=0
 func ClearAuthCookies(c *echo.Context) error {
 	accessCookie := &http.Cookie{
 		Name:     accessCookieName,
@@ -120,9 +122,37 @@ func ClearAuthCookies(c *echo.Context) error {
 		SameSite: cookieSameSite,
 	}
 
-	c.Response().Header().Add("Set-Cookie", accessCookie.String()+"; Partitioned")
-	c.Response().Header().Add("Set-Cookie", refreshCookie.String()+"; Partitioned")
+	c.Response().Header().Add("Set-Cookie", accessCookie.String())
+	c.Response().Header().Add("Set-Cookie", refreshCookie.String())
 	c.Response().Header().Set("Clear-Site-Data", `"cookies"`)
+
+	return nil
+}
+
+// ClearAuthCookiesDev is the dev-only variant clearing access_token/refresh_token
+// via c.SetCookie() with MaxAge=0, HttpOnly, SameSite=Lax. No Secure, no Clear-Site-Data header.
+// Matches SetAuthCookiesDev pattern.
+func ClearAuthCookiesDev(c *echo.Context) error {
+	accessCookie := &http.Cookie{
+		Name:     "access_token",
+		Value:    "",
+		Path:     cookiePath,
+		MaxAge:   0,
+		HttpOnly: true,
+		SameSite: cookieSameSite,
+	}
+
+	refreshCookie := &http.Cookie{
+		Name:     "refresh_token",
+		Value:    "",
+		Path:     cookiePath,
+		MaxAge:   0,
+		HttpOnly: true,
+		SameSite: cookieSameSite,
+	}
+
+	c.SetCookie(accessCookie)
+	c.SetCookie(refreshCookie)
 
 	return nil
 }

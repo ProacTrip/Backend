@@ -1,6 +1,6 @@
 // Utilidades para codificar/decodificar cursores de paginación.
 // Convierte offset numérico a string opaco base64 para API.
-package encoding
+package pagination
 
 import (
 	"encoding/base64"
