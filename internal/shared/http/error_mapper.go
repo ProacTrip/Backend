@@ -12,7 +12,7 @@ import (
 
 // =============================================================================
 // Error Mapper - Mapea errores a respuestas HTTP
-// Formato: RFC 7807 Problem Details
+// Formato: RFC 9457 Problem Details
 // Headers: X-Trace-Id, traceparent
 // =============================================================================
 

@@ -56,6 +56,10 @@ type Config struct {
 	SerpAPIKey     string                    // API key de SerpAPI para búsqueda de vuelos
 	PasetoKeyBytes []byte                    // Bytes decodificados de PASETO_KEY (para uso directo)
 	RateLimit      *ratelimit.RateLimitConfig // Configuración de rate limiting
+	DefaultCurrency   string                 // Moneda por defecto para usuarios sin geoip (DEFAULT_CURRENCY env)
+	DefaultLanguage   string                 // Idioma por defecto para usuarios sin geoip (DEFAULT_LANGUAGE env)
+	DefaultCountryCode string               // País por defecto para búsquedas sin geoip (DEFAULT_COUNTRY_CODE env)
+	AI                AIConfig               // Configuración del intérprete AI
 }
 
 // Configuración de la base de datos PostgreSQL
@@ -112,6 +116,16 @@ type SecurityConfig struct {
 // Configuración de email (Resend API)
 type EmailConfig struct {
 	ResendAPIKey string
+}
+
+// AIConfig contiene la configuración del intérprete de lenguaje natural.
+// Soporta múltiples proveedores (deepseek, ollama, openai, etc.).
+type AIConfig struct {
+	Provider string        // "deepseek" | "ollama" | "openai"
+	BaseURL  string        // API endpoint base
+	APIKey   string        // API key (omit for ollama local)
+	Model    string        // e.g. "deepseek-chat", "dolphin-mistral"
+	Timeout  time.Duration // timeout for AI requests
 }
 
 // ValidateSecureConfig valida las claves criptográficas al arrancar
@@ -191,7 +205,17 @@ func Load() *Config {
 			GoogleRedirectURL:  getEnv("GOOGLE_REDIRECT_URL", ""),
 		},
 		SerpAPIKey: getEnv("SERPAPI_KEY", ""),
-		RateLimit:  ratelimit.LoadRateLimitConfig(),
+		RateLimit:       ratelimit.LoadRateLimitConfig(),
+		DefaultCurrency:    getEnv("DEFAULT_CURRENCY", "EUR"),
+		DefaultLanguage:    getEnv("DEFAULT_LANGUAGE", "es"),
+		DefaultCountryCode: getEnv("DEFAULT_COUNTRY_CODE", "AR"),
+		AI: AIConfig{
+			Provider: getEnv("AI_PROVIDER", ""),
+			BaseURL:  getEnv("AI_BASE_URL", ""),
+			APIKey:   getEnv("AI_API_KEY", ""),
+			Model:    getEnv("AI_MODEL", ""),
+			Timeout:  getEnvDuration("AI_TIMEOUT", 30*time.Second),
+		},
 	}
 }
 

@@ -59,6 +59,7 @@ type UseCase struct {
 	hasher         PasswordHasher
 	tokenSvc       TokenService
 	eventPublisher EventPublisher
+	envResolver    EnvironmentResolver
 }
 
 type UseCaseDeps struct {
@@ -67,6 +68,7 @@ type UseCaseDeps struct {
 	Hasher         PasswordHasher
 	TokenSvc       TokenService
 	EventPublisher EventPublisher
+	EnvResolver    EnvironmentResolver // nil-safe: when nil, env defaults are skipped
 }
 
 func NewUseCase(deps UseCaseDeps) *UseCase {
@@ -76,19 +78,40 @@ func NewUseCase(deps UseCaseDeps) *UseCase {
 		hasher:         deps.Hasher,
 		tokenSvc:       deps.TokenSvc,
 		eventPublisher: deps.EventPublisher,
+		envResolver:    deps.EnvResolver,
 	}
 }
 
 // Execute procesa el registro de usuario:
-// 1. Valida email y password
-// 2. Verifica que el email no exista
-// 3. Hashea la contraseña
-// 4. Obtiene el rol "client" por defecto
-// 5. Crea el usuario en DB
-// 6. Genera verification token y auth tokens
-// 7. Publica evento para notification module
+// 1. Resuelve defaults de entorno via IP (si hay resolver e IP)
+// 2. Valida email y password
+// 3. Verifica que el email no exista
+// 4. Hashea la contraseña
+// 5. Obtiene el rol "client" por defecto
+// 6. Crea el usuario en DB
+// 7. Genera verification token y auth tokens
+// 8. Publica evento con env defaults para notification module
 // Retorna tokens para Set-Cookie segun AUTH_API.md
-func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) {
+func (uc *UseCase) Execute(ctx context.Context, cmd Command, envIP string) (*Response, error) {
+	// Resolver defaults de entorno desde la IP del usuario.
+	// Estos defaults son opcionales: si el resolver falla o no existe,
+	// la registración continúa normalmente sin campos de entorno en el evento.
+	var envLanguage, envCurrency, envCountry, envTimezone string
+	if uc.envResolver != nil && envIP != "" {
+		currency, language, country, tz, err := uc.envResolver.ResolveDefaults(ctx, envIP)
+		if err != nil {
+			slog.WarnContext(ctx, "env resolver failed, continuing without env defaults",
+				slog.String("env_ip", envIP),
+				slog.Any("error", err),
+			)
+		} else {
+			envLanguage = language
+			envCurrency = currency
+			envCountry = country
+			envTimezone = tz
+		}
+	}
+
 	// 1. Validar email
 	if _, err := mail.ParseAddress(cmd.Email); err != nil {
 		return nil, domain.ErrInvalidEmail
@@ -160,15 +183,33 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 			user.ID.String(),
 			user.Email,
 			verificationToken,
+			envLanguage,
+			envCurrency,
+			envCountry,
+			envTimezone,
 		)
 		streamName := eventbus.StreamName("auth.user.registered")
 		flatPayload := map[string]interface{}{
 			"event_type":         "user_registered",
+			"event_version":      int64(1),
 			"aggregate_id":       user.ID.String(),
 			"timestamp":          event.Timestamp,
 			"user_id":            user.ID.String(),
 			"email":              user.Email,
 			"verification_token": verificationToken,
+		}
+		// Env defaults — solo incluidos cuando están resueltos (omitempty equivalente en map)
+		if envLanguage != "" {
+			flatPayload["language_code"] = envLanguage
+		}
+		if envCurrency != "" {
+			flatPayload["currency_code"] = envCurrency
+		}
+		if envCountry != "" {
+			flatPayload["country_code"] = envCountry
+		}
+		if envTimezone != "" {
+			flatPayload["timezone_name"] = envTimezone
 		}
 		_, _ = uc.eventPublisher.Publish(ctx, streamName, flatPayload)
 	}

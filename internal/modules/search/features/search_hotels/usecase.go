@@ -1,5 +1,5 @@
 // Lógica de negocio para búsqueda de hoteles y vacation rentals.
-// Orquesta cache y proveedor externo SerpAPI.
+// Orquesta cache y proveedor externo via HotelProvider interface.
 package search_hotels
 
 import (
@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ProacTrip/Backend/internal/modules/search/adapters/serpapi"
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
-	"github.com/ProacTrip/Backend/internal/modules/search/domain/hotelmapping"
+	"github.com/ProacTrip/Backend/internal/shared/ratelimit"
+	serrors "github.com/ProacTrip/Backend/internal/shared/errors"
 )
 
 // =============================================================================
@@ -31,25 +31,28 @@ type Cache interface {
 
 // UseCase orchestrates hotel search with caching.
 type UseCase struct {
-	serpapiAdapter *serpapi.Adapter
-	cache          Cache
-	searchTTL      time.Duration
-	wg             sync.WaitGroup
+	hotelProvider domain.HotelProvider
+	cache         Cache
+	rateLimiter   *ratelimit.RateLimiter
+	searchTTL     time.Duration
+	wg            sync.WaitGroup
 }
 
 // UseCaseDeps bundles dependencies for the search hotels use case.
 type UseCaseDeps struct {
-	SerpapiAdapter *serpapi.Adapter
-	Cache          Cache
-	SearchTTL      time.Duration
+	Provider    domain.HotelProvider
+	Cache       Cache
+	RateLimiter *ratelimit.RateLimiter
+	SearchTTL   time.Duration
 }
 
 // NewUseCase creates a new search hotels use case.
 func NewUseCase(deps UseCaseDeps) *UseCase {
 	return &UseCase{
-		serpapiAdapter: deps.SerpapiAdapter,
-		cache:          deps.Cache,
-		searchTTL:      deps.SearchTTL,
+		hotelProvider: deps.Provider,
+		cache:         deps.Cache,
+		rateLimiter:   deps.RateLimiter,
+		searchTTL:     deps.SearchTTL,
 	}
 }
 
@@ -69,105 +72,85 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		return nil, err
 	}
 
-	// 2. Build SerpAPI params
-	adapterParams := cmdToAdapterParams(cmd)
+	// 2. Convert to domain request
+	domainReq := cmd.ToDomain()
 
-	// 3. Generate cache key (exclude page_token from key — different pages are different requests)
-	cacheKey := generateCacheKey(adapterParams)
-
-	slog.DebugContext(ctx, "checking cache for hotel search",
-		slog.String("key", cacheKey),
-		slog.String("query", cmd.Query),
-	)
-
-	// 4. Try cache
-	if cached, err := uc.cache.Get(ctx, cacheKey); err == nil && cached != "" {
-		var resp Response
-		if err := json.Unmarshal([]byte(cached), &resp); err == nil {
-			slog.InfoContext(ctx, "hotel search cache hit",
-				slog.String("key", cacheKey),
-				slog.String("query", cmd.Query),
-				slog.Int("property_count", len(resp.Properties)),
-			)
-			slog.DebugContext(ctx, "cache HIT, returning cached response",
-				slog.String("key", cacheKey),
-				slog.Int("property_count", len(resp.Properties)),
-				slog.Bool("from_cache", true),
-			)
-			resp.FromCache = true
-			cachedAt := time.Now().UTC().Format(time.RFC3339)
-			resp.CachedAt = &cachedAt
-			return &resp, nil
-		}
-		slog.WarnContext(ctx, "hotel search cache unmarshal failed, falling through to provider",
-			slog.String("key", cacheKey),
-			slog.Any("err", err),
-		)
-	} else {
-		slog.InfoContext(ctx, "hotel search cache miss, calling SerpAPI",
-			slog.String("key", cacheKey),
-			slog.String("query", cmd.Query),
-			slog.String("check_in", cmd.CheckInDate),
-			slog.String("check_out", cmd.CheckOutDate),
-			slog.Int("adults", cmd.Adults),
-		)
-		slog.DebugContext(ctx, "cache MISS, will call SerpAPI",
-			slog.String("key", cacheKey),
-			slog.String("query", cmd.Query),
-		)
+	// 3. Generate cache key (skip cache entirely when page_token is non-empty — different pages need fresh data)
+	skipCache := domainReq.PageToken != ""
+	var cacheKey string
+	if !skipCache {
+		cacheKey = generateCacheKey(domainReq)
 	}
 
-	// 5. Cache miss — call SerpAPI
-	slog.InfoContext(ctx, "hotel search calling SerpAPI",
+	// 4. Try cache (only for first page, not paginated requests)
+	if !skipCache {
+		slog.DebugContext(ctx, "checking cache for hotel search",
+			slog.String("key", cacheKey),
+			slog.String("query", cmd.Query),
+		)
+
+		if cached, err := uc.cache.Get(ctx, cacheKey); err == nil && cached != "" {
+			var resp Response
+			if err := json.Unmarshal([]byte(cached), &resp); err == nil {
+				slog.InfoContext(ctx, "hotel search cache hit",
+					slog.String("key", cacheKey),
+					slog.String("query", cmd.Query),
+					slog.Int("property_count", len(resp.Properties)),
+				)
+				resp.FromCache = true
+				// CachedAt is already stored in the cache entry — don't recompute
+				return &resp, nil
+			}
+			slog.WarnContext(ctx, "hotel search cache unmarshal failed, falling through to provider",
+				slog.String("key", cacheKey),
+				slog.Any("err", err),
+			)
+		} else {
+			slog.InfoContext(ctx, "hotel search cache miss, calling provider",
+				slog.String("key", cacheKey),
+				slog.String("query", cmd.Query),
+				slog.String("check_in", cmd.CheckInDate),
+				slog.String("check_out", cmd.CheckOutDate),
+				slog.Int("adults", cmd.Adults),
+			)
+		}
+	}
+
+	// 5. Rate limit check — after cache miss, before provider call
+
+	// 5. Rate limit check — after cache miss, before provider call
+	if uc.rateLimiter != nil {
+		if result, err := uc.rateLimiter.ProviderAllow(ctx, "serpapi"); err != nil {
+			slog.ErrorContext(ctx, "rate limit check failed", slog.Any("error", err))
+			return nil, serrors.ErrInternalError("rate limit service unavailable", err)
+		} else if !result.Allowed {
+			return nil, domain.ErrRateLimitExceeded
+		}
+	}
+
+	// 6. Cache miss — call provider via HotelProvider interface
+	slog.InfoContext(ctx, "hotel search calling provider",
 		slog.String("query", cmd.Query),
 		slog.String("check_in", cmd.CheckInDate),
 		slog.String("check_out", cmd.CheckOutDate),
 	)
-	slog.DebugContext(ctx, "calling SerpAPI adapter",
-		slog.String("query", cmd.Query),
-		slog.String("check_in", cmd.CheckInDate),
-		slog.String("check_out", cmd.CheckOutDate),
-		slog.Int("adults", cmd.Adults),
-	)
-	serpResp, err := uc.serpapiAdapter.SearchHotels(ctx, adapterParams)
+	resp, err := uc.hotelProvider.SearchHotels(ctx, domainReq)
 	if err != nil {
-		slog.ErrorContext(ctx, "hotel search SerpAPI call failed",
+		slog.ErrorContext(ctx, "hotel search provider call failed",
 			slog.String("query", cmd.Query),
 			slog.Any("error", err),
 		)
 		return nil, fmt.Errorf("hotel search: %w", err)
 	}
 
-	slog.InfoContext(ctx, "hotel search SerpAPI response received",
+	slog.InfoContext(ctx, "hotel search provider response received",
 		slog.String("query", cmd.Query),
-		slog.Int("properties_count", len(serpResp.Properties)),
-		slog.Int("non_matching_properties_count", len(serpResp.NonMatchingProperties)),
-		slog.String("results_state", serpResp.SearchInformation.HotelsResultsState),
-	)
-	slog.DebugContext(ctx, "SerpAPI response received",
-		slog.String("query", cmd.Query),
-		slog.Int("properties_count", len(serpResp.Properties)),
-		slog.Int("non_matching_count", len(serpResp.NonMatchingProperties)),
-		slog.String("results_state", serpResp.SearchInformation.HotelsResultsState),
-	)
-
-	// 6. Map SerpAPI response to our Response
-	resp := mapSearchResponse(serpResp, cmd.VacationRentals, cmd.Currency)
-
-	slog.InfoContext(ctx, "hotel search mapped response",
-		slog.String("query", cmd.Query),
-		slog.Int("property_count", len(resp.Properties)),
+		slog.Int("properties_count", len(resp.Properties)),
 		slog.String("results_state", resp.ResultsState),
 	)
-	slog.DebugContext(ctx, "mapped response, saving to cache",
-		slog.String("query", cmd.Query),
-		slog.Int("property_count", len(resp.Properties)),
-		slog.String("results_state", resp.ResultsState),
-		slog.String("cache_key", cacheKey),
-		slog.Duration("ttl", uc.searchTTL),
-	)
 
-	// 7. Save to cache async — fire-and-forget with WaitGroup tracking
+	// 7. Set cached_at timestamp and save to cache async — fire-and-forget with WaitGroup tracking
+	resp.CachedAt = new(time.Now().UTC().Format(time.RFC3339))
 	bgCtx := context.WithoutCancel(ctx)
 	uc.wg.Go(func() {
 		data, err := json.Marshal(resp)
@@ -190,185 +173,27 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 }
 
 // =============================================================================
-// Mapeo Command → SerpAPI Params
-// =============================================================================
-
-func cmdToAdapterParams(cmd Command) serpapi.HotelSearchParams {
-	return serpapi.HotelSearchParams{
-		Query:            cmd.Query,
-		GL:               cmd.GL,
-		HL:               cmd.HL,
-		Currency:         cmd.Currency,
-		CheckInDate:      cmd.CheckInDate,
-		CheckOutDate:     cmd.CheckOutDate,
-		Adults:           cmd.Adults,
-		Children:         cmd.Children,
-		ChildrenAges:     cmd.ChildrenAges,
-		SortBy:           cmd.SortBy,
-		MinPrice:         cmd.MinPrice,
-		MaxPrice:         cmd.MaxPrice,
-		PropertyTypes:    cmd.PropertyTypes,
-		Amenities:        cmd.Amenities,
-		VacationRentals:  cmd.VacationRentals,
-		Rating:           cmd.Rating,
-		HotelClasses:     cmd.HotelClasses,
-		Brands:           cmd.Brands,
-		FreeCancellation: cmd.FreeCancellation,
-		SpecialOffers:    cmd.SpecialOffers,
-		EcoCertified:     cmd.EcoCertified,
-		Bedrooms:         cmd.Bedrooms,
-		Bathrooms:        cmd.Bathrooms,
-		PageToken:        cmd.PageToken,
-	}
-}
-
-// =============================================================================
 // Generación de Clave de Cache
 // =============================================================================
 
-// generateCacheKey builds a deterministic cache key from adapter params.
+// generateCacheKey builds a deterministic cache key from the domain request.
 // Excludes page_token from the hash (different pages are different cache keys).
-func generateCacheKey(params serpapi.HotelSearchParams) string {
+func generateCacheKey(req domain.HotelSearchRequest) string {
 	// Create a copy without page_token for the cache key
-	params.PageToken = ""
-	raw, err := json.Marshal(params)
+	req.PageToken = ""
+	raw, err := json.Marshal(req)
 	if err != nil {
 		// Fallback: limited key
 		return fmt.Sprintf("hotels:v2:fallback:%s:%s:%s:%s",
-			params.Query, params.CheckInDate, params.CheckOutDate, params.Currency)
+			req.Query, req.CheckInDate, req.CheckOutDate, ptrStr(req.Currency))
 	}
 	return "hotels:v2:" + domain.HashKey(raw)
 }
 
-// =============================================================================
-// Mapeo SerpAPI Response → Feature Response
-// =============================================================================
-
-func mapSearchResponse(raw *serpapi.HotelSearchResponse, vacationRentals bool, currency string) *Response {
-	resp := &Response{
-		ResultsState: "matching",
+// ptrStr returns the dereferenced string, or "" if nil.
+func ptrStr(s *string) string {
+	if s == nil {
+		return ""
 	}
-
-	// Determine type
-	if vacationRentals {
-		resp.Type = "vacation_rentals"
-	} else {
-		resp.Type = "hotels"
-	}
-
-	// Map results state
-	if raw.SearchInformation.HotelsResultsState == "Non-matching results only" {
-		resp.ResultsState = "non_matching_only"
-		// Non-matching results only — use near matches as properties
-		resp.Properties = mapProperties(raw.NonMatchingProperties, currency)
-	} else {
-		// Matching results — use the main properties array
-		resp.Properties = mapProperties(raw.Properties, currency)
-	}
-
-	// Map brands
-	resp.Brands = mapBrands(raw.Brands)
-
-	return resp
-}
-
-func mapProperties(serpProps []serpapi.HotelProperty, currency string) []Property {
-	if serpProps == nil {
-		return nil
-	}
-	props := make([]Property, 0, len(serpProps))
-	for _, sp := range serpProps {
-		props = append(props, mapProperty(sp, currency))
-	}
-	return props
-}
-
-func mapProperty(sp serpapi.HotelProperty, currency string) Property {
-	p := Property{
-		ID:          sp.PropertyToken,
-		Type:        sp.Type,
-		Name:        sp.Name,
-		Description: sp.Description,
-		BookingURL:  sp.Link,
-		GPS: GPS{
-			Lat: sp.GPSCoordinates.Latitude,
-			Lng: sp.GPSCoordinates.Longitude,
-		},
-		HotelClass: sp.ExtractedHotelClass,
-		CheckIn:    sp.CheckInTime,
-		CheckOut:   sp.CheckOutTime,
-		Rating: Rating{
-			Overall:  sp.OverallRating,
-			Location: sp.LocationRating,
-		},
-		TotalReviews: sp.Reviews,
-		Price: Price{
-			Currency: currency,
-			PerNight: hotelmapping.MapPriceDetail(sp.RatePerNight),
-			Total:    hotelmapping.MapPriceDetail(sp.TotalRate),
-		},
-		Images:       hotelmapping.MapImages(sp.Images),
-		Amenities:    sp.Amenities,
-		NearbyPlaces: hotelmapping.MapNearbyPlaces(sp.NearbyPlaces),
-		// New SerpAPI fields
-		Ratings:          hotelmapping.MapRatings(sp.Ratings),
-		ReviewsBreakdown: hotelmapping.MapReviewsBreakdown(sp.ReviewsBreakdown),
-		Prices:           mapPrices(sp.Prices),
-		// Hotel-only
-		FreeCancellation: sp.FreeCancellation,
-		SpecialOffer:     sp.SpecialOffer,
-		EcoCertified:     sp.EcoCertified,
-	}
-
-	// VR-only
-	if sp.Type == "vacation_rental" {
-		p.ExcludedAmenities = sp.ExcludedAmenities
-		p.Capacity = hotelmapping.MapCapacity([]serpapi.HotelEssentialKV(sp.EssentialInfo))
-	}
-
-	return p
-}
-
-func mapBrands(serpBrands []serpapi.HotelBrand) []Brand {
-	if serpBrands == nil {
-		return nil
-	}
-	brands := make([]Brand, len(serpBrands))
-	for i, sb := range serpBrands {
-		b := Brand{
-			ID:   sb.ID,
-			Name: sb.Name,
-		}
-		if len(sb.Chains) > 0 {
-			b.Chains = make([]Chain, len(sb.Chains))
-			for j, sc := range sb.Chains {
-				b.Chains[j] = Chain{
-					ID:   sc.ID,
-					Name: sc.Name,
-				}
-			}
-		}
-		brands[i] = b
-	}
-	return brands
-}
-
-func mapPrices(serpPrices []serpapi.HotelPriceSource) []HotelPriceSourceResponse {
-	if serpPrices == nil {
-		return nil
-	}
-	out := make([]HotelPriceSourceResponse, len(serpPrices))
-	for i, p := range serpPrices {
-		ps := HotelPriceSourceResponse{
-			Source:    p.Source,
-			Logo:      p.Logo,
-			NumGuests: p.NumGuests,
-		}
-		if p.RatePerNight != nil {
-			pd := hotelmapping.MapPriceDetail(*p.RatePerNight)
-			ps.RatePerNight = &pd
-		}
-		out[i] = ps
-	}
-	return out
+	return *s
 }

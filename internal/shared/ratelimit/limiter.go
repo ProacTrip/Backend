@@ -99,7 +99,7 @@ func (rl *RateLimiter) AnonymousAllow(ctx context.Context, cookieID string) (Rat
 func (rl *RateLimiter) ProviderAllow(ctx context.Context, provider string) (RateLimitResult, error) {
 	pl, ok := rl.cfg.Providers[provider]
 	if !ok {
-		return RateLimitResult{Allowed: true}, fmt.Errorf("unknown provider: %s", provider)
+		return RateLimitResult{Allowed: false}, fmt.Errorf("unknown provider: %s", provider)
 	}
 
 	var windowKey string

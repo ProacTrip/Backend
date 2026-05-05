@@ -71,7 +71,7 @@ internal/
     ├── crypto/           # Cryptographic utilities
     ├── database/         # PostgreSQL connection pool (multi-DB pool manager)
     ├── encoding/         # Cursor-based pagination
-    ├── errors/           # RFC 7807 Problem JSON types
+    ├── errors/           # RFC 9457 Problem JSON types
     ├── eventbus/         # Event-driven architecture (Dragonfly Streams)
     ├── http/             # Cookie helpers, error mapping
     ├── middleware/       # Security headers (CSP, HSTS, X-Frame-Options)
@@ -115,7 +115,7 @@ POST /v1/auth/login
     ▼                         ▼
 ┌─────────────────┐   ┌─────────────────┐
 │  JSON Response  │   │  Event Bus      │
-│ (RFC 7807 errs) │   │  user.registered│
+│ (RFC 9457 errs) │   │  user.registered│
 └─────────────────┘   │  → notification │
                       │    consumer     │
                       └─────────────────┘
@@ -164,7 +164,7 @@ register()                     │                      │
 | Hotel Search | [docs/search_hotels_api.md](docs/search_hotels_api.md) | `/v1/search` |
 | Environment  | [docs/ENVIRONMENT_API.md](docs/ENVIRONMENT_API.md) | `/v1/environment` |
 
-All errors follow **RFC 7807 Problem JSON** format with `type`, `title`, `status`, `detail`, and `instance` fields.
+All errors follow **RFC 9457 Problem JSON** format with `type`, `title`, `status`, `detail`, `instance`, and `trace_id` fields.
 
 ### Auth Endpoints
 

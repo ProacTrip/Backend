@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
+	"github.com/ProacTrip/Backend/internal/shared/ratelimit"
+	serrors "github.com/ProacTrip/Backend/internal/shared/errors"
 )
 
 // =============================================================================
@@ -29,25 +31,28 @@ type Cache interface {
 
 // UseCase orchestrates flight details retrieval with caching.
 type UseCase struct {
-	provider   domain.FlightProvider
-	cache      Cache
-	detailsTTL time.Duration
-	wg         sync.WaitGroup
+	provider    domain.FlightProvider
+	cache       Cache
+	rateLimiter *ratelimit.RateLimiter
+	detailsTTL  time.Duration
+	wg          sync.WaitGroup
 }
 
 // UseCaseDeps bundles dependencies for the flight details use case.
 type UseCaseDeps struct {
-	Provider   domain.FlightProvider
-	Cache      Cache
-	DetailsTTL time.Duration
+	Provider    domain.FlightProvider
+	Cache       Cache
+	RateLimiter *ratelimit.RateLimiter
+	DetailsTTL  time.Duration
 }
 
 // NewUseCase creates a new flight details use case.
 func NewUseCase(deps UseCaseDeps) *UseCase {
 	return &UseCase{
-		provider:   deps.Provider,
-		cache:      deps.Cache,
-		detailsTTL: deps.DetailsTTL,
+		provider:    deps.Provider,
+		cache:       deps.Cache,
+		rateLimiter: deps.RateLimiter,
+		detailsTTL:  deps.DetailsTTL,
 	}
 }
 
@@ -85,13 +90,34 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		)
 	}
 
-	// 4. Cache miss — call provider
-	resp, err := uc.provider.GetDetails(ctx, cmd.BookingToken, cmd.Adults, cmd.Currency, cmd.Departure, cmd.Arrival, cmd.OutboundDate, cmd.ReturnDate)
+	// 4. Rate limit check — after cache miss, before provider call
+	if uc.rateLimiter != nil {
+		if result, err := uc.rateLimiter.ProviderAllow(ctx, "serpapi"); err != nil {
+			slog.ErrorContext(ctx, "rate limit check failed", slog.Any("error", err))
+			return nil, serrors.ErrInternalError("rate limit service unavailable", err)
+		} else if !result.Allowed {
+			return nil, domain.ErrRateLimitExceeded
+		}
+	}
+
+	// 5. Cache miss — call provider
+	providerReq := domain.FlightDetailsRequest{
+		BookingToken: cmd.BookingToken,
+		Adults:       cmd.Adults,
+		DepartureID:  cmd.Departure,
+		ArrivalID:    cmd.Arrival,
+		OutboundDate: cmd.OutboundDate,
+		ReturnDate:   cmd.ReturnDate,
+		GL:           ptrStr(cmd.GL),
+		HL:           ptrStr(cmd.HL),
+		Currency:     ptrStr(cmd.Currency),
+	}
+	resp, err := uc.provider.GetFlightDetails(ctx, providerReq)
 	if err != nil {
 		return nil, fmt.Errorf("flight details: %w", err)
 	}
 
-	// 5. Save to cache async — fire-and-forget with WaitGroup tracking
+	// 6. Save to cache async — fire-and-forget with WaitGroup tracking
 	bgCtx := context.WithoutCancel(ctx)
 	uc.wg.Go(func() {
 		data, err := json.Marshal(resp)
@@ -125,7 +151,15 @@ func generateCacheKey(cmd Command) string {
 	raw, err := json.Marshal(cmd)
 	if err != nil {
 		// Fallback: limited key (should never happen).
-		return fmt.Sprintf("details:fallback:%s:%s", cmd.BookingToken, cmd.Currency)
+		return fmt.Sprintf("details:fallback:%s:%s", cmd.BookingToken, ptrStr(cmd.Currency))
 	}
 	return "details:" + domain.HashKey(raw)
+}
+
+// ptrStr returns the dereferenced string, or "" if nil.
+func ptrStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

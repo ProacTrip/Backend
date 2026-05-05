@@ -94,6 +94,57 @@ func (m *AuthMiddleware) Handle(next echo.HandlerFunc) echo.HandlerFunc {
 	}
 }
 
+// Optional returns a middleware that extracts user claims when valid credentials
+// are present, but NEVER rejects the request. Invalid/expired tokens are silently
+// ignored — the request proceeds as anonymous with no user_claims in context.
+//
+// Use this on public endpoints that behave differently for authenticated users
+// (e.g., higher rate limits, profile preferences, conversation persistence)
+// but must remain accessible to anonymous users.
+func (m *AuthMiddleware) Optional() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			accessName, refreshName := m.cookieNames()
+
+			accessCookie, _ := c.Cookie(accessName)
+			refreshCookie, _ := c.Cookie(refreshName)
+
+			// No cookies → anonymous, pass through
+			if accessCookie == nil && refreshCookie == nil {
+				return next(c)
+			}
+
+			// Try access token first
+			if accessCookie != nil && accessCookie.Value != "" {
+				claims, err := m.config.TokenSvc.ValidateAccessToken(c.Request().Context(), accessCookie.Value)
+				if err == nil {
+					c.Set("user_claims", claims)
+					return next(c)
+				}
+			}
+
+			// Try refresh token rotation
+			if refreshCookie != nil && refreshCookie.Value != "" {
+				claims, newAccess, newRefresh, err := m.config.TokenSvc.ValidateAndRotateRefresh(c.Request().Context(), refreshCookie.Value)
+				if err == nil {
+					if m.config.IsProduction {
+						sharedhttp.SetAuthCookiesFromTokens(c, newAccess, newRefresh)
+					} else {
+						sharedhttp.SetAuthCookiesDev(c, newAccess, newRefresh)
+					}
+					c.Set("user_claims", claims)
+					return next(c)
+				}
+			}
+
+			// Token validation failed — proceed as anonymous.
+			// Do NOT clear cookies (they belong to other routes).
+			// Do NOT return 401 (this is a public endpoint).
+			return next(c)
+		}
+	}
+}
+
 func (m *AuthMiddleware) cookieNames() (string, string) {
 	if m.config.IsProduction {
 		return accessCookieNameProd, refreshCookieNameProd

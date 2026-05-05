@@ -26,7 +26,7 @@ import (
 )
 
 // Punto de entrada del módulo Auth.
-// Inicializa dependencias y mapea errores de dominio a respuestas HTTP RFC 7807.
+// Inicializa dependencias y mapea errores de dominio a respuestas HTTP RFC 9457.
 
 type Module struct {
 	// Repository
@@ -87,8 +87,11 @@ type Config struct {
 	// Event Bus
 	EventPublisher *eventbus.EventBus
 
-	// Environment (deprecated — usar IsProduction)
-	// IsProduction bool // movido arriba con FrontendURL
+	// EnvResolver resolves currency/language/country/timezone from client IP.
+	// Nil-safe: when nil, registration proceeds without env defaults in the event.
+	// Implementation lives in the environment module; injected here to avoid
+	// auth → environment coupling.
+	EnvResolver register.EnvironmentResolver
 }
 
 // NewModule crea e inicializa el módulo Auth con todas sus dependencias
@@ -141,6 +144,7 @@ func NewModule(cfg Config) (*Module, error) {
 		Hasher:         m.PasswordHasher,
 		TokenSvc:       m.TokenService,
 		EventPublisher: m.EventPublisher,
+		EnvResolver:    cfg.EnvResolver,
 	})
 	// Register Handler con soporte de idempotency (Dragonfly)
 	m.RegisterHandler = func() *register.Handler {
@@ -228,7 +232,7 @@ func GeneratePasetoKey() ([]byte, error) {
 }
 
 // registerAuthErrorMappings registra los mapeos de errores de dominio auth
-// a respuestas HTTP RFC 7807.
+// a respuestas HTTP RFC 9457.
 func registerAuthErrorMappings() {
 	serrors.RegisterDomainErrorMapper(func(err error) *serrors.Problem {
 		switch {

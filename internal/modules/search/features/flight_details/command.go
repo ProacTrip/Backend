@@ -20,9 +20,9 @@ type Command struct {
 	Arrival      string `json:"arrival"`
 	OutboundDate string `json:"outbound_date"`
 	ReturnDate   string `json:"return_date"`
-	GL           string `json:"gl"`
-	HL           string `json:"hl"`
-	Currency     string `json:"currency"`
+	GL           *string `json:"gl,omitzero"`
+	HL           *string `json:"hl,omitzero"`
+	Currency     *string `json:"currency,omitzero"`
 }
 
 // =============================================================================

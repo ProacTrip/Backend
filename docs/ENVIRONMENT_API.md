@@ -115,7 +115,7 @@ Todos los ejemplos usan `{base_url}` como placeholder.
 
 ## Errores Estándar
 
-Formato **RFC 7807 Problem Details**:
+Formato **RFC 9457 Problem Details**:
 
 ```json
 {

@@ -5,10 +5,13 @@ package upsert_profile
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/ProacTrip/Backend/internal/modules/user/domain"
+	"github.com/ProacTrip/Backend/internal/modules/user/features/shared"
 )
 
 // =============================================================================
@@ -19,18 +22,36 @@ import (
 
 type UseCase struct {
 	repo domain.UserRepository
+	rdb  *redis.Client // optional — for populating profile prefs cache
 }
 
 func NewUseCase(repo domain.UserRepository) *UseCase {
 	return &UseCase{repo: repo}
 }
 
-// Execute creates or updates a user profile.
+// NewUseCaseWithCache creates a UseCase that also populates the Dragonfly
+// profile prefs cache after profile creation/update.
+func NewUseCaseWithCache(repo domain.UserRepository, rdb *redis.Client) *UseCase {
+	return &UseCase{repo: repo, rdb: rdb}
+}
+
+// Execute creates or updates a user profile with optional environment-based prefs.
 // El perfil se crea basado en user_id (FK al dominio Auth)
 // El Upsert usa user_id como clave de conflicto
-func (uc *UseCase) Execute(ctx context.Context, userID uuid.UUID) error {
+func (uc *UseCase) Execute(ctx context.Context, userID uuid.UUID, envPrefs ...domain.EnvPrefs) error {
 	// Crear nuevo perfil con los defaults de la migración
 	profile := domain.NewUserProfile(userID)
+
+	// Override with environment prefs if provided
+	if len(envPrefs) > 0 && envPrefs[0].HasAny() {
+		prefs := envPrefs[0]
+		profile.SetPreferences(
+			new(prefs.TimezoneName),
+			new(prefs.LanguageCode),
+			new(prefs.CurrencyCode),
+			false,
+		)
+	}
 
 	// Upsert - creates if not exists, updates if exists
 	// El ON CONFLICT usa user_id (no id)
@@ -38,7 +59,35 @@ func (uc *UseCase) Execute(ctx context.Context, userID uuid.UUID) error {
 		return fmt.Errorf("upsert profile: %w", err)
 	}
 
+	// Populate Dragonfly profile prefs cache (best-effort, non-blocking)
+	uc.populatePrefsCache(ctx, userID, profile)
+
 	return nil
+}
+
+// populatePrefsCache stores profile preferences in Dragonfly for future search
+// default resolution. This is fire-and-forget — failures are logged but never
+// bubble up to the caller.
+func (uc *UseCase) populatePrefsCache(ctx context.Context, userID uuid.UUID, profile *domain.UserProfile) {
+	if uc.rdb == nil {
+		return
+	}
+
+	// Use WithoutCancel so the cache write survives handler context cancellation
+	bgCtx := context.WithoutCancel(ctx)
+
+	if err := shared.SetProfilePrefs(bgCtx, uc.rdb,
+		userID.String(),
+		profile.CurrencyCode,
+		profile.LanguageCode,
+		"", // country_code not stored in profile
+		profile.TimezoneName,
+	); err != nil {
+		slog.WarnContext(bgCtx, "populate profile prefs cache failed",
+			slog.String("user_id", userID.String()),
+			slog.String("error", err.Error()),
+		)
+	}
 }
 
 // HandleVerification handles the email verification event

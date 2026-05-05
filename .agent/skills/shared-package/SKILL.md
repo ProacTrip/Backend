@@ -15,7 +15,7 @@ Create or update packages in `internal/shared/` following Proactrip conventions.
 ## Questions to Ask (ALWAYS ask first — never generate code without answers)
 
 1. **¿Qué problema resuelve este paquete en `internal/shared/`?**
-   - Is it: cache (Dragonfly), encoding (base64, hex), HTTP middleware, error mapping RFC 7807, pagination (cursor/offset), validation, security headers, rate limiting, context utilities, event types, database connection pool, crypto utilities?
+   - Is it: cache (Dragonfly), encoding (base64, hex), HTTP middleware, error mapping RFC 9457, pagination (cursor/offset), validation, security headers, rate limiting, context utilities, event types, database connection pool, crypto utilities?
    - This determines which existing patterns to follow and which skills to load conditionally.
 
 2. **¿Es un paquete NUEVO o estás agregando a uno EXISTENTE?**
@@ -48,7 +48,7 @@ Create or update packages in `internal/shared/` following Proactrip conventions.
 |---|------|----------|
 | S1 | MUST NOT import any `modules/` package — no `internal/modules/` anywhere in imports | CRITICAL |
 | S2 | Public API MUST have godoc comments on ALL exported symbols (types, functions, methods, constants, variables) | CRITICAL |
-| S3 | MUST follow existing shared package conventions: RFC 7807 for errors, `pool PgxPool` for DB, `echo.MiddlewareFunc` for middleware, `context.Context` first param | MUST |
+| S3 | MUST follow existing shared package conventions: RFC 9457 for errors, `pool PgxPool` for DB, `echo.MiddlewareFunc` for middleware, `context.Context` first param | MUST |
 | S4 | Test files MUST use `package {name}_test` (black-box testing) — never `package {name}` for test files | MUST |
 
 ### Global Architecture Rules (R1-R9)
@@ -58,7 +58,7 @@ Create or update packages in `internal/shared/` following Proactrip conventions.
 | R1 | Modules communicate only via injected interfaces or published events | MUST |
 | R2 | NEVER import another module's `features/` or `adapters/` | MUST NOT |
 | R3 | `shared/` packages MUST NOT import from `modules/` | MUST NOT |
-| R4 | Domain errors → `RegisterDomainErrorMapper()` → RFC 7807 Problem JSON | MUST |
+| R4 | Domain errors → `RegisterDomainErrorMapper()` → RFC 9457 Problem JSON | MUST |
 | R5 | Manual constructor injection, zero globals, zero singletons | MUST |
 | R6 | Always generate `_test.go` alongside code | MUST |
 | R7 | Go 1.26 patterns: `omitzero`, `new(expr)`, `errors.AsType`, `uuid.Must(uuid.NewV7())` | MUST |
@@ -522,7 +522,7 @@ func Test{{.FunctionName}}(t *testing.T) {
 }
 ```
 
-### Template 4: Error Types (RFC 7807 Pattern)
+### Template 4: Error Types (RFC 9457 Pattern)
 
 Use this when creating a shared errors/errors-like package. Follows the exact pattern from `internal/shared/errors/errors.go`.
 
@@ -530,8 +530,8 @@ Use this when creating a shared errors/errors-like package. Follows the exact pa
 package errors
 
 // =============================================================================
-// RFC 7807 Problem Details — Formato estándar de errores
-// https://www.rfc-editor.org/rfc/rfc7807
+// RFC 9457 Problem Details — Formato estándar de errores
+// https://www.rfc-editor.org/rfc/rfc9457
 // =============================================================================
 
 import (
@@ -550,7 +550,7 @@ const (
 	{{end}}
 )
 
-// Problem es el formato RFC 7807 Problem Details.
+// Problem es el formato RFC 9457 Problem Details.
 type Problem struct {
 	Type     ProblemType `json:"type"`
 	Title    string      `json:"title"`

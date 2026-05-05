@@ -28,7 +28,7 @@ When the user needs to create or update a `module.go` file — the DI compositio
 | R1 | Module Isolation | CRITICAL | Modules communicate via injected interfaces or events |
 | R2 | No Cross-Module Imports | CRITICAL | NEVER import another module's `features/` or `adapters/` |
 | R3 | Shared Boundaries | CRITICAL | `shared/` packages MUST NOT import from `modules/` |
-| R4 | Error Flow | MUST | Domain errors → RegisterDomainErrorMapper() → RFC 7807 Problem JSON |
+| R4 | Error Flow | MUST | Domain errors → RegisterDomainErrorMapper() → RFC 9457 Problem JSON |
 | R5 | DI | MUST | Manual constructor injection, zero globals, zero singletons |
 | R6 | Testing | MUST | Generate `_test.go` when entity has behavior methods |
 | R7 | Go 1.26 | MUST | `omitzero`, `new(expr)`, `errors.AsType`, `uuid.Must(uuid.NewV7())` |

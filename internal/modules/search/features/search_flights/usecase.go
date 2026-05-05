@@ -14,6 +14,8 @@ import (
 
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
 	"github.com/ProacTrip/Backend/internal/shared/pagination"
+	"github.com/ProacTrip/Backend/internal/shared/ratelimit"
+	serrors "github.com/ProacTrip/Backend/internal/shared/errors"
 )
 
 // =============================================================================
@@ -32,28 +34,31 @@ type Cache interface {
 
 // UseCase orchestrates flight search with caching and history recording.
 type UseCase struct {
-	provider  domain.FlightProvider
-	cache     Cache
-	repo      domain.SearchHistoryRepository
-	searchTTL time.Duration
-	wg        sync.WaitGroup
+	provider    domain.FlightProvider
+	cache       Cache
+	repo        domain.SearchHistoryRepository
+	rateLimiter *ratelimit.RateLimiter
+	searchTTL   time.Duration
+	wg          sync.WaitGroup
 }
 
 // UseCaseDeps bundles dependencies for the search flights use case.
 type UseCaseDeps struct {
-	Provider  domain.FlightProvider
-	Cache     Cache
-	Repo      domain.SearchHistoryRepository
-	SearchTTL time.Duration
+	Provider    domain.FlightProvider
+	Cache       Cache
+	Repo        domain.SearchHistoryRepository
+	RateLimiter *ratelimit.RateLimiter
+	SearchTTL   time.Duration
 }
 
 // NewUseCase creates a new search flights use case.
 func NewUseCase(deps UseCaseDeps) *UseCase {
 	return &UseCase{
-		provider:  deps.Provider,
-		cache:     deps.Cache,
-		repo:      deps.Repo,
-		searchTTL: deps.SearchTTL,
+		provider:    deps.Provider,
+		cache:       deps.Cache,
+		repo:        deps.Repo,
+		rateLimiter: deps.RateLimiter,
+		searchTTL:   deps.SearchTTL,
 	}
 }
 
@@ -117,13 +122,23 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		)
 	}
 
-	// 5. Call provider
-	resp, err := uc.provider.Search(ctx, domainReq)
+	// 5. Rate limit check — after cache miss, before provider call
+	if uc.rateLimiter != nil {
+		if result, err := uc.rateLimiter.ProviderAllow(ctx, "serpapi"); err != nil {
+			slog.ErrorContext(ctx, "rate limit check failed", slog.Any("error", err))
+			return nil, serrors.ErrInternalError("rate limit service unavailable", err)
+		} else if !result.Allowed {
+			return nil, domain.ErrRateLimitExceeded
+		}
+	}
+
+	// 6. Call provider
+	resp, err := uc.provider.SearchFlights(ctx, domainReq)
 	if err != nil {
 		return nil, fmt.Errorf("flight search: %w", err)
 	}
 
-	// 6. Cache the full (uncut) response — marshal before slicing to avoid data race
+	// 7. Cache the full (uncut) response — marshal before slicing to avoid data race
 	fullData, marshalErr := json.Marshal(resp)
 	if marshalErr != nil {
 		slog.ErrorContext(ctx, "cache marshal failed",
@@ -142,7 +157,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		})
 	}
 
-	// 7. Save to search history async — fire-and-forget (full count before slicing)
+	// 8. Save to search history async — fire-and-forget (full count before slicing)
 	resultCount := len(resp.BestFlights) + len(resp.OtherFlights)
 	elapsedMs := int(time.Since(start).Milliseconds())
 	saveCtx := context.WithoutCancel(ctx)
@@ -151,7 +166,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 			new(elapsedMs), cmd.IPAddress, cmd.UserAgent)
 	})
 
-	// 8. Slice response and build pagination meta
+	// 9. Slice response and build pagination meta
 	maxLen := max(len(resp.BestFlights), len(resp.OtherFlights))
 	offset := decodeCursorFromReq(domainReq.Cursor)
 	limit := domainReq.Limit
@@ -170,13 +185,16 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 // Uses blake3 hash of the JSON-serialized request for fixed-size keys regardless
 // of how many filter params are present.
 func generateCacheKey(req domain.FlightSearchRequest) string {
+	// Cursor is a pagination detail — different pages share the same provider response.
+	// Exclude it from cache key so pages hit the same cached result (like hotels excludes page_token).
+	req.Cursor = nil
 	raw, err := json.Marshal(req)
 	if err != nil {
-		return fmt.Sprintf("search:fallback:%s:%s:%s:%s:%s",
+		return fmt.Sprintf("flights:fallback:%s:%s:%s:%s:%s",
 			req.TripType, req.Departure, req.Arrival,
 			req.OutboundDate, req.ReturnDate)
 	}
-	return "search:" + domain.HashKey(raw)
+	return "flights:" + domain.HashKey(raw)
 }
 
 // =============================================================================
@@ -199,6 +217,7 @@ func (uc *UseCase) saveSearchHistory(ctx context.Context, req domain.FlightSearc
 		CacheHit:        cacheHit,
 		IPAddress:       ipAddress,
 		UserAgent:       userAgent,
+		SessionID:        uuid.Must(uuid.NewV7()).String(), // anonymous searches need a session_id for the identity constraint
 		CreatedAt:       time.Now(),
 	}
 

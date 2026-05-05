@@ -7,11 +7,17 @@ import (
 	"github.com/ProacTrip/Backend/internal/modules/environment/adapters/ipquery"
 	"github.com/ProacTrip/Backend/internal/modules/environment/adapters/openweather"
 	"github.com/ProacTrip/Backend/internal/modules/environment/features/get_environment"
+	"github.com/ProacTrip/Backend/internal/modules/environment/features/shared"
 	"github.com/ProacTrip/Backend/internal/shared/ratelimit"
 )
 
 type Module struct {
 	GetEnvironmentHandler *get_environment.Handler
+
+	// EnvironmentResolver adapts the geo-IP location provider for auth module's
+	// registration use case (resolves currency/language/country/timezone from IP).
+	// Exported so bootstrap can wire it into the auth module config.
+	EnvironmentResolver *shared.EnvironmentResolverAdapter
 }
 
 type Config struct {
@@ -46,14 +52,19 @@ func NewModule(cfg Config) *Module {
 
 	getEnvironmentHandler := get_environment.NewHandler(getEnvironmentUC)
 
+	// Create the resolver adapter for auth registration wiring.
+	// The adapter uses the same IP query client (no extra HTTP calls).
+	resolverAdapter := shared.NewEnvironmentResolverAdapter(ipQueryClient)
+
 	slog.Info("Environment module initialized",
-		"features", []string{"get_environment"},
+		"features", []string{"get_environment", "environment_resolver"},
 		"ipquery_url", cfg.IpQueryBaseURL,
 		"weather_cache_ttl", cfg.OpenWeatherCacheTTL,
 	)
 
 	return &Module{
 		GetEnvironmentHandler: getEnvironmentHandler,
+		EnvironmentResolver:    resolverAdapter,
 	}
 }
 

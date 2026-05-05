@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
+
+	"github.com/ProacTrip/Backend/internal/modules/search/domain"
 )
 
 // =============================================================================
@@ -17,10 +19,17 @@ import (
 
 // HotelSearchResponse is the top-level SerpAPI google_hotels search response.
 type HotelSearchResponse struct {
-	SearchInformation     HotelSearchInfo  `json:"search_information"`
-	Properties            []HotelProperty  `json:"properties"`
-	NonMatchingProperties []HotelProperty  `json:"non_matching_properties"`
-	Brands                []HotelBrand     `json:"brands"`
+	SearchInformation     HotelSearchInfo    `json:"search_information"`
+	Properties            []HotelProperty    `json:"properties"`
+	NonMatchingProperties []HotelProperty    `json:"non_matching_properties"`
+	Brands                []HotelBrand       `json:"brands"`
+	SerpapiPagination     *SerpapiPagination `json:"serpapi_pagination"`
+}
+
+// SerpapiPagination holds the pagination metadata from SerpAPI's raw response.
+type SerpapiPagination struct {
+	Next          string `json:"next"`
+	NextPageToken string `json:"next_page_token"`
 }
 
 // HotelSearchInfo contains search metadata from SerpAPI hotel response.
@@ -36,7 +45,7 @@ type HotelProperty struct {
 	Link              string           `json:"link,omitempty"`
 	PropertyToken     string           `json:"property_token"`
 	GPSCoordinates    HotelGPS         `json:"gps_coordinates"`
-	HotelClass        *string          `json:"hotel_class,omitempty"`
+	// HotelClass *string is the raw string class from SerpAPI — unused, mapped via ExtractedHotelClass
 	ExtractedHotelClass *int            `json:"extracted_hotel_class,omitempty"`
 	CheckInTime       string           `json:"check_in_time,omitempty"`
 	CheckOutTime      string           `json:"check_out_time,omitempty"`
@@ -321,8 +330,8 @@ type HotelDetailsParams struct {
 // SearchHotels — búsqueda de hoteles y vacation rentals
 // =============================================================================
 
-// SearchHotels performs a hotel/vacation rental search via SerpAPI and returns raw DTOs.
-func (a *Adapter) SearchHotels(ctx context.Context, params HotelSearchParams) (*HotelSearchResponse, error) {
+// FetchHotels performs a hotel/vacation rental search via SerpAPI and returns raw DTOs.
+func (a *Adapter) FetchHotels(ctx context.Context, params HotelSearchParams) (*HotelSearchResponse, error) {
 	serpParams := buildHotelSearchParams(params)
 	raw, err := a.client.SearchHotels(ctx, serpParams)
 	if err != nil {
@@ -337,8 +346,8 @@ func (a *Adapter) SearchHotels(ctx context.Context, params HotelSearchParams) (*
 	return dto, nil
 }
 
-// HotelDetails retrieves full details for a single property via SerpAPI.
-func (a *Adapter) HotelDetails(ctx context.Context, params HotelDetailsParams) (*HotelPropertyDetail, error) {
+// FetchHotelDetail retrieves full details for a single property via SerpAPI.
+func (a *Adapter) FetchHotelDetail(ctx context.Context, params HotelDetailsParams) (*HotelPropertyDetail, error) {
 	serpParams := buildHotelDetailsParams(params)
 	raw, err := a.client.GetHotelDetails(ctx, serpParams)
 	if err != nil {
@@ -351,6 +360,363 @@ func (a *Adapter) HotelDetails(ctx context.Context, params HotelDetailsParams) (
 	}
 
 	return dto, nil
+}
+
+// =============================================================================
+// HotelProvider — interface satisfaction (hotel search + details)
+// =============================================================================
+
+// SearchHotels satisfies domain.HotelProvider.
+// Converts a domain request to SerpAPI params, calls the internal SerpAPI logic,
+// and maps the raw response to domain types.
+func (a *Adapter) SearchHotels(ctx context.Context, req domain.HotelSearchRequest) (*domain.HotelSearchResponse, error) {
+	params := domainRequestToHotelParams(req)
+	serpResp, err := a.FetchHotels(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	return mapHotelSearchDomainResponse(serpResp, ptrStrDomain(req.Currency), req.VacationRentals), nil
+}
+
+// GetHotelDetails satisfies domain.HotelProvider.
+func (a *Adapter) GetHotelDetails(ctx context.Context, req domain.HotelDetailsRequest) (*domain.HotelDetailsResponse, error) {
+	params := domainRequestToDetailsParams(req)
+	detail, err := a.FetchHotelDetail(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	return mapHotelDetailsDomainResponse(detail, ptrStrDomain(req.Currency)), nil
+}
+
+// =============================================================================
+// Mapeo Domain → SerpAPI Params
+// =============================================================================
+
+func domainRequestToHotelParams(req domain.HotelSearchRequest) HotelSearchParams {
+	return HotelSearchParams{
+		Query:            req.Query,
+		GL:               ptrStrDomain(req.GL),
+		HL:               ptrStrDomain(req.HL),
+		Currency:         ptrStrDomain(req.Currency),
+		CheckInDate:      req.CheckInDate,
+		CheckOutDate:     req.CheckOutDate,
+		Adults:           req.Adults,
+		Children:         req.Children,
+		ChildrenAges:     req.ChildrenAges,
+		SortBy:           req.SortBy,
+		MinPrice:         req.MinPrice,
+		MaxPrice:         req.MaxPrice,
+		PropertyTypes:    req.PropertyTypes,
+		Amenities:        req.Amenities,
+		VacationRentals:  req.VacationRentals,
+		Rating:           req.Rating,
+		HotelClasses:     req.HotelClasses,
+		Brands:           req.Brands,
+		FreeCancellation: req.FreeCancellation,
+		SpecialOffers:    req.SpecialOffers,
+		EcoCertified:     req.EcoCertified,
+		Bedrooms:         req.Bedrooms,
+		Bathrooms:        req.Bathrooms,
+		PageToken:        req.PageToken,
+	}
+}
+
+func domainRequestToDetailsParams(req domain.HotelDetailsRequest) HotelDetailsParams {
+	return HotelDetailsParams{
+		PropertyToken:   req.ID,
+		CheckInDate:     req.CheckInDate,
+		CheckOutDate:    req.CheckOutDate,
+		Adults:          req.Adults,
+		Children:        req.Children,
+		ChildrenAges:    req.ChildrenAges,
+		GL:              ptrStrDomain(req.GL),
+		HL:              ptrStrDomain(req.HL),
+		Currency:        ptrStrDomain(req.Currency),
+		VacationRentals: req.VacationRentals,
+	}
+}
+
+// =============================================================================
+// Mapeo SerpAPI DTO → Domain Response (Search)
+// =============================================================================
+
+func mapHotelSearchDomainResponse(serpResp *HotelSearchResponse, currency string, vacationRentals bool) *domain.HotelSearchResponse {
+	respType := "hotels"
+	if vacationRentals {
+		respType = "vacation_rentals"
+	}
+	resp := &domain.HotelSearchResponse{
+		Type:         respType,
+		ResultsState: "matching",
+	}
+
+	if serpResp.SearchInformation.HotelsResultsState == "Non-matching results only" {
+		resp.ResultsState = "non_matching_only"
+		resp.Properties = mapHotelProperties(serpResp.NonMatchingProperties, currency)
+	} else {
+		resp.Properties = mapHotelProperties(serpResp.Properties, currency)
+	}
+
+	resp.Brands = mapHotelBrands(serpResp.Brands)
+
+	// Map pagination from SerpAPI's serpapi_pagination block
+	if serpResp.SerpapiPagination != nil {
+		resp.Pagination = domain.HotelPagination{
+			NextToken: serpResp.SerpapiPagination.NextPageToken,
+			HasMore:   serpResp.SerpapiPagination.Next != "" || serpResp.SerpapiPagination.NextPageToken != "",
+		}
+	}
+
+	resp.FromCache = false
+
+	return resp
+}
+
+func mapHotelProperties(serpProps []HotelProperty, currency string) []domain.HotelProperty {
+	if serpProps == nil {
+		return nil
+	}
+	props := make([]domain.HotelProperty, 0, len(serpProps))
+	for _, sp := range serpProps {
+		props = append(props, mapSingleHotelProperty(sp, currency))
+	}
+	return props
+}
+
+func mapSingleHotelProperty(sp HotelProperty, currency string) domain.HotelProperty {
+	p := domain.HotelProperty{
+		ID:          sp.PropertyToken,
+		Type:        sp.Type,
+		Name:        sp.Name,
+		Description: sp.Description,
+		BookingURL:  sp.Link,
+		GPS: domain.GPS{
+			Lat: sp.GPSCoordinates.Latitude,
+			Lng: sp.GPSCoordinates.Longitude,
+		},
+		HotelClass: sp.ExtractedHotelClass,
+		CheckIn:    sp.CheckInTime,
+		CheckOut:   sp.CheckOutTime,
+		Rating: domain.HotelPropertyRating{
+			Overall:  sp.OverallRating,
+			Location: sp.LocationRating,
+		},
+		TotalReviews: sp.Reviews,
+		Price: domain.HotelPrice{
+			Currency: currency,
+			PerNight: MapPriceDetail(sp.RatePerNight),
+			Total:    MapPriceDetail(sp.TotalRate),
+		},
+		Images:            MapImages(sp.Images),
+		Amenities:         sp.Amenities,
+		NearbyPlaces:      MapNearbyPlaces(sp.NearbyPlaces),
+		Ratings:           MapRatings(sp.Ratings),
+		ReviewsBreakdown:  MapReviewsBreakdown(sp.ReviewsBreakdown),
+		Prices:            mapHotelPrices(sp.Prices),
+		FreeCancellation:  sp.FreeCancellation,
+		SpecialOffer:      sp.SpecialOffer,
+		EcoCertified:      sp.EcoCertified,
+	}
+
+	if sp.Type == "vacation_rental" {
+		p.ExcludedAmenities = sp.ExcludedAmenities
+		p.Capacity = MapCapacity([]HotelEssentialKV(sp.EssentialInfo))
+	}
+
+	return p
+}
+
+func mapHotelBrands(serpBrands []HotelBrand) []domain.HotelBrand {
+	if serpBrands == nil {
+		return nil
+	}
+	brands := make([]domain.HotelBrand, len(serpBrands))
+	for i, sb := range serpBrands {
+		b := domain.HotelBrand{
+			ID:   sb.ID,
+			Name: sb.Name,
+		}
+		if len(sb.Chains) > 0 {
+			b.Chains = make([]domain.HotelBrandChain, len(sb.Chains))
+			for j, sc := range sb.Chains {
+				b.Chains[j] = domain.HotelBrandChain{
+					ID:   sc.ID,
+					Name: sc.Name,
+				}
+			}
+		}
+		brands[i] = b
+	}
+	return brands
+}
+
+func mapHotelPrices(serpPrices []HotelPriceSource) []domain.HotelPriceSource {
+	if serpPrices == nil {
+		return nil
+	}
+	out := make([]domain.HotelPriceSource, len(serpPrices))
+	for i, p := range serpPrices {
+		ps := domain.HotelPriceSource{
+			Source:    p.Source,
+			Logo:      p.Logo,
+			NumGuests: p.NumGuests,
+		}
+		if p.RatePerNight != nil {
+			pd := MapPriceDetail(*p.RatePerNight)
+			ps.RatePerNight = &pd
+		}
+		out[i] = ps
+	}
+	return out
+}
+
+// =============================================================================
+// Mapeo SerpAPI DTO → Domain Response (Details)
+// =============================================================================
+
+func mapHotelDetailsDomainResponse(detail *HotelPropertyDetail, currency string) *domain.HotelDetailsResponse {
+	p := detail.HotelProperty
+	resp := &domain.HotelDetailsResponse{
+		ID:          p.PropertyToken,
+		Type:        p.Type,
+		Name:        p.Name,
+		Description: p.Description,
+		BookingURL:  p.Link,
+		GPS: domain.GPS{
+			Lat: p.GPSCoordinates.Latitude,
+			Lng: p.GPSCoordinates.Longitude,
+		},
+		HotelClass: p.ExtractedHotelClass,
+		CheckIn:    p.CheckInTime,
+		CheckOut:   p.CheckOutTime,
+		Rating: domain.HotelPropertyRating{
+			Overall:  p.OverallRating,
+			Location: p.LocationRating,
+		},
+		TotalReviews: p.Reviews,
+		Price: domain.HotelPrice{
+			Currency: currency,
+			PerNight: MapPriceDetail(p.RatePerNight),
+			Total:    MapPriceDetail(p.TotalRate),
+		},
+		Images:            MapImages(p.Images),
+		Amenities:         p.Amenities,
+		NearbyPlaces:      MapNearbyPlaces(p.NearbyPlaces),
+		Address:           detail.Address,
+		DirectionsURL:     detail.DirectionsURL,
+		PriceRange:        mapTypicalPriceRange(detail.TypicalPriceRange, currency),
+		ExternalReviews:   mapExternalReviews(detail.OtherReviews),
+		HealthAndSafety:   mapHealthAndSafety(detail.HealthAndSafety),
+		Sustainability:    mapSustainability(detail.Sustainability),
+		Ratings:           MapRatings(p.Ratings),
+		ReviewsBreakdown:  MapReviewsBreakdown(p.ReviewsBreakdown),
+		FreeCancellation:  p.FreeCancellation,
+		SpecialOffer:      p.SpecialOffer,
+		EcoCertified:      p.EcoCertified,
+		FromCache:         false,
+	}
+
+	if p.Type == "vacation_rental" {
+		resp.ExcludedAmenities = p.ExcludedAmenities
+		resp.Capacity = MapCapacity([]HotelEssentialKV(p.EssentialInfo))
+	}
+
+	return resp
+}
+
+func mapTypicalPriceRange(tpr *HotelTypicalPriceRange, currency string) *domain.HotelPriceRange {
+	if tpr == nil {
+		return nil
+	}
+	return &domain.HotelPriceRange{
+		Currency: currency,
+		Min:      tpr.ExtractedLowest,
+		Max:      tpr.ExtractedHighest,
+	}
+}
+
+func mapExternalReviews(serpReviews []HotelOtherReview) []domain.HotelExternalReview {
+	if serpReviews == nil {
+		return nil
+	}
+	out := make([]domain.HotelExternalReview, len(serpReviews))
+	for i, sr := range serpReviews {
+		or := domain.HotelExternalReview{
+			Source:       sr.Source,
+			LogoURL:      sr.SourceIcon,
+			TotalReviews: sr.Reviews,
+		}
+		if sr.SourceRating != nil {
+			or.Score = sr.SourceRating.Score
+			or.MaxScore = sr.SourceRating.MaxScore
+		}
+		if sr.UserReview != nil {
+			fr := domain.HotelFeaturedReview{
+				Author:  sr.UserReview.Username,
+				Date:    sr.UserReview.Date,
+				Comment: sr.UserReview.Comment,
+			}
+			if sr.UserReview.Rating != nil {
+				fr.Score = sr.UserReview.Rating.Score
+			}
+			if sr.UserReview.URL != "" {
+				fr.URL = new(sr.UserReview.URL)
+			}
+			or.FeaturedReview = &fr
+		}
+		out[i] = or
+	}
+	return out
+}
+
+func mapHealthAndSafety(hs *HealthAndSafetyObject) []domain.HotelHealthSafetyCategory {
+	if hs == nil {
+		return nil
+	}
+	groups := make([]domain.HotelHealthSafetyCategory, len(hs.Groups))
+	for i, g := range hs.Groups {
+		items := make([]domain.HotelHealthSafetyItem, len(g.List))
+		for j, item := range g.List {
+			items[j] = domain.HotelHealthSafetyItem{
+				Name:      item.Title,
+				Available: item.Available,
+			}
+		}
+		groups[i] = domain.HotelHealthSafetyCategory{
+			Category: g.Title,
+			Items:    items,
+		}
+	}
+	return groups
+}
+
+func mapSustainability(s *SustainabilityObject) []domain.HotelSustainabilityCategory {
+	if s == nil {
+		return nil
+	}
+	groups := make([]domain.HotelSustainabilityCategory, len(s.Groups))
+	for i, g := range s.Groups {
+		items := make([]domain.HotelSustainabilityItem, len(g.List))
+		for j, item := range g.List {
+			items[j] = domain.HotelSustainabilityItem{
+				Name:      item.Title,
+				Available: item.Available,
+			}
+		}
+		groups[i] = domain.HotelSustainabilityCategory{
+			Category: g.Title,
+			Items:    items,
+		}
+	}
+	return groups
+}
+
+// ptrStrDomain returns the dereferenced string, or "" if nil.
+func ptrStrDomain(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // =============================================================================
@@ -387,8 +753,6 @@ func convertToHotelDetailsResponse(raw map[string]interface{}) (*HotelPropertyDe
 
 func buildHotelSearchParams(p HotelSearchParams) map[string]string {
 	params := make(map[string]string)
-
-	params["engine"] = "google_hotels"
 
 	// Required
 	if p.Query != "" {
@@ -478,6 +842,9 @@ func buildHotelSearchParams(p HotelSearchParams) map[string]string {
 		params["page_token"] = p.PageToken
 	}
 
+	// Internal SerpAPI params (always set, not exposed to clients)
+	params["no_cache"] = "true" // Always fetch fresh; we handle cache ourselves
+
 	return params
 }
 
@@ -521,6 +888,9 @@ func buildHotelDetailsParams(p HotelDetailsParams) map[string]string {
 	if p.VacationRentals {
 		params["vacation_rentals"] = "true"
 	}
+
+	// Internal SerpAPI params (always set, not exposed to clients)
+	params["no_cache"] = "true" // Always fetch fresh; we handle cache ourselves
 
 	return params
 }

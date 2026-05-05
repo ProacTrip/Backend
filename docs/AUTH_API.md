@@ -221,7 +221,7 @@ Set-Cookie: __Secure-refresh_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=L
 | `INVALID_EMAIL` | 400 | Formato inválido |
 | `WEAK_PASSWORD` | 400 | No cumple requisitos |
 | `VALIDATION_ERROR` | 400 | Body malformado |
-| `RATE_LIMIT_EXCEEDED` | 429 | Demasiadas peticiones (RFC 7807 Problem JSON). Ver [Rate Limiting](#rate-limiting) |
+| `RATE_LIMIT_EXCEEDED` | 429 | Demasiadas peticiones (RFC 9457 Problem JSON). Ver [Rate Limiting](#rate-limiting) |
 | `INTERNAL_ERROR` | 500 | Error inesperado |
 
 ---
@@ -745,7 +745,7 @@ Set-Cookie: __Secure-anon_token=019d5439-cb43-716d-90b5-51dcbe980908; HttpOnly; 
 
 ### Response on 429 (Rate Limit Exceeded)
 
-Formato **RFC 7807 Problem Details**:
+Formato **RFC 9457 Problem Details**:
 
 ```json
 {

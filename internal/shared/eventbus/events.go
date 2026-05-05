@@ -9,9 +9,12 @@ import (
 	"time"
 )
 
-// NewUserRegisteredEvent crea un evento de usuario registrado
-// Incluye verification_token para que el consumer de notification pueda enviar el email
-func NewUserRegisteredEvent(userID, email, verificationToken string) Event {
+// NewUserRegisteredEvent crea un evento de usuario registrado.
+// Incluye verification_token para que el consumer de notification pueda enviar el email.
+// Los campos de entorno (languageCode, currencyCode, countryCode, timezoneName)
+// son opcionales: se incluyen en el payload solo cuando no están vacíos.
+// Esto asegura que eventos legacy (sin estos campos) sigan siendo válidos al deserializar.
+func NewUserRegisteredEvent(userID, email, verificationToken, languageCode, currencyCode, countryCode, timezoneName string) Event {
 	payload := map[string]interface{}{
 		"user_id": userID,
 		"email":   email,
@@ -20,6 +23,20 @@ func NewUserRegisteredEvent(userID, email, verificationToken string) Event {
 	// Incluir verification_token para el notification consumer
 	if verificationToken != "" {
 		payload["verification_token"] = verificationToken
+	}
+
+	// Env fields — solo incluidos cuando no están vacíos (omitempty equivalente en map)
+	if languageCode != "" {
+		payload["language_code"] = languageCode
+	}
+	if currencyCode != "" {
+		payload["currency_code"] = currencyCode
+	}
+	if countryCode != "" {
+		payload["country_code"] = countryCode
+	}
+	if timezoneName != "" {
+		payload["timezone_name"] = timezoneName
 	}
 
 	return Event{

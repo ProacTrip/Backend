@@ -5,12 +5,15 @@ package serpapi
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
+
+	"github.com/ProacTrip/Backend/internal/modules/search/domain"
 )
 
 const serpapiBaseURL = "https://serpapi.com/search"
@@ -106,7 +109,7 @@ func (c *Client) doRequestWithEngine(ctx context.Context, params map[string]stri
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("serpapi request: %w", err)
+		return nil, fmt.Errorf("%w: serpapi request: %w", domain.ErrProviderUnavailable, err)
 	}
 
 	slog.InfoContext(ctx, "serpapi response",
@@ -116,16 +119,26 @@ func (c *Client) doRequestWithEngine(ctx context.Context, params map[string]stri
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("serpapi returned HTTP %d", resp.StatusCode)
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		errorBody := strings.TrimSpace(string(bodyBytes))
+
+		if resp.StatusCode >= 500 {
+			return nil, fmt.Errorf("%w: serpapi internal error (HTTP %d)", domain.ErrProviderUnavailable, resp.StatusCode)
+		}
+		// 4xx errors are our fault (bad params) — map to 502 Bad Gateway upstream
+		if errorBody != "" {
+			return nil, fmt.Errorf("%w: serpapi returned HTTP %d: %s", domain.ErrProviderBadRequest, resp.StatusCode, errorBody)
+		}
+		return nil, fmt.Errorf("%w: serpapi returned HTTP %d", domain.ErrProviderBadRequest, resp.StatusCode)
 	}
 
 	var result map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode serpapi response: %w", err)
+		return nil, fmt.Errorf("%w: decode serpapi response: %w", domain.ErrProviderUnavailable, err)
 	}
 
 	if errMsg := getErrorFromResponse(result); errMsg != "" {
-		return nil, errors.New("serpapi: " + errMsg)
+		return nil, fmt.Errorf("%w: %s", domain.ErrProviderUnavailable, errMsg)
 	}
 
 	return result, nil

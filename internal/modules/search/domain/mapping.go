@@ -23,30 +23,30 @@ type Image struct {
 // NearbyPlace represents a nearby attraction or POI with transport info.
 type NearbyPlace struct {
 	Name         string      `json:"name"`
-	Category     string      `json:"category,omitempty"`
-	Description  *string     `json:"description,omitempty"`
-	Rating       *float64    `json:"rating,omitempty"`
-	TotalReviews *int        `json:"total_reviews,omitempty"`
-	ThumbnailURL *string     `json:"thumbnail_url,omitempty"`
-	MapsURL      *string     `json:"maps_url,omitempty"`
-	GPS          *GPS        `json:"gps,omitempty"`
-	Transport    []Transport `json:"transport,omitempty"`
+	Category     string      `json:"category,omitzero"`
+	Description  *string     `json:"description,omitzero"`
+	Rating       *float64    `json:"rating,omitzero"`
+	TotalReviews *int        `json:"total_reviews,omitzero"`
+	ThumbnailURL *string     `json:"thumbnail_url,omitzero"`
+	MapsURL      *string     `json:"maps_url,omitzero"`
+	GPS          *GPS        `json:"gps,omitzero"`
+	Transport    []Transport `json:"transport,omitzero"`
 }
 
 // PriceDetail holds amount and optional before-taxes value.
 type PriceDetail struct {
 	Amount      float64  `json:"amount"`
-	BeforeTaxes *float64 `json:"before_taxes,omitempty"`
+	BeforeTaxes *float64 `json:"before_taxes,omitzero"`
 }
 
 // Capacity holds unit type and capacity info (vacation rentals only).
 type Capacity struct {
 	UnitType  string `json:"unit_type"`
-	Guests    *int   `json:"guests,omitempty"`
-	Bedrooms  *int   `json:"bedrooms,omitempty"`
-	Bathrooms *int   `json:"bathrooms,omitempty"`
-	Beds      *int   `json:"beds,omitempty"`
-	Area      string `json:"area,omitempty"`
+	Guests    *int   `json:"guests,omitzero"`
+	Bedrooms  *int   `json:"bedrooms,omitzero"`
+	Bathrooms *int   `json:"bathrooms,omitzero"`
+	Beds      *int   `json:"beds,omitzero"`
+	Area      string `json:"area,omitzero"`
 }
 
 // HotelRatingResponse represents a star rating distribution bucket.

@@ -53,7 +53,7 @@ Generate PostgreSQL migrations for Proactrip modules. Activate when user mention
 | R1 | Modules communicate only via injected interfaces or published events — consider FK boundaries | MUST |
 | R2 | NEVER reference another module's `features/` or `adapters/` in SQL | MUST NOT |
 | R3 | `shared/` packages MUST NOT import from `modules/` | MUST NOT |
-| R4 | Domain errors → `RegisterDomainErrorMapper()` → RFC 7807 Problem JSON | MUST |
+| R4 | Domain errors → `RegisterDomainErrorMapper()` → RFC 9457 Problem JSON | MUST |
 | R5 | Manual constructor injection, zero globals, zero singletons | MUST |
 | R6 | Always generate `_test.go` alongside code | MUST |
 | R7 | Go 1.26 patterns: `omitzero`, `new(expr)`, `errors.AsType`, `uuid.Must(uuid.NewV7())` | MUST |

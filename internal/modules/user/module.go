@@ -41,8 +41,8 @@ func NewModule(cfg Config) (*Module, error) {
 	// 1. Inicializar Repository (PostgreSQL adapter)
 	m.Repository = postgres.NewUserRepository(cfg.PostgresPool)
 
-	// 2. Inicializar Use Case
-	m.UpsertProfileUseCase = upsert_profile.NewUseCase(m.Repository)
+	// 2. Inicializar Use Case (with Dragonfly cache for profile prefs)
+	m.UpsertProfileUseCase = upsert_profile.NewUseCaseWithCache(m.Repository, cfg.RedisClient)
 
 	// 3. Inicializar Event Consumer (Dragonfly Streams)
 	m.EventConsumer = consumer.NewUserEventConsumer(cfg.RedisClient, m.Repository)

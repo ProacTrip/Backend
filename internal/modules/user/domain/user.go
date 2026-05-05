@@ -135,3 +135,22 @@ func (p *UserProfile) FullName() string {
 	}
 	return full
 }
+
+// =============================================================================
+// Environment prefs extracted from registration event / geoip
+// =============================================================================
+
+// EnvPrefs holds environment-based preferences extracted from the user
+// registration event (language_code, currency_code, country_code, timezone_name).
+// All fields are optional — empty means "not provided, use defaults".
+type EnvPrefs struct {
+	LanguageCode string
+	CurrencyCode string
+	CountryCode  string // for cache only, not persisted to profile column
+	TimezoneName string
+}
+
+// HasAny returns true if at least one preference is non-empty.
+func (e EnvPrefs) HasAny() bool {
+	return e.LanguageCode != "" || e.CurrencyCode != "" || e.CountryCode != "" || e.TimezoneName != ""
+}

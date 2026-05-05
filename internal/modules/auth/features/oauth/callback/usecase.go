@@ -224,6 +224,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		streamName := eventbus.StreamName("auth.user.registered")
 		flatPayload := map[string]interface{}{
 			"event_type":   "user_registered",
+			"event_version": int64(1),
 			"aggregate_id": user.ID.String(),
 			"timestamp":    time.Now().UnixMilli(),
 			"user_id":      user.ID.String(),

@@ -1,17 +1,15 @@
-// Shared mapping functions for hotel search features.
-// Converts SerpAPI types to domain response types.
-// Lives in a subpackage to avoid circular dependency: serpapi imports domain.
-package hotelmapping
+// Mapping functions for hotel/VR SerpAPI types → domain response types.
+// Lives in the serpapi adapter package since these types are defined here.
+package serpapi
 
 import (
 	"fmt"
 
-	"github.com/ProacTrip/Backend/internal/modules/search/adapters/serpapi"
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
 )
 
-// MapImages converts SerpAPI hotel images to Image slice.
-func MapImages(serpImages []serpapi.HotelImage) []domain.Image {
+// MapImages converts SerpAPI hotel images to domain.Image slice.
+func MapImages(serpImages []HotelImage) []domain.Image {
 	if serpImages == nil {
 		return nil
 	}
@@ -25,8 +23,8 @@ func MapImages(serpImages []serpapi.HotelImage) []domain.Image {
 	return imgs
 }
 
-// MapNearbyPlaces converts SerpAPI nearby places to NearbyPlace slice.
-func MapNearbyPlaces(serpPlaces []serpapi.HotelNearbyPlace) []domain.NearbyPlace {
+// MapNearbyPlaces converts SerpAPI nearby places to domain.NearbyPlace slice.
+func MapNearbyPlaces(serpPlaces []HotelNearbyPlace) []domain.NearbyPlace {
 	if serpPlaces == nil {
 		return nil
 	}
@@ -63,8 +61,8 @@ func MapNearbyPlaces(serpPlaces []serpapi.HotelNearbyPlace) []domain.NearbyPlace
 	return places
 }
 
-// MapPriceDetail converts a SerpAPI rate detail to a PriceDetail.
-func MapPriceDetail(sd serpapi.HotelRateDetail) domain.PriceDetail {
+// MapPriceDetail converts a SerpAPI rate detail to a domain.PriceDetail.
+func MapPriceDetail(sd HotelRateDetail) domain.PriceDetail {
 	pd := domain.PriceDetail{}
 	if sd.ExtractedLowest != nil {
 		pd.Amount = *sd.ExtractedLowest
@@ -75,8 +73,8 @@ func MapPriceDetail(sd serpapi.HotelRateDetail) domain.PriceDetail {
 	return pd
 }
 
-// MapCapacity converts essential info KVs to a Capacity pointer.
-func MapCapacity(essentialInfo []serpapi.HotelEssentialKV) *domain.Capacity {
+// MapCapacity converts essential info KVs to a domain.Capacity pointer.
+func MapCapacity(essentialInfo []HotelEssentialKV) *domain.Capacity {
 	if len(essentialInfo) == 0 {
 		return nil
 	}
@@ -108,8 +106,8 @@ func MapCapacity(essentialInfo []serpapi.HotelEssentialKV) *domain.Capacity {
 	return c
 }
 
-// MapRatings converts SerpAPI rating distribution to HotelRatingResponse slice.
-func MapRatings(serpRatings []serpapi.HotelRating) []domain.HotelRatingResponse {
+// MapRatings converts SerpAPI rating distribution to domain.HotelRatingResponse slice.
+func MapRatings(serpRatings []HotelRating) []domain.HotelRatingResponse {
 	if serpRatings == nil {
 		return nil
 	}
@@ -123,8 +121,8 @@ func MapRatings(serpRatings []serpapi.HotelRating) []domain.HotelRatingResponse 
 	return out
 }
 
-// MapReviewsBreakdown converts SerpAPI review breakdown to HotelReviewBreakdownResponse slice.
-func MapReviewsBreakdown(serpBreakdown []serpapi.HotelReviewBreakdown) []domain.HotelReviewBreakdownResponse {
+// MapReviewsBreakdown converts SerpAPI review breakdown to domain.HotelReviewBreakdownResponse slice.
+func MapReviewsBreakdown(serpBreakdown []HotelReviewBreakdown) []domain.HotelReviewBreakdownResponse {
 	if serpBreakdown == nil {
 		return nil
 	}

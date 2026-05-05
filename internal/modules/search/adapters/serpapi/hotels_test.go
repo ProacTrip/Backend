@@ -138,8 +138,8 @@ func TestHotelSearchResponse(t *testing.T) {
 		t.Logf("Hotel: ExtractedHotelClass=%d", *p0.ExtractedHotelClass)
 	}
 
-	if p0.HotelClass == nil || *p0.HotelClass == "" {
-		t.Logf("HotelClass label (localized string): %v", p0.HotelClass)
+	if p0.ExtractedHotelClass != nil {
+		t.Logf("HotelClass numeric: %d", *p0.ExtractedHotelClass)
 	}
 
 	if p0.RatePerNight.ExtractedLowest == nil {
@@ -295,8 +295,8 @@ func TestHotelDetailsResponse(t *testing.T) {
 	if detail.ExtractedHotelClass != nil {
 		t.Logf("Hotel Detail: ExtractedHotelClass=%d", *detail.ExtractedHotelClass)
 	}
-	if detail.HotelClass != nil {
-		t.Logf("Hotel Detail: HotelClass label=%q (localized string)", *detail.HotelClass)
+	if detail.ExtractedHotelClass != nil {
+		t.Logf("Hotel Detail: ExtractedHotelClass numeric=%d", *detail.ExtractedHotelClass)
 	}
 }
 
@@ -410,12 +410,9 @@ func TestVRDetailsResponse(t *testing.T) {
 	}
 	t.Logf("VR Detail: Name=%q Type=%q", detail.Name, detail.Type)
 
-	// HotelClass must be nil for VR (no stars)
+	// ExtractedHotelClass must be nil for VR (no star ratings)
 	if detail.ExtractedHotelClass != nil {
 		t.Errorf("Expected ExtractedHotelClass to be nil for VR, got %d", *detail.ExtractedHotelClass)
-	}
-	if detail.HotelClass != nil {
-		t.Errorf("Expected HotelClass label to be nil for VR, got %q", *detail.HotelClass)
 	}
 
 	// Capacity fields should exist

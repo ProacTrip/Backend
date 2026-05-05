@@ -4,6 +4,7 @@ package bootstrap
 // Gestiona el ciclo de vida completo del servidor.
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -18,9 +19,16 @@ import (
 	authModule "github.com/ProacTrip/Backend/internal/modules/auth"
 	authmiddleware "github.com/ProacTrip/Backend/internal/modules/auth/adapters/middleware"
 	environmentModule "github.com/ProacTrip/Backend/internal/modules/environment"
+	envShared "github.com/ProacTrip/Backend/internal/modules/environment/features/shared"
 	notifModule "github.com/ProacTrip/Backend/internal/modules/notification"
 	searchModule "github.com/ProacTrip/Backend/internal/modules/search"
+	searchDomain "github.com/ProacTrip/Backend/internal/modules/search/domain"
+	ai_deepseek "github.com/ProacTrip/Backend/internal/modules/search/adapters/ai/deepseek"
+	ai_ollama "github.com/ProacTrip/Backend/internal/modules/search/adapters/ai/ollama"
+	searchConv "github.com/ProacTrip/Backend/internal/modules/search/shared/conversation"
+	searchShared "github.com/ProacTrip/Backend/internal/modules/search/features/shared"
 	userModule "github.com/ProacTrip/Backend/internal/modules/user"
+	"github.com/ProacTrip/Backend/internal/modules/auth/features/register"
 	"github.com/ProacTrip/Backend/internal/shared/cache"
 	contextutil "github.com/ProacTrip/Backend/internal/shared/context"
 	"github.com/ProacTrip/Backend/internal/shared/database"
@@ -36,6 +44,9 @@ import (
 
 // StartConfig es un alias para echo.StartConfig
 type StartConfig = echo.StartConfig
+
+// Compile-time interface check: EnvironmentResolverAdapter implements register.EnvironmentResolver.
+var _ register.EnvironmentResolver = (*envShared.EnvironmentResolverAdapter)(nil)
 
 type App struct {
 	Echo        *echo.Echo
@@ -98,6 +109,10 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	})
 
 	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
+		Skipper: func(c *echo.Context) bool {
+			path := c.Request().URL.Path
+			return path == "/health" || path == "/ready"
+		},
 		LogStatus: true,
 		LogURI:    true,
 		LogValuesFunc: func(c *echo.Context, v middleware.RequestLoggerValues) error {
@@ -128,7 +143,7 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	// Security headers (CSP, HSTS, X-Frame-Options, etc.) — required by all API docs
 	e.Use(sharedmiddleware.SecurityHeaders())
 
-	// HTTPErrorHandler: errores RFC 7807
+	// HTTPErrorHandler: errores RFC 9457
 	e.HTTPErrorHandler = func(c *echo.Context, err error) {
 		// Verificar si la respuesta ya fue enviada
 		if resp, _ := echo.UnwrapResponse(c.Response()); resp != nil && resp.Committed {
@@ -169,7 +184,7 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 			return
 		}
 
-		// Error desconocido → RFC 7807
+		// Error desconocido → RFC 9457
 		problem := sharederrors.ErrInternalError(err.Error(), err).WithInstance(c.Request().URL.Path)
 		_ = c.JSON(http.StatusInternalServerError, problem)
 	}
@@ -232,8 +247,19 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 
 	// Inicializar módulos
 
+	// Environment Module (IP geolocation + weather)
+	// Created BEFORE auth because auth registration needs the EnvironmentResolver.
+	environmentMod := environmentModule.NewModule(environmentModule.Config{
+		OpenWeatherAPIKey:   cfg.Environment.OpenWeatherAPIKey,
+		OpenWeatherCacheTTL: cfg.Environment.OpenWeatherCacheTTL,
+		IpQueryBaseURL:      cfg.Environment.IpQueryBaseURL,
+		Cache:               df,
+		RateLimiter:         rateLimiter,
+	})
+
 	// Auth Module (incluye DragonflyClient para idempotency)
 	authMod, err := authModule.NewModule(authModule.Config{
+		EnvResolver: environmentMod.EnvironmentResolver,
 		PostgresPool:         authPool,
 		DragonflyClient:      rdb,
 		PasetoKey:            cfg.PasetoKeyBytes, // Bytes decodificados de hex
@@ -285,7 +311,35 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		// No es fatal - el servidor puede iniciar sin el consumer
 	}
 
-	// Search Module
+	// Search Module — create AI interpreter if configured
+	var aiInterpreter searchDomain.AIInterpreter
+	if cfg.AI.Provider == "deepseek" && cfg.AI.APIKey != "" {
+		baseURL := cmp.Or(cfg.AI.BaseURL, "https://api.deepseek.com/v1")
+		model := cmp.Or(cfg.AI.Model, "deepseek-chat")
+		client := ai_deepseek.NewClient(cfg.AI.APIKey, cfg.AI.Timeout,
+			ai_deepseek.WithBaseURL(baseURL),
+			ai_deepseek.WithModel(model),
+		)
+		aiInterpreter = ai_deepseek.NewAdapter(client)
+		slog.Info("AI interpreter: deepseek configured", slog.String("model", model))
+	} else if cfg.AI.Provider == "ollama" {
+		baseURL := cmp.Or(cfg.AI.BaseURL, "http://localhost:11434/v1")
+		model := cmp.Or(cfg.AI.Model, "llama3.2")
+		var opts []ai_ollama.ClientOpt
+		if cfg.AI.BaseURL != "" {
+			opts = append(opts, ai_ollama.WithBaseURL(baseURL))
+		}
+		if cfg.AI.Model != "" {
+			opts = append(opts, ai_ollama.WithModel(model))
+		}
+		client := ai_ollama.NewClient(cfg.AI.Timeout, opts...)
+		aiInterpreter = ai_ollama.NewAdapter(client)
+		slog.Info("AI interpreter: ollama configured", slog.String("model", model))
+	}
+
+	// Conversation PG store for auth users
+	convPgStore := searchConv.NewPgConversationStore(searchPool)
+
 	searchMod, err := searchModule.NewModule(searchModule.Config{
 		Provider:          nil, // created from SerpAPIKey/SerpAPITimeout
 		SerpAPIKey:        cfg.SerpAPIKey,
@@ -301,19 +355,19 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		HotelSearchTTL:    5 * time.Minute,
 		HotelDetailsTTL:   15 * time.Minute,
 		RateLimiter:       rateLimiter,
+		RedisClient:       rdb,
+		SearchDefaults: searchShared.SearchDefaultConfig{
+			Currency:    cfg.DefaultCurrency,
+			Language:    cfg.DefaultLanguage,
+			CountryCode: cfg.DefaultCountryCode,
+		},
+		AIInterpreter:     aiInterpreter,
+		ConversationStore: convPgStore,
+		EventBus:          eventBus,
 	})
 	if err != nil {
 		return nil, err
 	}
-
-	// Environment Module (IP geolocation + weather)
-	environmentMod := environmentModule.NewModule(environmentModule.Config{
-		OpenWeatherAPIKey:   cfg.Environment.OpenWeatherAPIKey,
-		OpenWeatherCacheTTL: cfg.Environment.OpenWeatherCacheTTL,
-		IpQueryBaseURL:      cfg.Environment.IpQueryBaseURL,
-		Cache:               df,
-		RateLimiter:         rateLimiter,
-	})
 
 	// Auth Middleware (silent refresh token rotation)
 	authMiddleware := authmiddleware.NewAuthMiddleware(authmiddleware.AuthConfig{
@@ -359,9 +413,6 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		},
 	)
 
-	// Middleware: rate limit para providers externos (SerpAPI)
-	serpapiRateLimitMW := ratelimit.ProviderRateLimitMiddleware(rateLimiter, "serpapi")
-
 	// Auth routes: /v1/auth
 	authGroup := e.Group("/v1/auth")
 
@@ -386,15 +437,25 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	authGroup.GET("/me", authMod.MeHandler.Handle, authMiddleware.Handle, authRateLimitMW)
 
 	// Search routes: /v1/search (públicas con rate limit)
-	searchGroup := e.Group("/v1/search", anonRateLimitMW, serpapiRateLimitMW)
+	searchGroup := e.Group("/v1/search", anonRateLimitMW, authMiddleware.Optional())
 	searchGroup.POST("/flights", searchMod.SearchFlightsHandler.Handle)
 	searchGroup.POST("/flight-details", searchMod.FlightDetailsHandler.Handle)
 	searchGroup.POST("/hotels", searchMod.SearchHotelsHandler.Handle)
 	searchGroup.POST("/hotel-details", searchMod.HotelDetailsHandler.Handle)
+	// AI search — supports streaming via "stream": true in the request body
+	searchGroup.POST("/ai", searchMod.AISearchHandler.Handle)
 
 	// Environment route: location + weather (public, no auth required)
 	environmentGroup := e.Group("/v1")
 	environmentGroup.GET("/environment", environmentMod.GetEnvironmentHandler.Handle)
+
+	// Start conversation consumer (BACKGROUND - persiste conversaciones en PG via streams)
+	if searchMod.ConvConsumer != nil {
+		if err := searchMod.ConvConsumer.Start(appCtx); err != nil {
+			slog.Warn("conversation consumer failed to start", "error", err)
+			// No es fatal - el servidor puede iniciar sin el consumer
+		}
+	}
 
 	// === App Structure ===
 	app := &App{
@@ -466,7 +527,7 @@ func (app *App) readyCheckHandler(rdb *redis.Client, poolMgr *database.PoolManag
 			}
 		}
 
-		// Check event consumers (notification + user)
+		// Check event consumers (notification + user + conversation)
 		if app.NotificationModule != nil && app.NotificationModule.EventConsumer != nil {
 			nc := app.NotificationModule.EventConsumer
 			if nc.IsRunning() {
@@ -482,6 +543,15 @@ func (app *App) readyCheckHandler(rdb *redis.Client, poolMgr *database.PoolManag
 				checks[uc.Name()] = "ok"
 			} else {
 				checks[uc.Name()] = "error: consumer not running"
+			}
+		}
+
+		if app.SearchModule != nil && app.SearchModule.ConvConsumer != nil {
+			cc := app.SearchModule.ConvConsumer
+			if cc.IsRunning() {
+				checks[cc.Name()] = "ok"
+			} else {
+				checks[cc.Name()] = "error: consumer not running"
 			}
 		}
 

@@ -321,6 +321,9 @@ type AccessClaims struct {
 	JTI       uuid.UUID
 }
 
+// GetUserID returns the user ID as a UUID for interface satisfaction.
+func (c AccessClaims) GetUserID() uuid.UUID { return c.UserID }
+
 type RefreshClaims struct {
 	UserID    uuid.UUID
 	Email     string
@@ -328,6 +331,9 @@ type RefreshClaims struct {
 	SessionID uuid.UUID
 	JTI       uuid.UUID
 }
+
+// GetUserID returns the user ID as a UUID for interface satisfaction.
+func (c RefreshClaims) GetUserID() uuid.UUID { return c.UserID }
 
 // =============================================================================
 // SSE / OAuth / MFA Token Methods

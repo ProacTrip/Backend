@@ -20,15 +20,31 @@ type Command struct {
 	Adults          int    `json:"adults"`
 	Children        int    `json:"children"`
 	ChildrenAges    []int  `json:"children_ages"`
-	GL              string `json:"gl"`
-	HL              string `json:"hl"`
-	Currency        string `json:"currency"`
+	GL              *string `json:"gl,omitzero"`
+	HL              *string `json:"hl,omitzero"`
+	Currency        *string `json:"currency,omitzero"`
 	VacationRentals bool   `json:"vacation_rentals"`
 }
 
 // =============================================================================
 // Validate
 // =============================================================================
+
+// ToDomain converts the input command to a domain hotel details request.
+func (cmd Command) ToDomain() domain.HotelDetailsRequest {
+	return domain.HotelDetailsRequest{
+		ID:              cmd.ID,
+		CheckInDate:     cmd.CheckInDate,
+		CheckOutDate:    cmd.CheckOutDate,
+		Adults:          cmd.Adults,
+		Children:        cmd.Children,
+		ChildrenAges:    cmd.ChildrenAges,
+		GL:              cmd.GL,
+		HL:              cmd.HL,
+		Currency:        cmd.Currency,
+		VacationRentals: cmd.VacationRentals,
+	}
+}
 
 // Validate checks required fields.
 func (cmd *Command) Validate() error {

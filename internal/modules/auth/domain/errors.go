@@ -5,7 +5,7 @@ import (
 )
 
 // Errores de dominio específicos del módulo auth.
-// Cada error incluye un código legible para mapeo HTTP RFC 7807.
+// Cada error incluye un código legible para mapeo HTTP RFC 9457.
 var (
 	// Usuario
 	ErrUserNotFound        = errors.New("USER_NOT_FOUND: usuario no encontrado")

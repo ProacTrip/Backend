@@ -26,10 +26,11 @@ const (
 
 	// 5xx Server Errors
 	ProblemTypeInternalError      ProblemType = "https://api.proactrip.com/errors/internal-error"
+	ProblemTypeBadGateway         ProblemType = "https://api.proactrip.com/errors/bad-gateway"
 	ProblemTypeServiceUnavailable ProblemType = "https://api.proactrip.com/errors/service-unavailable"
 )
 
-// Problem es el formato RFC 7807 Problem Details
+// Problem es el formato RFC 9457 Problem Details
 type Problem struct {
 	Type     ProblemType `json:"type"`               // Identificador único del tipo de problema
 	Title    string      `json:"title"`              // Título breve legible humano
@@ -112,6 +113,9 @@ var (
 	ErrInternalError = func(detail string, err error) *Problem {
 		return New(ProblemTypeInternalError, "Internal Server Error", detail, http.StatusInternalServerError, err)
 	}
+	ErrBadGateway = func(detail string, err error) *Problem {
+		return New(ProblemTypeBadGateway, "Bad Gateway", detail, http.StatusBadGateway, err)
+	}
 	ErrServiceUnavailable = func(detail string, err error) *Problem {
 		return New(ProblemTypeServiceUnavailable, "Service Unavailable", detail, http.StatusServiceUnavailable, err)
 	}
@@ -122,7 +126,7 @@ var (
 // de sus errores de dominio sin que el paquete shared/http importe módulos específicos
 // =============================================================================
 
-// DomainErrorMapper mapea un error de dominio específico a un Problem RFC 7807.
+// DomainErrorMapper mapea un error de dominio específico a un Problem RFC 9457.
 // Retorna nil si el mapper no reconoce el error.
 type DomainErrorMapper func(error) *Problem
 
@@ -162,6 +166,8 @@ func HTTPStatusFromType(typ ProblemType) int {
 		return http.StatusTooManyRequests
 	case ProblemTypeInternalError:
 		return http.StatusInternalServerError
+	case ProblemTypeBadGateway:
+		return http.StatusBadGateway
 	case ProblemTypeServiceUnavailable:
 		return http.StatusServiceUnavailable
 	default:

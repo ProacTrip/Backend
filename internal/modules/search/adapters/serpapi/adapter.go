@@ -6,11 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"strings"
 
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
-	"github.com/ProacTrip/Backend/internal/shared/ratelimit"
 )
 
 // =============================================================================
@@ -18,11 +16,11 @@ import (
 // =============================================================================
 
 var _ domain.FlightProvider = (*Adapter)(nil)
+var _ domain.HotelProvider = (*Adapter)(nil)
 
 // Adapter maps SerpAPI SDK responses (map[string]interface{}) to domain entities.
 type Adapter struct {
-	client      *Client
-	rateLimiter *ratelimit.RateLimiter
+	client *Client
 }
 
 // NewAdapter creates a new SerpAPI adapter.
@@ -30,26 +28,12 @@ func NewAdapter(client *Client) *Adapter {
 	return &Adapter{client: client}
 }
 
-// SetRateLimiter sets the rate limiter for provider rate limiting.
-func (a *Adapter) SetRateLimiter(rl *ratelimit.RateLimiter) {
-	a.rateLimiter = rl
-}
-
 // =============================================================================
 // Búsqueda de Vuelos
 // =============================================================================
 
-// Search performs a flight search via SerpAPI and maps results to domain entities.
-func (a *Adapter) Search(ctx context.Context, req domain.FlightSearchRequest) (*domain.FlightSearchResponse, error) {
-	if a.rateLimiter != nil {
-		result, err := a.rateLimiter.ProviderAllow(ctx, "serpapi")
-		if err != nil {
-			slog.Warn("serpapi rate limit check failed", "error", err)
-		} else if !result.Allowed {
-			return nil, fmt.Errorf("serpapi rate limit exceeded: %d/%d", result.Current, result.Limit)
-		}
-	}
-
+// SearchFlights performs a flight search via SerpAPI and maps results to domain entities.
+func (a *Adapter) SearchFlights(ctx context.Context, req domain.FlightSearchRequest) (*domain.FlightSearchResponse, error) {
 	params := buildSerpapiParams(req)
 
 	raw, err := a.client.Search(ctx, params)
@@ -70,18 +54,9 @@ func (a *Adapter) Search(ctx context.Context, req domain.FlightSearchRequest) (*
 // Detalles de Reserva
 // =============================================================================
 
-// GetDetails retrieves booking details for a booking token.
-func (a *Adapter) GetDetails(ctx context.Context, bookingToken string, adults int, currency string, departureID, arrivalID, outboundDate, returnDate string) (*domain.FlightDetailsResponse, error) {
-	if a.rateLimiter != nil {
-		result, err := a.rateLimiter.ProviderAllow(ctx, "serpapi")
-		if err != nil {
-			slog.Warn("serpapi rate limit check failed", "error", err)
-		} else if !result.Allowed {
-			return nil, fmt.Errorf("serpapi rate limit exceeded: %d/%d", result.Current, result.Limit)
-		}
-	}
-
-	raw, err := a.client.GetBookingDetails(ctx, bookingToken, adults, currency, departureID, arrivalID, outboundDate, returnDate)
+// GetFlightDetails retrieves booking details for a booking token.
+func (a *Adapter) GetFlightDetails(ctx context.Context, req domain.FlightDetailsRequest) (*domain.FlightDetailsResponse, error) {
+	raw, err := a.client.GetBookingDetails(ctx, req.BookingToken, req.Adults, req.Currency, req.DepartureID, req.ArrivalID, req.OutboundDate, req.ReturnDate)
 	if err != nil {
 		return nil, fmt.Errorf("serpapi booking details: %w", err)
 	}
@@ -91,7 +66,7 @@ func (a *Adapter) GetDetails(ctx context.Context, bookingToken string, adults in
 		return nil, fmt.Errorf("serpapi parse booking response: %w", err)
 	}
 
-	return mapBookingResponse(dto, adults, currency), nil
+	return mapBookingResponse(dto, req.Adults, req.Currency), nil
 }
 
 // =============================================================================
@@ -244,6 +219,12 @@ func buildSerpapiParams(req domain.FlightSearchRequest) map[string]string {
 	if len(req.Legs) > 0 {
 		params["multi_city_json"] = marshalMultiCityLegs(req.Legs)
 	}
+
+	// Internal SerpAPI params (always set, not exposed to clients)
+	params["show_hidden"] = "1"   // Show ALL results (equivalent to "View more flights" on Google Flights)
+	params["deep_search"] = "1"   // Enable deep search for better results (matches browser experience)
+	params["exclude_basic"] = "0" // Don't exclude basic economy results
+	params["no_cache"] = "false"  // Use SerpAPI's own cache
 
 	return params
 }

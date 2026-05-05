@@ -129,7 +129,7 @@ Todos los ejemplos usan `{base_url}` como placeholder.
 
 ## Errores Estándar
 
-Formato **RFC 7807 Problem Details**:
+Formato **RFC 9457 Problem Details**:
 
 ```json
 {
@@ -307,7 +307,7 @@ POST /v1/search/flights
 | `travel_class` | string | `"economy"` | Clase de vuelo. Ver tabla de valores |
 | `gl` | string\|null | `null` | Código ISO 3166-1 alpha-2. Ej: `"ES"`, `"PE"`. Personaliza resultados al país |
 | `hl` | string\|null | `null` | Código de idioma ISO 639-1. Ej: `"es"`, `"en"`, `"fr"` |
-| `currency` | string | `"USD"` | Código ISO 4217. Ej: `"EUR"`, `"GBP"` |
+| `currency` | string | Resuelto por el backend | Código ISO 4217. Ej: `"EUR"`, `"GBP"`. Si no se envía, el backend resuelve por una cadena de prioridad de 4 niveles:<br>1. Valor explícito del request<br>2. Preferencias del perfil del usuario (PostgreSQL, solo autenticados)<br>3. Caché de entorno DragonflyDB (IP → país → moneda)<br>4. Configuración por defecto (`DEFAULT_CURRENCY` en `.env`)<br>Si ninguno está disponible, se usa `"USD"` como último fallback |
 | `bags` | integer | `0` | Número de bolsos de mano. No puede superar el total de pasajeros con derecho a equipaje |
 | `max_price` | number\|null | `null` | Precio máximo total del billete |
 | `sort_by` | string | `"top"` | Orden de resultados. Ver tabla de valores |
@@ -1216,7 +1216,7 @@ Itinerario completo + booking_options (respuesta)
 | `INVALID_PARAM_RANGE` | 422 | Parámetros fuera de rango: `bags` supera el número de pasajeros, horas de rango inválidas, `outbound_selection_token` expirado o inválido |
 | `PROVIDER_UNAVAILABLE` | 503 | El proveedor externo (SerpAPI) no está disponible |
 | `TOKEN_INVALID` | 401 | Cookie de sesión inválida o expirada (solo si el usuario estaba autenticado) |
-| `RATE_LIMIT_EXCEEDED` | 429 | Demasiadas peticiones (RFC 7807 Problem JSON). Ver [Rate Limiting](#rate-limiting) |
+| `RATE_LIMIT_EXCEEDED` | 429 | Demasiadas peticiones (RFC 9457 Problem JSON). Ver [Rate Limiting](#rate-limiting) |
 | `INTERNAL_ERROR` | 500 | Error inesperado del servidor |
 
 ---
@@ -1577,7 +1577,7 @@ El frontend debe mostrar esta información al usuario para que sepa qué aerolí
 | `INVALID_PARAM_RANGE` | 422 | Parámetros de pasajeros incoherentes con el token |
 | `PROVIDER_UNAVAILABLE` | 503 | El proveedor externo no está disponible |
 | `TOKEN_INVALID` | 401 | Cookie de sesión inválida o expirada (solo si el usuario estaba autenticado) |
-| `RATE_LIMIT_EXCEEDED` | 429 | Demasiadas peticiones (RFC 7807 Problem JSON). Ver [Rate Limiting](#rate-limiting) |
+| `RATE_LIMIT_EXCEEDED` | 429 | Demasiadas peticiones (RFC 9457 Problem JSON). Ver [Rate Limiting](#rate-limiting) |
 | `INTERNAL_ERROR` | 500 | Error inesperado del servidor |
 
 ---
@@ -1635,7 +1635,7 @@ Set-Cookie: __Secure-anon_token=019d5439-cb43-716d-90b5-51dcbe980908; HttpOnly; 
 
 ### Response on 429 (Rate Limit Exceeded)
 
-Formato **RFC 7807 Problem Details**:
+Formato **RFC 9457 Problem Details**:
 
 ```json
 {

@@ -6,6 +6,9 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/redis/go-redis/v9"
+
+	"github.com/ProacTrip/Backend/internal/modules/search/features/shared"
 	httperr "github.com/ProacTrip/Backend/internal/shared/http"
 	"github.com/labstack/echo/v5"
 )
@@ -16,12 +19,14 @@ import (
 
 // Handler processes flight search HTTP requests.
 type Handler struct {
-	usecase *UseCase
+	usecase     *UseCase
+	rdb         *redis.Client
+	defaultsCfg shared.SearchDefaultConfig
 }
 
 // NewHandler creates a new search flights handler.
-func NewHandler(usecase *UseCase) *Handler {
-	return &Handler{usecase: usecase}
+func NewHandler(usecase *UseCase, rdb *redis.Client, defaultsCfg shared.SearchDefaultConfig) *Handler {
+	return &Handler{usecase: usecase, rdb: rdb, defaultsCfg: defaultsCfg}
 }
 
 // Handle processes the flight search request.
@@ -29,15 +34,30 @@ func NewHandler(usecase *UseCase) *Handler {
 func (h *Handler) Handle(c *echo.Context) error {
 	var cmd Command
 
-	// Set defaults before binding so they act as fallbacks
+	// Set default adults — other defaults are handled by Command.Validate()
 	cmd.Adults = 1
-	cmd.TravelClass = "economy"
-	cmd.Currency = "USD"
-	cmd.SortBy = "top"
-	cmd.Stops = "any"
 
 	if err := c.Bind(&cmd); err != nil {
 		return httperr.MapError(c, err)
+	}
+
+	// Resolve GL/HL/Currency from the 4-tier priority chain
+	gl, hl, currency := shared.ResolveSearchDefaults(
+		c.Request().Context(),
+		h.rdb,
+		shared.UserIDFromContext(c), // userID from auth middleware, "" for anonymous
+		c.RealIP(),                  // clientIP for env:{ip} cache lookup
+		cmd.GL, cmd.HL, cmd.Currency,
+		h.defaultsCfg,
+	)
+	if cmd.GL == nil {
+		cmd.GL = new(gl)
+	}
+	if cmd.HL == nil {
+		cmd.HL = new(hl)
+	}
+	if cmd.Currency == nil {
+		cmd.Currency = new(currency)
 	}
 
 	resp, err := h.usecase.Execute(c.Request().Context(), cmd)

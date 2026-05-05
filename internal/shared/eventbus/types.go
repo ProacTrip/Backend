@@ -12,10 +12,11 @@ import (
 type EventType string
 
 const (
-	UserRegistered EventType = "user_registered"
-	TripCreated    EventType = "trip_created"
-	TripUpdated    EventType = "trip_updated"
-	TripDeleted    EventType = "trip_deleted"
+	UserRegistered     EventType = "user_registered"
+	TripCreated        EventType = "trip_created"
+	TripUpdated        EventType = "trip_updated"
+	TripDeleted        EventType = "trip_deleted"
+	ConversationSaved  EventType = "conversation_saved"
 )
 
 type Event struct {
@@ -27,7 +28,7 @@ type Event struct {
 
 func (e *Event) ToMap() map[string]interface{} {
 	return map[string]interface{}{
-		"event_type":   e.EventType,
+		"event_type":   string(e.EventType),
 		"aggregate_id": e.AggregateID,
 		"timestamp":    e.Timestamp,
 		"payload":      e.Payload,

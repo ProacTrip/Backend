@@ -198,9 +198,25 @@ func TestProviderAllowUnknown(t *testing.T) {
 	ctx := t.Context()
 	rl, _ := setupRateLimiter(t)
 
-	_, err := rl.ProviderAllow(ctx, "unknown")
+	result, err := rl.ProviderAllow(ctx, "unknown")
 	if err == nil {
 		t.Error("expected error for unknown provider")
+	}
+	if result.Allowed {
+		t.Error("expected Allowed=false for unknown provider (fail-closed)")
+	}
+}
+
+func TestProviderAllowUnknownBlocked(t *testing.T) {
+	ctx := t.Context()
+	rl, _ := setupRateLimiter(t)
+
+	result, err := rl.ProviderAllow(ctx, "serpai")
+	if err == nil {
+		t.Error("expected error for typo provider 'serpai'")
+	}
+	if result.Allowed {
+		t.Error("expected Allowed=false for typo provider (fail-closed)")
 	}
 }
 
@@ -260,5 +276,41 @@ func TestRateLimitConfigDefaults(t *testing.T) {
 	}
 	if resend.Window != 24*time.Hour {
 		t.Errorf("resend Window = %v, want 24h", resend.Window)
+	}
+}
+
+func TestRateLimitConfigDynamicProvider(t *testing.T) {
+	t.Setenv("RATELIMIT_PROVIDER_AI_MAX", "20")
+	t.Setenv("RATELIMIT_PROVIDER_AI_WINDOW_SEC", "3600")
+
+	cfg := ratelimit.LoadRateLimitConfig()
+
+	aiProvider, ok := cfg.Providers["ai"]
+	if !ok {
+		t.Fatal(`expected "ai" provider in cfg.Providers — dynamic env var detection failed`)
+	}
+	if aiProvider.MaxRequests != 20 {
+		t.Errorf("ai MaxRequests = %d, want 20", aiProvider.MaxRequests)
+	}
+	if aiProvider.Window != 1*time.Hour {
+		t.Errorf("ai Window = %v, want 1h", aiProvider.Window)
+	}
+}
+
+func TestRateLimitConfigDynamicProviderStripe(t *testing.T) {
+	t.Setenv("RATELIMIT_PROVIDER_STRIPE_MAX", "500")
+	t.Setenv("RATELIMIT_PROVIDER_STRIPE_WINDOW_SEC", "60")
+
+	cfg := ratelimit.LoadRateLimitConfig()
+
+	stripeProvider, ok := cfg.Providers["stripe"]
+	if !ok {
+		t.Fatal(`expected "stripe" provider in cfg.Providers — dynamic env var detection failed`)
+	}
+	if stripeProvider.MaxRequests != 500 {
+		t.Errorf("stripe MaxRequests = %d, want 500", stripeProvider.MaxRequests)
+	}
+	if stripeProvider.Window != 60*time.Second {
+		t.Errorf("stripe Window = %v, want 60s", stripeProvider.Window)
 	}
 }

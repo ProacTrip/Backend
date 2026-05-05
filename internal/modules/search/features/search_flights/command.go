@@ -45,6 +45,29 @@ var validTripTypes = map[string]bool{
 	TripTypeMultiCity: true,
 }
 
+var validTravelClasses = map[string]bool{
+	TravelClassEconomy:       true,
+	TravelClassPremiumEconomy: true,
+	TravelClassBusiness:      true,
+	TravelClassFirst:         true,
+}
+
+var validSortBy = map[string]bool{
+	SortByTop:           true,
+	SortByPrice:         true,
+	SortByDepartureTime: true,
+	SortByArrivalTime:   true,
+	SortByDuration:      true,
+	SortByEmissions:     true,
+}
+
+var validStops = map[string]bool{
+	StopsAny:     true,
+	StopsNonstop: true,
+	StopsMax1:    true,
+	StopsMax2:    true,
+}
+
 // =============================================================================
 // Command
 // =============================================================================
@@ -62,21 +85,21 @@ type Command struct {
 	InfantsInSeat          int                  `json:"infants_in_seat"`
 	InfantsOnLap           int                  `json:"infants_on_lap"`
 	TravelClass            string               `json:"travel_class"`
-	GL                     string               `json:"gl"`
-	HL                     string               `json:"hl"`
-	Currency               string               `json:"currency"`
+	GL                     *string              `json:"gl,omitzero"`
+	HL                     *string              `json:"hl,omitzero"`
+	Currency               *string              `json:"currency,omitzero"`
 	Bags                   int                  `json:"bags"`
-	MaxPrice               *float64             `json:"max_price,omitempty"`
+	MaxPrice               *float64             `json:"max_price,omitzero"`
 	SortBy                 string               `json:"sort_by"`
 	Stops                  string               `json:"stops"`
 	IncludeAirlines        []string             `json:"include_airlines"`
 	ExcludeAirlines        []string             `json:"exclude_airlines"`
-	OutboundTimes          *domain.TimeRange    `json:"outbound_times,omitempty"`
-	ReturnTimes            *domain.TimeRange    `json:"return_times,omitempty"`
+	OutboundTimes          *domain.TimeRange    `json:"outbound_times,omitzero"`
+	ReturnTimes            *domain.TimeRange    `json:"return_times,omitzero"`
 	EmissionsFilter        bool                 `json:"emissions_filter"`
-	LayoverDuration        *LayoverRangeCmd     `json:"layover_duration,omitempty"`
+	LayoverDuration        *domain.LayoverRange `json:"layover_duration,omitzero"`
 	ExcludeConnections     []string             `json:"exclude_connections"`
-	MaxDurationMinutes     *int                 `json:"max_duration_minutes,omitempty"`
+	MaxDurationMinutes     *int                 `json:"max_duration_minutes,omitzero"`
 	OutboundSelectionToken string               `json:"outbound_selection_token"`
 	Cursor                 *string              `json:"cursor,omitzero"`
 	Limit                  int                  `json:"limit"`
@@ -91,22 +114,14 @@ const (
 	MaxResultsLimit = domain.MaxResultsLimit
 )
 
-// TimeRangeCmd is the input DTO for time range filters.
-// Deprecated: use domain.TimeRange directly.
-type TimeRangeCmd = domain.TimeRange
 
-// LayoverRangeCmd is the input DTO for layover duration.
-type LayoverRangeCmd struct {
-	MinMinutes int `json:"min_minutes"`
-	MaxMinutes int `json:"max_minutes"`
-}
 
 // MultiCityLegCmd is the input DTO for multi-city legs.
 type MultiCityLegCmd struct {
 	Departure string            `json:"departure"`
 	Arrival   string            `json:"arrival"`
 	Date      string            `json:"date"`
-	Times     *domain.TimeRange `json:"times,omitempty"`
+	Times     *domain.TimeRange `json:"times,omitzero"`
 }
 
 // =============================================================================
@@ -170,6 +185,54 @@ func (cmd *Command) Validate() error {
 		cmd.Adults = 1 // enforce minimum
 	}
 
+	// Validate defaults: TravelClass, SortBy, Stops
+	if cmd.TravelClass == "" {
+		cmd.TravelClass = TravelClassEconomy
+	}
+	if !validTravelClasses[cmd.TravelClass] {
+		return fmt.Errorf("%w: travel_class debe ser economy, premium_economy, business o first", domain.ErrInvalidParameterRange)
+	}
+	if cmd.SortBy == "" {
+		cmd.SortBy = SortByTop
+	}
+	if !validSortBy[cmd.SortBy] {
+		return fmt.Errorf("%w: sort_by debe ser top, price, departure_time, arrival_time, duration o emissions", domain.ErrInvalidParameterRange)
+	}
+	if cmd.Stops == "" {
+		cmd.Stops = StopsAny
+	}
+	if !validStops[cmd.Stops] {
+		return fmt.Errorf("%w: stops debe ser any, nonstop, max_1 o max_2", domain.ErrInvalidParameterRange)
+	}
+
+	// Bags cannot exceed total passengers (adults + children + infants_in_seat)
+	totalPassengers := cmd.Adults + cmd.Children + cmd.InfantsInSeat
+	if cmd.Bags > totalPassengers {
+		return fmt.Errorf("%w: bags no puede superar el número de pasajeros (%d)", domain.ErrInvalidParameterRange, totalPassengers)
+	}
+
+	// Validate time ranges (0-23)
+	if cmd.OutboundTimes != nil {
+		if err := validateTimeRange(cmd.OutboundTimes); err != nil {
+			return fmt.Errorf("%w: outbound_times: %w", domain.ErrInvalidParameterRange, err)
+		}
+	}
+	if cmd.ReturnTimes != nil {
+		if err := validateTimeRange(cmd.ReturnTimes); err != nil {
+			return fmt.Errorf("%w: return_times: %w", domain.ErrInvalidParameterRange, err)
+		}
+	}
+
+	// Layover duration must be non-negative and min <= max
+	if cmd.LayoverDuration != nil {
+		if cmd.LayoverDuration.MinMinutes < 0 || cmd.LayoverDuration.MaxMinutes < 0 {
+			return fmt.Errorf("%w: layover_duration no puede ser negativo", domain.ErrInvalidParameterRange)
+		}
+		if cmd.LayoverDuration.MinMinutes > cmd.LayoverDuration.MaxMinutes {
+			return fmt.Errorf("%w: layover_duration min_minutes no puede ser mayor que max_minutes", domain.ErrInvalidParameterRange)
+		}
+	}
+
 	// Validate Limit: default to 10 if zero, reject if out of range [1,100]
 	if cmd.Limit == 0 {
 		cmd.Limit = DefaultLimit
@@ -189,6 +252,20 @@ func (cmd *Command) Validate() error {
 	return nil
 }
 
+// validateTimeRange checks that departure_from/to and optional arrival_from/to are in 0-23.
+func validateTimeRange(tr *domain.TimeRange) error {
+	if tr.DepartureFrom < 0 || tr.DepartureFrom > 23 || tr.DepartureTo < 0 || tr.DepartureTo > 23 {
+		return fmt.Errorf("departure_from y departure_to deben estar entre 0 y 23")
+	}
+	if tr.ArrivalFrom != nil && (*tr.ArrivalFrom < 0 || *tr.ArrivalFrom > 23) {
+		return fmt.Errorf("arrival_from debe estar entre 0 y 23")
+	}
+	if tr.ArrivalTo != nil && (*tr.ArrivalTo < 0 || *tr.ArrivalTo > 23) {
+		return fmt.Errorf("arrival_to debe estar entre 0 y 23")
+	}
+	return nil
+}
+
 // =============================================================================
 // Mapeo a Dominio
 // =============================================================================
@@ -205,9 +282,9 @@ func (cmd *Command) ToDomain() domain.FlightSearchRequest {
 		InfantsInSeat:          cmd.InfantsInSeat,
 		InfantsOnLap:           cmd.InfantsOnLap,
 		TravelClass:            cmd.TravelClass,
-		GL:                     cmd.GL,
-		HL:                     cmd.HL,
-		Currency:               cmd.Currency,
+		GL:                     ptrStr(cmd.GL),
+		HL:                     ptrStr(cmd.HL),
+		Currency:               ptrStr(cmd.Currency),
 		Bags:                   cmd.Bags,
 		MaxPrice:               cmd.MaxPrice,
 		SortBy:                 cmd.SortBy,
@@ -228,13 +305,8 @@ func (cmd *Command) ToDomain() domain.FlightSearchRequest {
 	// Map ReturnTimes
 	req.ReturnTimes = cmd.ReturnTimes
 
-	// Map LayoverDuration
-	if cmd.LayoverDuration != nil {
-		req.LayoverDuration = &domain.LayoverRange{
-			MinMinutes: cmd.LayoverDuration.MinMinutes,
-			MaxMinutes: cmd.LayoverDuration.MaxMinutes,
-		}
-	}
+	// Map LayoverDuration (already domain.LayoverRange)
+	req.LayoverDuration = cmd.LayoverDuration
 
 	// Map multi-city Legs
 	if len(cmd.Legs) > 0 {
@@ -251,4 +323,13 @@ func (cmd *Command) ToDomain() domain.FlightSearchRequest {
 	}
 
 	return req
+}
+
+// ptrStr returns the dereferenced string, or "" if nil.
+// Used to convert *string command fields to plain string domain fields.
+func ptrStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

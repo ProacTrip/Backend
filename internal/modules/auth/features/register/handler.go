@@ -48,7 +48,7 @@ func NewHandlerWithIdempotency(usecase *UseCase, rdb *redis.Client, isProduction
 func (h *Handler) Handle(c *echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "no-store, private")
 
-	_ = c.RealIP()
+	envIP := c.RealIP()
 
 	idempotencyKey := c.Request().Header.Get("Idempotency-Key")
 	if idempotencyKey == "" {
@@ -72,7 +72,7 @@ func (h *Handler) Handle(c *echo.Context) error {
 		return httperr.MapError(c, echo.NewHTTPError(http.StatusBadRequest, "email and password are required"))
 	}
 
-	resp, err := h.usecase.Execute(c.Request().Context(), cmd)
+	resp, err := h.usecase.Execute(c.Request().Context(), cmd, envIP)
 	if err != nil {
 		return httperr.MapError(c, err)
 	}

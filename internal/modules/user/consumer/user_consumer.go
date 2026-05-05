@@ -40,7 +40,7 @@ func NewUserEventConsumer(rdb *redis.Client, repo domain.UserRepository) *UserEv
 	return &UserEventConsumer{
 		rdb:        rdb,
 		repo:       repo,
-		uc:         upsert_profile.NewUseCase(repo),
+		uc:         upsert_profile.NewUseCaseWithCache(repo, rdb),
 		group:      "user-service",
 		consumer:   fmt.Sprintf("user-worker-%d", time.Now().UnixMilli()),
 		streamName: eventbus.StreamName("auth.user.registered"),
@@ -159,15 +159,40 @@ func (c *UserEventConsumer) handleUserRegistered(ctx context.Context, event *eve
 		return
 	}
 
+	// Extract optional environment fields from the event (may be absent in legacy events)
+	envPrefs := extractEnvPrefs(payload)
+
 	// Create profile using Upsert use case (inyectado en constructor, no crear en cada mensaje)
 	// El perfil se crea basado en user_id - el email viene del dominio Auth
-	if err := c.uc.Execute(ctx, userID); err != nil {
+	// If env fields are present, they override the hardcoded defaults
+	if err := c.uc.Execute(ctx, userID, envPrefs); err != nil {
 		slog.Error("upsert profile failed", "error", err, "user_id", userID)
 		// Don't ack - leave in PEL for retry
 		return
 	}
 
 	slog.Info("user profile created/updated", "user_id", userID)
+}
+
+// extractEnvPrefs extracts optional environment preference fields from the event payload.
+// Returns zero-value EnvPrefs if none are present (old events).
+func extractEnvPrefs(payload map[string]interface{}) domain.EnvPrefs {
+	var prefs domain.EnvPrefs
+
+	if v, ok := payload["language_code"].(string); ok && v != "" {
+		prefs.LanguageCode = v
+	}
+	if v, ok := payload["currency_code"].(string); ok && v != "" {
+		prefs.CurrencyCode = v
+	}
+	if v, ok := payload["country_code"].(string); ok && v != "" {
+		prefs.CountryCode = v
+	}
+	if v, ok := payload["timezone_name"].(string); ok && v != "" {
+		prefs.TimezoneName = v
+	}
+
+	return prefs
 }
 
 // rescueOrphans runs XAUTOCLAIM periodically to reclaim messages from dead workers

@@ -123,7 +123,7 @@ Todos los ejemplos usan `{base_url}` como placeholder.
 
 ## Errores Estándar
 
-Formato **RFC 7807 Problem Details**:
+Formato **RFC 9457 Problem Details**:
 
 ```json
 {
@@ -268,12 +268,12 @@ POST /v1/search/hotels
 | `children_ages` | integer[] | `[]` | Edades de los niños (1-17). Debe coincidir con `children` |
 | `gl` | string\|null | `null` | Código ISO 3166-1 alpha-2. Ej: `"ES"`, `"PE"`. Personaliza resultados al país. Debe tener relación con `query` |
 | `hl` | string\|null | `null` | Código de idioma ISO 639-1. Ej: `"es"`, `"en"`, `"fr"` |
-| `currency` | string | `"USD"` | Código ISO 4217. Ej: `"EUR"`, `"GBP"` |
+| `currency` | string | Resuelto por el backend | Código ISO 4217. Ej: `"EUR"`, `"GBP"`. Si no se envía, el backend resuelve por perfil, IP o default de configuración |
 | `min_price` | number\|null | `null` | Precio mínimo por noche |
 | `max_price` | number\|null | `null` | Precio máximo por noche |
 | `sort_by` | integer\|null | `null` | Orden de resultados. Ver tabla de ordenamiento |
 | `rating` | integer\|null | `null` | Filtro de rating mínimo. Ver tabla de valores |
-| `property_types` | integer[] | `[]` | Tipos de propiedad. Ver tabla de valores |
+| `property_types` | integer[] | `[]` | Tipos de alojamiento. Hotels: 12–24. Vacation Rentals: 1–11. Ver tabla de valores |
 | `amenities` | integer[] | `[]` | Servicios requeridos. Ver tabla de valores |
 | `vacation_rentals` | boolean | `false` | `true` para buscar alquileres vacacionales |
 | `hotel_classes` | integer[] | `[]` | Categorías de hotel (2-5). Solo para Hotels |
@@ -470,7 +470,10 @@ curl -X POST {base_url}/hotels \
     "hotel_classes": [4, 5],
     "property_types": [17, 18],
     "amenities": [35, 9, 10],
-    "free_cancellation": true
+    "brands": [33, 90],
+    "free_cancellation": true,
+    "special_offers": true,
+    "eco_certified": true
   }'
 ```
 
@@ -921,7 +924,7 @@ Cuando una búsqueda devuelve más resultados de los que caben en una página, l
 | `INVALID_PARAM_RANGE` | 422 | Parámetros fuera de rango (`bedrooms`, `bathrooms` negativos, `adults` < 1) |
 | `PROVIDER_UNAVAILABLE` | 503 | El proveedor externo (SerpAPI) no está disponible |
 | `TOKEN_INVALID` | 401 | Cookie de sesión inválida o expirada (solo si el usuario estaba autenticado) |
-| `RATE_LIMIT_EXCEEDED` | 429 | Demasiadas peticiones (RFC 7807 Problem JSON). Ver [Rate Limiting](#rate-limiting) |
+| `RATE_LIMIT_EXCEEDED` | 429 | Demasiadas peticiones (RFC 9457 Problem JSON). Ver [Rate Limiting](#rate-limiting) |
 | `INTERNAL_ERROR` | 500 | Error inesperado del servidor |
 
 ---
@@ -1535,7 +1538,7 @@ curl -X POST {base_url}/hotel-details \
 | `INVALID_PARAM_RANGE` | 422 | Parámetros fuera de rango (`adults` < 1, `children_ages` no coincide con `children`) |
 | `PROVIDER_UNAVAILABLE` | 503 | El proveedor externo no está disponible |
 | `TOKEN_INVALID` | 401 | Cookie de sesión inválida o expirada (solo si el usuario estaba autenticado) |
-| `RATE_LIMIT_EXCEEDED` | 429 | Demasiadas peticiones (RFC 7807 Problem JSON). Ver [Rate Limiting](#rate-limiting) |
+| `RATE_LIMIT_EXCEEDED` | 429 | Demasiadas peticiones (RFC 9457 Problem JSON). Ver [Rate Limiting](#rate-limiting) |
 | `INTERNAL_ERROR` | 500 | Error inesperado del servidor |
 
 ---
@@ -1593,7 +1596,7 @@ Set-Cookie: __Secure-anon_token=019d5439-cb43-716d-90b5-51dcbe980908; HttpOnly; 
 
 ### Response on 429 (Rate Limit Exceeded)
 
-Formato **RFC 7807 Problem Details**:
+Formato **RFC 9457 Problem Details**:
 
 ```json
 {
@@ -1634,6 +1637,8 @@ El backend **siempre obtiene datos frescos del proveedor** (SerpAPI). La caché 
 | Clave de caché | Hash con Blake3 de los parámetros de búsqueda (ver campos abajo) |
 | Invalidación | Por TTL únicamente. No se invalida manualmente |
 | Proveedor externo | Siempre datos frescos (`from_cache: false`) |
+
+> **Nota interna:** El backend envía `no_cache=true` a SerpAPI para hoteles, forzando datos frescos en cada llamada. La caché interna de DragonflyDB es la única capa de caché — se prefiere la frescura de los datos sobre la caché del proveedor externo para hoteles, ya que la disponibilidad y precios cambian constantemente. Para vuelos, SerpAPI sí usa su caché interna (`no_cache=false`).
 
 - Si un usuario busca sin autenticarse, se registra, y vuelve a buscar con los mismos parámetros dentro de la ventana de caché → se reutilizan los resultados cacheados (sin nueva llamada a SerpAPI)
 - `from_cache` es **siempre `false`** en todas las respuestas. La caché no se expone al frontend
