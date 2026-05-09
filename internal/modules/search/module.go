@@ -16,6 +16,7 @@ import (
 	"github.com/ProacTrip/Backend/internal/modules/search/consumer"
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/ai_search"
+	"github.com/ProacTrip/Backend/internal/modules/search/features/execute_saved_search"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/flight_details"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/hotel_details"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/search_flights"
@@ -33,13 +34,14 @@ import (
 // =============================================================================
 
 // Module expone todos los handlers y dependencias del módulo Search.
-type Module struct {
-	SearchFlightsHandler *search_flights.Handler
-	FlightDetailsHandler *flight_details.Handler
-	SearchHotelsHandler  *search_hotels.Handler
-	HotelDetailsHandler  *hotel_details.Handler
-	AISearchHandler      *ai_search.Handler
-	Repository           domain.SearchHistoryRepository
+type 	Module struct {
+	SearchFlightsHandler      *search_flights.Handler
+	FlightDetailsHandler      *flight_details.Handler
+	SearchHotelsHandler       *search_hotels.Handler
+	HotelDetailsHandler       *hotel_details.Handler
+	AISearchHandler           *ai_search.Handler
+	ExecuteSavedSearchHandler *execute_saved_search.Handler
+	Repository                domain.SearchHistoryRepository
 
 	searchUC       *search_flights.UseCase
 	detailsUC      *flight_details.UseCase
@@ -110,6 +112,9 @@ type Config struct {
 
 	// Event Bus — for publishing conversation_saved events to Dragonfly Streams
 	EventBus *eventbus.EventBus
+
+	// SavedSearchProvider — provides access to saved searches from the user module.
+	SavedSearchProvider domain.SavedSearchProvider
 }
 
 // =============================================================================
@@ -229,13 +234,26 @@ func NewModule(cfg Config) (*Module, error) {
 		"details_ttl", cfg.FlightDetailsTTL,
 	)
 
+	// 8. Execute Saved Search — requires SavedSearchProvider to be set
+	var executeSavedSearchHandler *execute_saved_search.Handler
+	if cfg.SavedSearchProvider != nil {
+		executeSavedSearchUC := execute_saved_search.NewUseCase(execute_saved_search.UseCaseDeps{
+			SavedSearchProvider: cfg.SavedSearchProvider,
+			FlightSearcher:      searchUC,
+			HotelSearcher:       hotelsUC,
+			AISearcher:          aiSearchUC,
+		})
+		executeSavedSearchHandler = execute_saved_search.NewHandler(executeSavedSearchUC)
+	}
+
 	return &Module{
-		SearchFlightsHandler: searchHandler,
-		FlightDetailsHandler: detailsHandler,
-		SearchHotelsHandler:  hotelsHandler,
-		HotelDetailsHandler:  hdetailsHandler,
-		AISearchHandler:      aiSearchHandler,
-		Repository:           repo,
+		SearchFlightsHandler:      searchHandler,
+		FlightDetailsHandler:      detailsHandler,
+		SearchHotelsHandler:       hotelsHandler,
+		HotelDetailsHandler:       hdetailsHandler,
+		AISearchHandler:           aiSearchHandler,
+		ExecuteSavedSearchHandler: executeSavedSearchHandler,
+		Repository:                repo,
 		searchUC:             searchUC,
 		detailsUC:            detailsUC,
 		hotelsUC:             hotelsUC,

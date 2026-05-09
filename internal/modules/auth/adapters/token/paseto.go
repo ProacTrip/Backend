@@ -58,13 +58,13 @@ func NewPasetoService(cfg PasetoConfig) (*PasetoService, error) {
 	}, nil
 }
 
-func (s *PasetoService) GenerateTokenPair(userID uuid.UUID, email string, roleID, sessionID uuid.UUID) (*TokenPair, error) {
-	accessToken, accessJTI, err := s.generateAccessToken(userID, email, roleID, sessionID)
+func (s *PasetoService) GenerateTokenPair(userID uuid.UUID, email string, role string, roleID, sessionID uuid.UUID) (*TokenPair, error) {
+	accessToken, accessJTI, err := s.generateAccessToken(userID, email, role, roleID, sessionID)
 	if err != nil {
 		return nil, err
 	}
 
-	refreshToken, refreshJTI, err := s.generateRefreshToken(userID, email, roleID, sessionID)
+	refreshToken, refreshJTI, err := s.generateRefreshToken(userID, email, role, roleID, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -80,13 +80,13 @@ func (s *PasetoService) GenerateTokenPair(userID uuid.UUID, email string, roleID
 }
 
 // GenerateAccessToken genera solo un access token.
-func (s *PasetoService) GenerateAccessToken(userID uuid.UUID, email string, roleID, sessionID uuid.UUID) (string, error) {
-	tokenStr, _, err := s.generateAccessToken(userID, email, roleID, sessionID)
+func (s *PasetoService) GenerateAccessToken(userID uuid.UUID, email string, role string, roleID, sessionID uuid.UUID) (string, error) {
+	tokenStr, _, err := s.generateAccessToken(userID, email, role, roleID, sessionID)
 	return tokenStr, err
 }
 
-func (s *PasetoService) GenerateRefreshToken(userID uuid.UUID, email string, roleID, sessionID uuid.UUID) (string, error) {
-	tokenStr, _, err := s.generateRefreshToken(userID, email, roleID, sessionID)
+func (s *PasetoService) GenerateRefreshToken(userID uuid.UUID, email string, role string, roleID, sessionID uuid.UUID) (string, error) {
+	tokenStr, _, err := s.generateRefreshToken(userID, email, role, roleID, sessionID)
 	return tokenStr, err
 }
 
@@ -147,10 +147,13 @@ func (s *PasetoService) ValidateAccessToken(ctx context.Context, tokenString str
 		return nil, domain.ErrTokenInvalid
 	}
 
+	role, _ := pasetoToken.GetString("role")
+
 	return &AccessClaims{
 		UserID:    userID,
 		Email:     email,
 		RoleID:    roleID,
+		Role:      role,
 		SessionID: sessionID,
 		JTI:       jtiUUID,
 	}, nil
@@ -204,10 +207,13 @@ func (s *PasetoService) ValidateRefreshToken(ctx context.Context, tokenString st
 		return nil, domain.ErrTokenInvalid
 	}
 
+	role, _ := pasetoToken.GetString("role")
+
 	claims := &RefreshClaims{
 		UserID:    userID,
 		Email:     email,
 		RoleID:    roleID,
+		Role:      role,
 		SessionID: sessionID,
 		JTI:       jtiUUID,
 	}
@@ -231,12 +237,12 @@ func (s *PasetoService) ValidateAndRotateRefresh(ctx context.Context, refreshTok
 		return nil, "", "", fmt.Errorf("blacklist JTI: %w", err)
 	}
 
-	newAccess, err := s.GenerateAccessToken(claims.UserID, claims.Email, claims.RoleID, claims.SessionID)
+	newAccess, err := s.GenerateAccessToken(claims.UserID, claims.Email, claims.Role, claims.RoleID, claims.SessionID)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("generate access token: %w", err)
 	}
 
-	newRefresh, err := s.GenerateRefreshToken(claims.UserID, claims.Email, claims.RoleID, claims.SessionID)
+	newRefresh, err := s.GenerateRefreshToken(claims.UserID, claims.Email, claims.Role, claims.RoleID, claims.SessionID)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("generate refresh token: %w", err)
 	}
@@ -268,12 +274,13 @@ func (s *PasetoService) isJTIBlacklisted(ctx context.Context, jti uuid.UUID) (bo
 // Métodos privados de generación
 // ---------------------------------------------------------------------------
 
-func (s *PasetoService) generateAccessToken(userID uuid.UUID, email string, roleID, sessionID uuid.UUID) (string, uuid.UUID, error) {
+func (s *PasetoService) generateAccessToken(userID uuid.UUID, email, role string, roleID, sessionID uuid.UUID) (string, uuid.UUID, error) {
 	jti := uuid.Must(uuid.NewV7())
 
 	token := paseto.NewToken()
 	token.SetSubject(userID.String())
 	token.SetString("email", email)
+	token.SetString("role", role)
 	token.SetString("role_id", roleID.String())
 	token.SetString("session_id", sessionID.String())
 	token.SetJti(jti.String())
@@ -284,12 +291,13 @@ func (s *PasetoService) generateAccessToken(userID uuid.UUID, email string, role
 	return encrypted, jti, nil
 }
 
-func (s *PasetoService) generateRefreshToken(userID uuid.UUID, email string, roleID, sessionID uuid.UUID) (string, uuid.UUID, error) {
+func (s *PasetoService) generateRefreshToken(userID uuid.UUID, email, role string, roleID, sessionID uuid.UUID) (string, uuid.UUID, error) {
 	jti := uuid.Must(uuid.NewV7())
 
 	token := paseto.NewToken()
 	token.SetSubject(userID.String())
 	token.SetString("email", email)
+	token.SetString("role", role)
 	token.SetString("role_id", roleID.String())
 	token.SetString("session_id", sessionID.String())
 	token.SetJti(jti.String())
@@ -317,6 +325,7 @@ type AccessClaims struct {
 	UserID    uuid.UUID
 	Email     string
 	RoleID    uuid.UUID
+	Role      string
 	SessionID uuid.UUID
 	JTI       uuid.UUID
 }
@@ -324,16 +333,30 @@ type AccessClaims struct {
 // GetUserID returns the user ID as a UUID for interface satisfaction.
 func (c AccessClaims) GetUserID() uuid.UUID { return c.UserID }
 
+// GetRole returns the role name for admin middleware checks.
+func (c AccessClaims) GetRole() string { return c.Role }
+
 type RefreshClaims struct {
 	UserID    uuid.UUID
 	Email     string
 	RoleID    uuid.UUID
+	Role      string
 	SessionID uuid.UUID
 	JTI       uuid.UUID
 }
 
 // GetUserID returns the user ID as a UUID for interface satisfaction.
 func (c RefreshClaims) GetUserID() uuid.UUID { return c.UserID }
+
+// GetRole returns the role name for admin middleware checks.
+func (c RefreshClaims) GetRole() string { return c.Role }
+
+// RoleClaims is the minimal interface for claims that carry role information.
+// Both AccessClaims and RefreshClaims satisfy this.
+type RoleClaims interface {
+	GetUserID() uuid.UUID
+	GetRole() string
+}
 
 // =============================================================================
 // SSE / OAuth / MFA Token Methods

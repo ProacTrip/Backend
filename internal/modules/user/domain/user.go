@@ -35,6 +35,7 @@ const (
 type UserProfile struct {
 	ID              uuid.UUID  `json:"id"`      // PK - diferente de user_id
 	UserID          uuid.UUID  `json:"user_id"` // FK al dominio Auth
+	Email           string     `json:"email,omitzero"` // denormalized from registration event
 	FirstName       *string    `json:"first_name,omitempty"`
 	LastName        *string    `json:"last_name,omitempty"`
 	DateOfBirth     *time.Time `json:"date_of_birth,omitzero"`
@@ -48,6 +49,7 @@ type UserProfile struct {
 	TimezoneName    string     `json:"timezone_name"` // NOT NULL DEFAULT 'UTC'
 	LanguageCode    string     `json:"language_code"` // NOT NULL DEFAULT 'es'
 	CurrencyCode    string     `json:"currency_code"` // NOT NULL DEFAULT 'EUR'
+	Role            string     `json:"role,omitzero"` // "client" or "admin", default "client"
 	IsPublic        bool       `json:"is_public"`     // NOT NULL DEFAULT FALSE
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
@@ -57,15 +59,19 @@ type UserProfile struct {
 // Métodos de dominio
 // =============================================================================
 
-// NewUserProfile crea un nuevo perfil de usuario
+// NewUserProfile crea un nuevo perfil de usuario.
+// email: viene del evento UserRegistered (denormalizado para evitar cross-DB joins).
 // IMPORTANTE: Usa user_id (FK al auth) diferente del id (PK auto-generado)
-func NewUserProfile(userID uuid.UUID) *UserProfile {
+func NewUserProfile(userID uuid.UUID, email string) *UserProfile {
 	now := time.Now()
 	return &UserProfile{
+		ID:            uuid.New(),
 		UserID:        userID,
+		Email:         email,
 		TimezoneName:  "UTC",
 		LanguageCode:  "es",
 		CurrencyCode:  "EUR",
+		Role:          "client",
 		IsPublic:      false,
 		PhoneVerified: false,
 		CreatedAt:     now,

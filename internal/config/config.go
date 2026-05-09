@@ -56,10 +56,12 @@ type Config struct {
 	SerpAPIKey     string                    // API key de SerpAPI para búsqueda de vuelos
 	PasetoKeyBytes []byte                    // Bytes decodificados de PASETO_KEY (para uso directo)
 	RateLimit      *ratelimit.RateLimitConfig // Configuración de rate limiting
-	DefaultCurrency   string                 // Moneda por defecto para usuarios sin geoip (DEFAULT_CURRENCY env)
-	DefaultLanguage   string                 // Idioma por defecto para usuarios sin geoip (DEFAULT_LANGUAGE env)
-	DefaultCountryCode string               // País por defecto para búsquedas sin geoip (DEFAULT_COUNTRY_CODE env)
-	AI                AIConfig               // Configuración del intérprete AI
+	DefaultCurrency    string                 // Moneda por defecto para usuarios sin geoip (DEFAULT_CURRENCY env)
+	DefaultLanguage    string                 // Idioma por defecto para usuarios sin geoip (DEFAULT_LANGUAGE env)
+	DefaultCountryCode string                 // País por defecto para búsquedas sin geoip (DEFAULT_COUNTRY_CODE env)
+	AI                 AIConfig               // Configuración del intérprete AI
+	Medical            MedicalConfig          // Configuración del módulo médico
+	Documents          DocumentLimitsConfig   // Límites de documentos
 }
 
 // Configuración de la base de datos PostgreSQL
@@ -126,6 +128,28 @@ type AIConfig struct {
 	APIKey   string        // API key (omit for ollama local)
 	Model    string        // e.g. "deepseek-chat", "dolphin-mistral"
 	Timeout  time.Duration // timeout for AI requests
+}
+
+// MedicalConfig contiene la configuración del módulo médico.
+type MedicalConfig struct {
+	EncryptionKey string // 32 bytes (64 hex chars) para ChaCha20-Poly1305
+}
+
+// EncryptionKeyBytes decodifica la clave de hex a bytes.
+func (c *MedicalConfig) EncryptionKeyBytes() ([]byte, error) {
+	if c.EncryptionKey == "" {
+		return nil, nil // sin clave → sin encriptación
+	}
+	return hex.DecodeString(c.EncryptionKey)
+}
+
+// DocumentLimitsConfig contiene los límites de subida de documentos.
+type DocumentLimitsConfig struct {
+	MaxSizeMB   int // Tamaño máximo por documento (MB)
+	ImageMaxMB  int // Tamaño máximo para imágenes (MB)
+	MaxPerUser  int // Máximo de documentos por usuario
+	RateLimit   int // Subidas por minuto por usuario
+	RateWindow  int // Ventana del rate limit (segundos)
 }
 
 // ValidateSecureConfig valida las claves criptográficas al arrancar
@@ -216,6 +240,16 @@ func Load() *Config {
 			Model:    getEnv("AI_MODEL", ""),
 			Timeout:  getEnvDuration("AI_TIMEOUT", 30*time.Second),
 		},
+		Medical: MedicalConfig{
+			EncryptionKey: getEnv("MEDICAL_ENCRYPTION_KEY", ""),
+		},
+		Documents: DocumentLimitsConfig{
+			MaxSizeMB:  getEnvInt("DOCUMENT_MAX_SIZE_MB", 20),
+			ImageMaxMB: getEnvInt("IMAGE_MAX_SIZE_MB", 10),
+			MaxPerUser: getEnvInt("DOCUMENT_MAX_PER_USER", 5),
+			RateLimit:  getEnvInt("DOCUMENT_UPLOAD_RATE_LIMIT", 10),
+			RateWindow: getEnvInt("DOCUMENT_UPLOAD_RATE_WINDOW", 60),
+		},
 	}
 }
 
@@ -237,6 +271,18 @@ func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
 		return defaultValue
 	}
 	return d
+}
+
+func getEnvInt(key string, defaultValue int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultValue
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return defaultValue
+	}
+	return n
 }
 
 // Addr retorna dirección del servidor en formato host:port

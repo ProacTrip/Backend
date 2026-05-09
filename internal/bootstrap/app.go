@@ -28,6 +28,7 @@ import (
 	searchConv "github.com/ProacTrip/Backend/internal/modules/search/shared/conversation"
 	searchShared "github.com/ProacTrip/Backend/internal/modules/search/features/shared"
 	userModule "github.com/ProacTrip/Backend/internal/modules/user"
+	userAdapters "github.com/ProacTrip/Backend/internal/modules/user/adapters"
 	"github.com/ProacTrip/Backend/internal/modules/auth/features/register"
 	"github.com/ProacTrip/Backend/internal/shared/cache"
 	contextutil "github.com/ProacTrip/Backend/internal/shared/context"
@@ -277,10 +278,12 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	}
 
 	// User Module (simplified for MVP)
+	encKeyBytes, _ := cfg.Medical.EncryptionKeyBytes()
 	userMod, err := userModule.NewModule(userModule.Config{
-		PostgresPool: userPool,
-		RedisClient:  rdb,
-		EventBus:     eventBus,
+		PostgresPool:  userPool,
+		RedisClient:   rdb,
+		EventBus:      eventBus,
+		EncryptionKey: encKeyBytes,
 	})
 	if err != nil {
 		return nil, err
@@ -309,6 +312,12 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	if err := userMod.EventConsumer.Start(appCtx); err != nil {
 		slog.Warn("user event consumer failed to start", "error", err)
 		// No es fatal - el servidor puede iniciar sin el consumer
+	}
+
+	// Start avatar validator pipeline (BACKGROUND) — Phase 4
+	if err := userMod.Start(appCtx); err != nil {
+		slog.Warn("user avatar validator failed to start", "error", err)
+		// No es fatal - el servidor puede iniciar sin el validator
 	}
 
 	// Search Module — create AI interpreter if configured
@@ -340,6 +349,9 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	// Conversation PG store for auth users
 	convPgStore := searchConv.NewPgConversationStore(searchPool)
 
+	// SavedSearchResolver bridges user module's SavedSearchRepo to search module's SavedSearchProvider.
+	savedSearchResolver := userAdapters.NewSearchResolver(userMod.SavedSearchRepo)
+
 	searchMod, err := searchModule.NewModule(searchModule.Config{
 		Provider:          nil, // created from SerpAPIKey/SerpAPITimeout
 		SerpAPIKey:        cfg.SerpAPIKey,
@@ -364,6 +376,7 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		AIInterpreter:     aiInterpreter,
 		ConversationStore: convPgStore,
 		EventBus:          eventBus,
+		SavedSearchProvider: savedSearchResolver,
 	})
 	if err != nil {
 		return nil, err
@@ -445,9 +458,18 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	// AI search — supports streaming via "stream": true in the request body
 	searchGroup.POST("/ai", searchMod.AISearchHandler.Handle)
 
+	// Execute saved search — requires auth (cookie), not optional
+	if searchMod.ExecuteSavedSearchHandler != nil {
+		searchGroup.POST("/execute_saved", searchMod.ExecuteSavedSearchHandler.Handle, authMiddleware.Handle, authRateLimitMW)
+	}
+
 	// Environment route: location + weather (public, no auth required)
 	environmentGroup := e.Group("/v1")
 	environmentGroup.GET("/environment", environmentMod.GetEnvironmentHandler.Handle)
+
+	// User routes: /v1/user/profile/* (autenticado via cookie)
+	userGroup := e.Group("/v1/user", authMiddleware.Handle, authRateLimitMW)
+	userMod.RegisterRoutes(userGroup, authMiddleware.Handle)
 
 	// Start conversation consumer (BACKGROUND - persiste conversaciones en PG via streams)
 	if searchMod.ConvConsumer != nil {
@@ -607,6 +629,15 @@ func (app *App) Shutdown(ctx context.Context) error {
 	// Cancel background consumers (notification, user event handlers)
 	if app.appCancel != nil {
 		app.appCancel()
+	}
+
+	// Wait for pipeline workers to drain (graceful shutdown with timeout)
+	if app.UserModule != nil {
+		shutdownCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		if err := app.UserModule.Shutdown(shutdownCtx); err != nil {
+			slog.Warn("user module shutdown timed out", "error", err)
+		}
 	}
 
 	// Wait for in-flight fire-and-forget goroutines (cache writes, history saves)

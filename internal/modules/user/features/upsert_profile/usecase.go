@@ -4,6 +4,7 @@ package upsert_profile
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -21,26 +22,49 @@ import (
 // =============================================================================
 
 type UseCase struct {
-	repo domain.UserRepository
-	rdb  *redis.Client // optional — for populating profile prefs cache
+	repo        domain.ProfileRepository
+	travelRepo  domain.TravelPrefsRepository
+	medicalRepo domain.MedicalProfileRepository
+	notifRepo   domain.NotificationPrefsRepository
+	rdb         *redis.Client // optional — for populating profile prefs cache
 }
 
-func NewUseCase(repo domain.UserRepository) *UseCase {
+func NewUseCase(repo domain.ProfileRepository) *UseCase {
 	return &UseCase{repo: repo}
 }
 
 // NewUseCaseWithCache creates a UseCase that also populates the Dragonfly
 // profile prefs cache after profile creation/update.
-func NewUseCaseWithCache(repo domain.UserRepository, rdb *redis.Client) *UseCase {
+func NewUseCaseWithCache(repo domain.ProfileRepository, rdb *redis.Client) *UseCase {
 	return &UseCase{repo: repo, rdb: rdb}
+}
+
+// NewUseCaseComplete creates a UseCase that populates all related tables
+// (travel prefs, medical profile, notification prefs) on profile creation.
+// Repos may be nil for backward compat — defaults are skipped silently.
+func NewUseCaseComplete(
+	repo domain.ProfileRepository,
+	travelRepo domain.TravelPrefsRepository,
+	medicalRepo domain.MedicalProfileRepository,
+	notifRepo domain.NotificationPrefsRepository,
+	rdb *redis.Client,
+) *UseCase {
+	return &UseCase{
+		repo:        repo,
+		travelRepo:  travelRepo,
+		medicalRepo: medicalRepo,
+		notifRepo:   notifRepo,
+		rdb:         rdb,
+	}
 }
 
 // Execute creates or updates a user profile with optional environment-based prefs.
 // El perfil se crea basado en user_id (FK al dominio Auth)
 // El Upsert usa user_id como clave de conflicto
-func (uc *UseCase) Execute(ctx context.Context, userID uuid.UUID, envPrefs ...domain.EnvPrefs) error {
+// email: denormalized from the registration event (avoids cross-DB joins).
+func (uc *UseCase) Execute(ctx context.Context, userID uuid.UUID, email string, envPrefs ...domain.EnvPrefs) error {
 	// Crear nuevo perfil con los defaults de la migración
-	profile := domain.NewUserProfile(userID)
+	profile := domain.NewUserProfile(userID, email)
 
 	// Override with environment prefs if provided
 	if len(envPrefs) > 0 && envPrefs[0].HasAny() {
@@ -59,10 +83,55 @@ func (uc *UseCase) Execute(ctx context.Context, userID uuid.UUID, envPrefs ...do
 		return fmt.Errorf("upsert profile: %w", err)
 	}
 
+	// Create default related rows (idempotent — INSERT ON CONFLICT DO NOTHING)
+	uc.createDefaults(ctx, userID)
+
 	// Populate Dragonfly profile prefs cache (best-effort, non-blocking)
 	uc.populatePrefsCache(ctx, userID, profile)
 
 	return nil
+}
+
+// createDefaults seeds the related tables with default values.
+// All inserts are idempotent (INSERT ... ON CONFLICT DO NOTHING in repos).
+// Failures are logged as warnings — they don't block profile creation.
+func (uc *UseCase) createDefaults(ctx context.Context, userID uuid.UUID) {
+	if uc.travelRepo != nil {
+		travelPrefs := domain.NewTravelPreferences(userID)
+		if err := uc.travelRepo.Create(ctx, travelPrefs); err != nil {
+			slog.WarnContext(ctx, "create travel prefs default failed",
+				slog.String("user_id", userID.String()),
+				slog.String("error", err.Error()),
+			)
+		}
+	}
+
+	if uc.medicalRepo != nil {
+		medicalProfile := domain.NewMedicalProfileV2(userID)
+		if err := uc.medicalRepo.Create(ctx, medicalProfile); err != nil {
+			slog.WarnContext(ctx, "create medical profile default failed",
+				slog.String("user_id", userID.String()),
+				slog.String("error", err.Error()),
+			)
+		}
+	}
+
+	if uc.notifRepo != nil {
+		np1 := domain.NewNotificationPreference(userID, domain.NotifChannelEmail, domain.NotifTypeBookingConfirm)
+		if err := uc.notifRepo.Upsert(ctx, np1); err != nil {
+			slog.WarnContext(ctx, "create notif pref default failed",
+				slog.String("user_id", userID.String()),
+				slog.String("error", err.Error()),
+			)
+		}
+		np2 := domain.NewNotificationPreference(userID, domain.NotifChannelEmail, domain.NotifTypeTravelReminder)
+		if err := uc.notifRepo.Upsert(ctx, np2); err != nil {
+			slog.WarnContext(ctx, "create notif pref default failed",
+				slog.String("user_id", userID.String()),
+				slog.String("error", err.Error()),
+			)
+		}
+	}
 }
 
 // populatePrefsCache stores profile preferences in Dragonfly for future search
@@ -96,17 +165,18 @@ func (uc *UseCase) populatePrefsCache(ctx context.Context, userID uuid.UUID, pro
 func (uc *UseCase) HandleVerification(ctx context.Context, userID uuid.UUID) error {
 	// Check if profile exists by user_id
 	existing, err := uc.repo.GetByUserID(ctx, userID)
-	if err != nil {
+	if err != nil && !errors.Is(err, domain.ErrProfileNotFound) {
 		return fmt.Errorf("check profile for verification: %w", err)
 	}
 
 	if existing == nil {
 		// Edge case: verify-email clicked before any event was processed
-		// Create a minimal profile first
-		profile := domain.NewUserProfile(userID)
+		// Create a minimal profile first (email empty — will be filled by registration event)
+		profile := domain.NewUserProfile(userID, "")
 		if err := uc.repo.UpsertProfile(ctx, profile); err != nil {
 			return fmt.Errorf("create profile on verification: %w", err)
 		}
+		uc.createDefaults(ctx, userID)
 	}
 
 	// El status del perfil ahora se maneja de forma diferente

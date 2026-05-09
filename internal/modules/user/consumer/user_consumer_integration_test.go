@@ -42,6 +42,40 @@ func (m *integrationMockRepo) UpsertProfile(ctx context.Context, profile *domain
 	return nil
 }
 
+func (m *integrationMockRepo) Create(ctx context.Context, profile *domain.UserProfile) error {
+	return m.UpsertProfile(ctx, profile)
+}
+
+func (m *integrationMockRepo) Update(ctx context.Context, profile *domain.UserProfile) error {
+	if profile == nil {
+		return fmt.Errorf("nil profile")
+	}
+	p, ok := m.profiles[profile.UserID]
+	if !ok {
+		return fmt.Errorf("profile not found")
+	}
+	if profile.FirstName != nil { p.FirstName = profile.FirstName }
+	if profile.LastName != nil { p.LastName = profile.LastName }
+	if profile.DateOfBirth != nil { p.DateOfBirth = profile.DateOfBirth }
+	if profile.Gender != nil { p.Gender = profile.Gender }
+	if profile.Nationality != nil { p.Nationality = profile.Nationality }
+	if profile.Phone != nil { p.Phone = profile.Phone }
+	if profile.Bio != nil { p.Bio = profile.Bio }
+	if profile.IsPublic != nil { p.IsPublic = profile.IsPublic }
+	return nil
+}
+
+func (m *integrationMockRepo) UpdateLocale(ctx context.Context, userID uuid.UUID, timezone, language, currency, currentLocation string) error {
+	p, ok := m.profiles[userID]
+	if !ok {
+		return fmt.Errorf("profile not found")
+	}
+	if timezone != "" { p.TimezoneName = timezone }
+	if language != "" { p.LanguageCode = language }
+	if currency != "" { p.CurrencyCode = currency }
+	return nil
+}
+
 func (m *integrationMockRepo) GetByUserID(ctx context.Context, userID uuid.UUID) (*domain.UserProfile, error) {
 	p, ok := m.profiles[userID]
 	if !ok {
@@ -106,7 +140,7 @@ func TestIntegration_RegistrationEventToProfileCache(t *testing.T) {
 	}
 
 	// 3. Execute upsert with env prefs (what the consumer calls)
-	if err := uc.Execute(ctx, userID, envPrefs); err != nil {
+	if err := uc.Execute(ctx, userID, "test@example.com", envPrefs); err != nil {
 		t.Fatalf("upsert profile failed: %v", err)
 	}
 
@@ -167,7 +201,7 @@ func TestIntegration_RegistrationEventWithoutEnvFields_ProfileDefaults(t *testin
 	// Empty env prefs — simulates a legacy event without env fields
 	emptyPrefs := domain.EnvPrefs{}
 
-	if err := uc.Execute(ctx, userID, emptyPrefs); err != nil {
+	if err := uc.Execute(ctx, userID, "", emptyPrefs); err != nil {
 		t.Fatalf("upsert profile failed: %v", err)
 	}
 
@@ -250,7 +284,7 @@ func TestIntegration_RegistrationEventMixedStream(t *testing.T) {
 	uc := upsert_profile.NewUseCaseWithCache(repo, rdb)
 
 	// Process old-style event (no env fields)
-	if err := uc.Execute(ctx, userIDOld); err != nil {
+	if err := uc.Execute(ctx, userIDOld, ""); err != nil {
 		t.Fatalf("old event upsert failed: %v", err)
 	}
 
@@ -261,7 +295,7 @@ func TestIntegration_RegistrationEventMixedStream(t *testing.T) {
 		CountryCode:  "MX",
 		TimezoneName: "America/Mexico_City",
 	}
-	if err := uc.Execute(ctx, userIDNew, newEnvPrefs); err != nil {
+	if err := uc.Execute(ctx, userIDNew, "", newEnvPrefs); err != nil {
 		t.Fatalf("new event upsert failed: %v", err)
 	}
 
@@ -336,7 +370,7 @@ func TestIntegration_ProfilePrefsUpdatedLater(t *testing.T) {
 		CountryCode:  "ES",
 		TimezoneName: "Europe/Madrid",
 	}
-	if err := uc.Execute(ctx, userID, initialPrefs); err != nil {
+	if err := uc.Execute(ctx, userID, "", initialPrefs); err != nil {
 		t.Fatalf("initial upsert failed: %v", err)
 	}
 
@@ -373,7 +407,7 @@ func TestIntegration_LegacyEventReplayDoesNotCrash(t *testing.T) {
 	uc := upsert_profile.NewUseCaseWithCache(repo, rdb)
 
 	// Replay a legacy event: only user_id and email, no env fields
-	if err := uc.Execute(ctx, userID); err != nil {
+	if err := uc.Execute(ctx, userID, ""); err != nil {
 		t.Fatalf("legacy event replay should not crash: %v", err)
 	}
 
@@ -383,7 +417,7 @@ func TestIntegration_LegacyEventReplayDoesNotCrash(t *testing.T) {
 		t.Fatalf("profile should exist after legacy replay: %v", err)
 	}
 	// All fields should have hardcoded defaults
-	validDefault := domain.NewUserProfile(userID)
+	validDefault := domain.NewUserProfile(userID, "")
 	if profile.CurrencyCode != validDefault.CurrencyCode {
 		t.Errorf("CurrencyCode = %q, want hardcoded %q", profile.CurrencyCode, validDefault.CurrencyCode)
 	}

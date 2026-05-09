@@ -22,7 +22,8 @@ const (
 	ProblemTypeNotFound        ProblemType = "https://api.proactrip.com/errors/not-found"
 	ProblemTypeConflict        ProblemType = "https://api.proactrip.com/errors/conflict"
 	ProblemTypeValidationError ProblemType = "https://api.proactrip.com/errors/validation-error"
-	ProblemTypeTooManyRequests ProblemType = "https://api.proactrip.com/errors/rate-limit-exceeded"
+	ProblemTypeTooManyRequests  ProblemType = "https://api.proactrip.com/errors/rate-limit-exceeded"
+	ProblemTypePayloadTooLarge ProblemType = "https://api.proactrip.com/errors/payload-too-large"
 
 	// 5xx Server Errors
 	ProblemTypeInternalError      ProblemType = "https://api.proactrip.com/errors/internal-error"
@@ -110,6 +111,9 @@ var (
 	ErrTooManyRequests = func(detail string, err error) *Problem {
 		return New(ProblemTypeTooManyRequests, "Too Many Requests", detail, http.StatusTooManyRequests, err)
 	}
+	ErrPayloadTooLarge = func(detail string, err error) *Problem {
+		return New(ProblemTypePayloadTooLarge, "Payload Too Large", detail, http.StatusRequestEntityTooLarge, err)
+	}
 	ErrInternalError = func(detail string, err error) *Problem {
 		return New(ProblemTypeInternalError, "Internal Server Error", detail, http.StatusInternalServerError, err)
 	}
@@ -164,6 +168,8 @@ func HTTPStatusFromType(typ ProblemType) int {
 		return http.StatusConflict
 	case ProblemTypeTooManyRequests:
 		return http.StatusTooManyRequests
+	case ProblemTypePayloadTooLarge:
+		return http.StatusRequestEntityTooLarge
 	case ProblemTypeInternalError:
 		return http.StatusInternalServerError
 	case ProblemTypeBadGateway:

@@ -1,3 +1,4 @@
+-- +migrate Up
 -- =============================================================================
 -- FUNCIONES Y UTILIDADES (sin lógica de negocio)
 -- =============================================================================
@@ -166,7 +167,7 @@ CREATE TABLE IF NOT EXISTS user_documents (
     is_verified       BOOLEAN     NOT NULL DEFAULT FALSE,
     verified_at       TIMESTAMPTZ,
     verified_by       UUID,
-    ocr_status        VARCHAR(20) NOT NULL DEFAULT 'uploaded',
+    ocr_status        VARCHAR(20) NOT NULL DEFAULT 'queued',
     ocr_data          JSONB,
     ocr_confidence    DOUBLE PRECISION,
     extracted_data    JSONB,
@@ -185,7 +186,7 @@ CREATE TABLE IF NOT EXISTS user_documents (
 
     CONSTRAINT chk_ocr_status CHECK (
         ocr_status IN (
-            'uploaded', 'validating', 'sanitizing', 'ocr_processing',
+            'queued', 'processing', 'validating', 'sanitizing', 'ocr_processing',
             'completed', 'rejected', 'failed'
         )
     )
@@ -290,3 +291,17 @@ CREATE TABLE IF NOT EXISTS wishlist_items (
 );
 
 CREATE INDEX idx_wishlist_items_wishlist_id ON wishlist_items(wishlist_id);
+
+-- +migrate Down
+-- Eliminar todas las tablas en orden inverso (para respetar FKs)
+DROP TABLE IF EXISTS wishlist_items CASCADE;
+DROP TABLE IF EXISTS wishlists CASCADE;
+DROP TABLE IF EXISTS saved_searches CASCADE;
+DROP TABLE IF EXISTS medical_pending_updates CASCADE;
+DROP TABLE IF EXISTS user_documents CASCADE;
+DROP TABLE IF EXISTS document_types CASCADE;
+DROP TABLE IF EXISTS user_notification_preferences CASCADE;
+DROP TABLE IF EXISTS user_medical_profiles CASCADE;
+DROP TABLE IF EXISTS user_travel_preferences CASCADE;
+DROP TABLE IF EXISTS user_profiles CASCADE;
+DROP FUNCTION IF EXISTS update_updated_at_column CASCADE;

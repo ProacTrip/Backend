@@ -3,19 +3,14 @@ package shared
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
 
-// =============================================================================
-// Profile preference cache — reads cached user preferences from Dragonfly
-// Cache key format: profile:{userID}:prefs (Hash)
-// TTL: 30 minutes
-// =============================================================================
-
 const (
 	// ProfilePrefsCacheTTL is the TTL for cached profile preferences
-	ProfilePrefsCacheTTL = 30 * 60 // 30 minutes in seconds
+	ProfilePrefsCacheTTL = 30 * time.Minute // 30 minutes
 
 	// profilePrefsKeyPrefix is the cache key prefix
 	profilePrefsKeyPrefix = "profile:"
@@ -81,5 +76,15 @@ func SetProfilePrefs(ctx context.Context, rdb *redis.Client, userID, currency, l
 		return fmt.Errorf("set profile prefs TTL: %w", err)
 	}
 
+	return nil
+}
+
+// DeleteProfilePrefs invalida el cache de preferencias para un usuario.
+// Se llama después de actualizar timezone, idioma o moneda.
+func DeleteProfilePrefs(ctx context.Context, rdb *redis.Client, userID string) error {
+	key := profilePrefsKeyPrefix + userID + profilePrefsKeySuffix
+	if err := rdb.Del(ctx, key).Err(); err != nil {
+		return fmt.Errorf("delete profile prefs: %w", err)
+	}
 	return nil
 }

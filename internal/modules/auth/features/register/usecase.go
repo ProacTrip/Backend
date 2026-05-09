@@ -37,7 +37,7 @@ type PasswordHasher interface {
 // =============================================================================
 
 type TokenService interface {
-	GenerateTokenPair(userID uuid.UUID, email string, roleID, sessionID uuid.UUID) (*token.TokenPair, error)
+	GenerateTokenPair(userID uuid.UUID, email string, role string, roleID, sessionID uuid.UUID) (*token.TokenPair, error)
 }
 
 // =============================================================================
@@ -163,7 +163,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command, envIP string) (*Res
 	var accessToken, refreshToken string
 	if uc.tokenSvc != nil {
 		sessionID := uuid.Must(uuid.NewV7())
-		tokenPair, err := uc.tokenSvc.GenerateTokenPair(user.ID, user.Email, user.RoleID, sessionID)
+		tokenPair, err := uc.tokenSvc.GenerateTokenPair(user.ID, user.Email, user.RoleName, user.RoleID, sessionID)
 		if err != nil {
 			slog.ErrorContext(ctx, "failed to generate token pair after registration",
 				slog.String("email", cmd.Email),

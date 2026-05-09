@@ -19,7 +19,7 @@ type VerificationService interface {
 }
 
 type TokenService interface {
-	GenerateTokenPair(userID uuid.UUID, email string, roleID, sessionID uuid.UUID) (*token.TokenPair, error)
+	GenerateTokenPair(userID uuid.UUID, email string, role string, roleID, sessionID uuid.UUID) (*token.TokenPair, error)
 }
 
 type UseCase struct {
@@ -59,7 +59,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 	}
 
 	sessionID := uuid.Must(uuid.NewV7())
-	tokenPair, err := uc.tokenSvc.GenerateTokenPair(user.ID, user.Email, user.RoleID, sessionID)
+	tokenPair, err := uc.tokenSvc.GenerateTokenPair(user.ID, user.Email, user.RoleName, user.RoleID, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("verify email: generate tokens: %w", err)
 	}
