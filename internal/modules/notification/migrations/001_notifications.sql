@@ -59,21 +59,3 @@ CREATE INDEX idx_notifications_status  ON notifications(status)
 CREATE INDEX idx_notifications_provider_msg ON notifications(provider_message_id)
     WHERE provider_message_id IS NOT NULL;
 
-
--- =============================================================================
--- NOTIFICATION READS
--- Tracks in-app read status for websocket notifications.
--- Intentionally separate from opened_at: opened_at is the Resend email-open
--- pixel event, while this table captures explicit in-app acknowledgement.
--- =============================================================================
-CREATE TABLE IF NOT EXISTS notification_reads (
-    id              UUID        PRIMARY KEY DEFAULT uuidv7(),
-    user_id         UUID        NOT NULL,
-    notification_id UUID        NOT NULL REFERENCES notifications(id) ON DELETE CASCADE,
-    read_at         TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT uq_notification_read UNIQUE (user_id, notification_id)
-);
-
-CREATE INDEX idx_notif_reads_user_id         ON notification_reads(user_id);
-CREATE INDEX idx_notif_reads_notification_id ON notification_reads(notification_id);

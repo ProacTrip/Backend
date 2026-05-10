@@ -15,23 +15,57 @@ import (
 )
 
 // =============================================================================
+// Resend Template ID para verificación de email
+// =============================================================================
+
+// ResendTemplateVerifyEmail es el ID del template de verificación en Resend.
+const ResendTemplateVerifyEmail = "c58c6953-1bf9-41f1-9d8d-26d5d77b9879"
+
+// =============================================================================
 // EmailSender port - interfaz para enviar emails
 // =============================================================================
 
+// EmailSender define el contrato para enviar emails usando templates.
+// Retorna el message ID del proveedor en caso de éxito.
 type EmailSender interface {
-	SendVerifyEmail(ctx context.Context, to, verificationURL string) error
+	SendWithTemplate(ctx context.Context, to, templateID string, vars map[string]any) (string, error)
 }
 
 // =============================================================================
-// UseCase - Lógica para enviar emails de verificación
+// Command - Datos de entrada para el caso de uso
 // =============================================================================
 
+// Command representa el comando para enviar un email de verificación.
+type Command struct {
+	UserID            uuid.UUID
+	Email             string
+	VerificationToken string
+	FirstName         string // Opcional — puede estar vacío
+}
+
+// Validate valida que los campos obligatorios del comando no estén vacíos.
+func (c Command) Validate() error {
+	if c.UserID == uuid.Nil {
+		return fmt.Errorf("UserID es obligatorio")
+	}
+	if c.Email == "" {
+		return fmt.Errorf("Email es obligatorio")
+	}
+	if c.VerificationToken == "" {
+		return fmt.Errorf("VerificationToken es obligatorio")
+	}
+	return nil
+}
+
+// =============================================================================
+// UseCase encapsula la lógica para enviar emails de verificación.
 type UseCase struct {
 	repo           domain.NotificationRepository
 	sender         EmailSender
 	frontendConfig config.FrontendConfig
 }
 
+// Deps agrupa las dependencias necesarias para construir un UseCase.
 type Deps struct {
 	Repo           domain.NotificationRepository
 	Sender         EmailSender
@@ -46,59 +80,88 @@ func NewUseCase(deps Deps) *UseCase {
 	}
 }
 
-// Execute envía un email de verificación con idempotencia
-func (uc *UseCase) Execute(ctx context.Context, userID uuid.UUID, email, verificationToken string) error {
-	// 1. Generar URL de verificación usando la configuración del frontend
-	baseURL := uc.frontendConfig.GetURL()
-	verificationURL := fmt.Sprintf("%s/auth/verify-email?token=%s", baseURL, verificationToken)
+// Execute envía un email de verificación con idempotencia.
+// Retorna el providerMessageID de Resend en caso de éxito.
+func (uc *UseCase) Execute(ctx context.Context, cmd Command) (string, error) {
+	// 1. Validar comando
+	if err := cmd.Validate(); err != nil {
+		return "", fmt.Errorf("comando inválido: %w", err)
+	}
 
-	// 2. Crear notificación alineada con migración (channel + content son OBLIGATORIOS)
-	notification := domain.NewEmailNotification(
-		userID,
+	// 2. Generar URL de verificación usando la configuración del frontend
+	baseURL := uc.frontendConfig.GetURL()
+	verificationURL := fmt.Sprintf("%s/auth/verify-email?token=%s", baseURL, cmd.VerificationToken)
+
+	// 3. Crear notificación alineada con migración (channel + content son OBLIGATORIOS)
+	notification, err := domain.NewEmailNotification(
+		cmd.UserID,
 		"Verifica tu email en Proactrip", // subject
 		"Haz clic en el siguiente enlace para verificar tu email: "+verificationURL, // content
-		"verify_email", // template_code (Resend)
 		domain.NotificationTypeTransactional,
+		"verify_email", // template_code (Resend)
 		map[string]any{
-			"verification_token": verificationToken,
+			"verification_token": cmd.VerificationToken,
 			"verification_url":   verificationURL,
-			"email":              email,
+			"email":              cmd.Email,
 		},
 	)
+	if err != nil {
+		return "", errors.ErrInternalError("failed to create notification", err)
+	}
 
-	// 3. Intentar guardar (si ya existe por idempotencia, retornar error de conflict)
+	// 4. Intentar guardar (si ya existe por idempotencia, retornar error de conflict)
 	existingID, err := uc.repo.Save(ctx, notification)
 	if err != nil {
-		return errors.ErrInternalError("failed to save notification", err)
+		return "", errors.ErrInternalError("failed to save notification", err)
 	}
 
 	// Si ya existe, verificar si ya fue enviado exitosamente
 	if existingID != uuid.Nil {
 		existing, getErr := uc.repo.GetByID(ctx, existingID)
 		if getErr == nil && existing != nil && existing.Status == domain.NotificationStatusSent {
-			slog.Info("verification email already sent", "user_id", userID, "notification_id", existingID)
-			return nil // Idempotency: ya enviado, no re-enviar
+			slog.Info("verification email already sent",
+				"user_id", cmd.UserID,
+				"notification_id", existingID,
+			)
+			return existing.ProviderMessageID, nil // Idempotencia: retornar el ID existente
 		}
 	}
 
-	// 4. Enviar email
-	if err := uc.sender.SendVerifyEmail(ctx, email, verificationURL); err != nil {
-		slog.Error("failed to send verification email", "error", err, "email", email)
+	// 5. Preparar variables del template
+	templateVars := map[string]any{
+		"verification_url": verificationURL,
+	}
+	if cmd.FirstName != "" {
+		templateVars["first_name"] = cmd.FirstName
+	}
 
-		// 5. Registrar失败
+	// 6. Enviar email y obtener el message ID del proveedor
+	messageID, err := uc.sender.SendWithTemplate(ctx, cmd.Email, ResendTemplateVerifyEmail, templateVars)
+	if err != nil {
+		slog.Error("failed to send verification email",
+			"error", err,
+			"email", cmd.Email,
+		)
+
+		// Registrar fallo
 		if updateErr := uc.repo.MarkFailed(ctx, notification.ID, err.Error()); updateErr != nil {
 			slog.Error("failed to mark notification as failed", "error", updateErr)
 		}
 
-		return errors.ErrInternalError("failed to send verification email", err)
+		return "", errors.ErrInternalError("failed to send verification email", err)
 	}
 
-	// 6. Actualizar estado a enviado (con provider message ID vacío por ahora)
-	if err := uc.repo.MarkSent(ctx, notification.ID, ""); err != nil {
+	// 7. Actualizar estado a enviado con el message ID del proveedor
+	if err := uc.repo.MarkSent(ctx, notification.ID, messageID); err != nil {
 		slog.Error("failed to mark notification as sent", "error", err)
 		// El email se envió, pero falló el update - no es crítico
 	}
 
-	slog.Info("verification email sent successfully", "user_id", userID, "email", email)
-	return nil
+	slog.Info("verification email sent successfully",
+		"user_id", cmd.UserID,
+		"email", cmd.Email,
+		"message_id", messageID,
+	)
+
+	return messageID, nil
 }

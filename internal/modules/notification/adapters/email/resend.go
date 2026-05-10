@@ -12,29 +12,36 @@ import (
 )
 
 // =============================================================================
-// Resend Email Service - Adapter para notification module
-// Usa templates de Resend (dashboard)
+// Servicio de Email Resend — adapter para el módulo de notificaciones.
+// Usa templates configurados en el dashboard de Resend.
 // =============================================================================
 
-// ResendService implementa el envío de emails usando la SDK oficial de Resend
-// El "from" se configura en cada template del dashboard de Resend
+// ResendService implementa el envío de emails usando la SDK oficial de Resend.
+// El "from" se configura en cada template del dashboard de Resend.
 type ResendService struct {
 	client      *resend.Client
 	rateLimiter *ratelimit.RateLimiter
+	logger      *slog.Logger
 }
 
-// ResendConfig contiene la configuración para Resend
+// ResendConfig contiene la configuración para Resend.
 type ResendConfig struct {
 	APIKey      string
 	RateLimiter *ratelimit.RateLimiter
+	Logger      *slog.Logger
 }
 
-// NewResendService crea un nuevo servicio de email con Resend
+// NewResendService crea un nuevo servicio de email con Resend.
 func NewResendService(cfg ResendConfig) *ResendService {
 	client := resend.NewClient(cfg.APIKey)
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &ResendService{
 		client:      client,
 		rateLimiter: cfg.RateLimiter,
+		logger:      logger,
 	}
 }
 
@@ -42,35 +49,36 @@ func NewResendService(cfg ResendConfig) *ResendService {
 // Constantes de templates de Resend
 // =============================================================================
 
-// Constantes de templates - https://resend.com/templates
-// El "from" se define en cada template en el dashboard de Resend
+// Constantes de templates configurados en https://resend.com/templates.
+// El "from" se define en cada template en el dashboard de Resend.
 var (
-	TemplateWelcome        = "a59105e0-e732-490f-8747-3d2a317e1781" // Tu ID real
-	TemplateVerifyEmail    = "c58c6953-1bf9-41f1-9d8d-26d5d77b9879" // Template verificación
-	TemplateLogin          = ""                                     // TODO: crear y agregar ID
-	TemplateResetPassword  = ""                                     // TODO: crear y agregar ID
-	TemplateMFA            = ""                                     // TODO: crear y agregar ID
-	TemplateAccountBlocked = ""                                     // TODO: crear y agregar ID
+	// TemplateWelcome es el ID del template de bienvenida en Resend.
+	TemplateWelcome = "a59105e0-e732-490f-8747-3d2a317e1781"
+	// TemplateVerifyEmail es el ID del template de verificación de email en Resend.
+	TemplateVerifyEmail = "c58c6953-1bf9-41f1-9d8d-26d5d77b9879"
 )
 
 // =============================================================================
 // Envío con templates
 // =============================================================================
 
-// SendWithTemplate envía un email usando un template de Resend
-// Las variables se reemplazan automáticamente en el template
-// El "from" ya está configurado en cada template del dashboard de Resend
-func (s *ResendService) SendWithTemplate(ctx context.Context, to string, templateID string, variables map[string]any) error {
+// SendWithTemplate envía un email usando un template de Resend.
+// Retorna el message ID de Resend en caso de éxito.
+// Las variables se reemplazan automáticamente en el template.
+// El "from" ya está configurado en cada template del dashboard de Resend.
+func (s *ResendService) SendWithTemplate(ctx context.Context, to string, templateID string, variables map[string]any) (string, error) {
 	if templateID == "" {
-		return fmt.Errorf("templateID no configurado - crear template en https://resend.com/templates")
+		return "", fmt.Errorf("templateID no configurado - crear template en https://resend.com/templates")
 	}
 
+	// Rate limiter fail-closed: si falla la verificación, NO enviar el email.
 	if s.rateLimiter != nil {
 		result, err := s.rateLimiter.ProviderAllow(ctx, "resend")
 		if err != nil {
-			slog.Warn("resend rate limit check failed", "error", err)
-		} else if !result.Allowed {
-			return fmt.Errorf("resend rate limit exceeded: %d/%d emails today", result.Current, result.Limit)
+			return "", fmt.Errorf("rate limiter check failed: %w", err)
+		}
+		if !result.Allowed {
+			return "", fmt.Errorf("resend rate limit exceeded: %d/%d emails today", result.Current, result.Limit)
 		}
 	}
 
@@ -84,12 +92,39 @@ func (s *ResendService) SendWithTemplate(ctx context.Context, to string, templat
 
 	resp, err := s.client.Emails.SendWithContext(ctx, params)
 	if err != nil {
-		return fmt.Errorf("Resend API error: %w", err)
+		return "", fmt.Errorf("Resend API error: %w", err)
 	}
 
-	// Log para debugging (en producción, usar structured logging)
-	if resp != nil && resp.Id != "" {
-		fmt.Printf("[Resend] Email sent to %s, ID: %s\n", to, resp.Id)
+	// Log estructurado con slog en vez de fmt.Printf
+	if s.logger != nil {
+		s.logger.InfoContext(ctx, "email enviado via Resend",
+			slog.String("message_id", resp.Id),
+			slog.String("recipient", to),
+		)
+	}
+
+	return resp.Id, nil
+}
+
+// =============================================================================
+// Health check
+// =============================================================================
+
+// HealthCheck verifica que el adapter de Resend esté correctamente configurado
+// y que la API key sea válida. Intenta una llamada liviana a la API de Resend
+// para validar autenticación y conectividad.
+func (s *ResendService) HealthCheck(ctx context.Context) error {
+	if s.client == nil {
+		return fmt.Errorf("resend client no inicializado")
+	}
+
+	// Intentar listar emails con limit=1 para validar la API key sin costo real.
+	// Si la API key es inválida, Resend retorna un error de autenticación.
+	_, err := s.client.Emails.ListWithOptions(ctx, &resend.ListOptions{
+		Limit: new(1),
+	})
+	if err != nil {
+		return fmt.Errorf("resend health check failed: %w", err)
 	}
 
 	return nil
@@ -99,47 +134,16 @@ func (s *ResendService) SendWithTemplate(ctx context.Context, to string, templat
 // Métodos de conveniencia
 // =============================================================================
 
-// SendWelcomeEmail envía email de bienvenida
-func (s *ResendService) SendWelcomeEmail(ctx context.Context, to, firstName string) error {
-	return s.SendWithTemplate(ctx, to, TemplateWelcome, map[string]any{
-		"FIRST_NAME": firstName,
-	})
-}
-
-// SendVerifyEmail envía email de verificación
-// El template usa {{{verification_url}}} y {{{first_name}}}
-func (s *ResendService) SendVerifyEmail(ctx context.Context, to, verificationURL string) error {
-	return s.SendWithTemplate(ctx, to, TemplateVerifyEmail, map[string]any{
-		"first_name":       to, // El template espera first_name, usamos el email como valor
+// SendVerifyEmail envía email de verificación.
+// El template usa {{{verification_url}}} y {{{first_name}}}.
+// first_name solo se incluye si no está vacío (el template de Resend
+// tiene fallback a "Usuario" cuando el campo está ausente).
+func (s *ResendService) SendVerifyEmail(ctx context.Context, to, firstName, verificationURL string) (string, error) {
+	vars := map[string]any{
 		"verification_url": verificationURL,
-	})
-}
-
-// SendLoginNotification envía notificación de nuevo login
-func (s *ResendService) SendLoginNotification(ctx context.Context, to, deviceInfo, location string) error {
-	return s.SendWithTemplate(ctx, to, TemplateLogin, map[string]any{
-		"DEVICE_INFO": deviceInfo,
-		"LOCATION":    location,
-	})
-}
-
-// SendPasswordResetEmail envía email para reset de contraseña
-func (s *ResendService) SendPasswordResetEmail(ctx context.Context, to, resetURL string) error {
-	return s.SendWithTemplate(ctx, to, TemplateResetPassword, map[string]any{
-		"RESET_URL": resetURL,
-	})
-}
-
-// SendMFACode envía código MFA
-func (s *ResendService) SendMFACode(ctx context.Context, to, code string) error {
-	return s.SendWithTemplate(ctx, to, TemplateMFA, map[string]any{
-		"MFA_CODE": code,
-	})
-}
-
-// SendAccountBlockedEmail envía notificación de cuenta bloqueada
-func (s *ResendService) SendAccountBlockedEmail(ctx context.Context, to, reason string) error {
-	return s.SendWithTemplate(ctx, to, TemplateAccountBlocked, map[string]any{
-		"REASON": reason,
-	})
+	}
+	if firstName != "" {
+		vars["first_name"] = firstName
+	}
+	return s.SendWithTemplate(ctx, to, TemplateVerifyEmail, vars)
 }

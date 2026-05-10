@@ -16,10 +16,11 @@ import (
 )
 
 // =============================================================================
-// Notification Repository - PostgreSQL adapter
+// Repositorio de Notificaciones — adapter PostgreSQL
 // Alineado con migración 001_notifications.sql (fuente de truth)
 // =============================================================================
 
+// NotificationRepository implementa domain.NotificationRepository usando pgxpool.
 type NotificationRepository struct {
 	db *pgxpool.Pool
 }
@@ -28,6 +29,7 @@ type NotificationRepository struct {
 // Constructor
 // =============================================================================
 
+// NewNotificationRepository crea un repositorio de notificaciones respaldado por PostgreSQL.
 func NewNotificationRepository(db *pgxpool.Pool) *NotificationRepository {
 	return &NotificationRepository{db: db}
 }
@@ -39,13 +41,13 @@ func NewNotificationRepository(db *pgxpool.Pool) *NotificationRepository {
 // Save guarda una notificación con idempotencia
 // Alineado con schema: id, user_id, template_code, type, channel, subject, content, data, status...
 func (r *NotificationRepository) Save(ctx context.Context, n *domain.Notification) (existingID uuid.UUID, err error) {
-	// Verificar idempotency: si ya existe una notificación enviada para este user + type
+	// Verificar idempotency: si ya existe una notificación enviada para este user + type + template_code
 	existingQuery := `
 		SELECT id FROM notifications 
-		WHERE user_id = $1 AND type = $2 AND status = 'sent'
+		WHERE user_id = $1 AND type = $2 AND template_code = $3 AND status = 'sent'
 	`
 	var existingUUID uuid.UUID
-	err = r.db.QueryRow(ctx, existingQuery, n.UserID, n.Type).Scan(&existingUUID)
+	err = r.db.QueryRow(ctx, existingQuery, n.UserID, n.Type, n.TemplateCode).Scan(&existingUUID)
 	if err == nil {
 		// Ya existe una notificación enviada para este user + type
 		return existingUUID, nil
@@ -140,15 +142,16 @@ func (r *NotificationRepository) MarkSent(ctx context.Context, id uuid.UUID, pro
 	return nil
 }
 
-// MarkDelivered actualiza estado a entregado (desde webhook)
-func (r *NotificationRepository) MarkDelivered(ctx context.Context, id uuid.UUID) error {
+// MarkDelivered actualiza estado a entregado (desde webhook).
+// Usa el timestamp provisto por el proveedor para delivered_at.
+func (r *NotificationRepository) MarkDelivered(ctx context.Context, id uuid.UUID, deliveredAt time.Time) error {
 	query := `
 		UPDATE notifications
-		SET status = 'delivered', delivered_at = NOW(), updated_at = NOW()
+		SET status = 'delivered', delivered_at = $2, updated_at = NOW()
 		WHERE id = $1
 	`
 
-	_, err := r.db.Exec(ctx, query, id)
+	_, err := r.db.Exec(ctx, query, id, deliveredAt)
 	if err != nil {
 		return fmt.Errorf("mark delivered: %w", err)
 	}
@@ -170,66 +173,20 @@ func (r *NotificationRepository) MarkFailed(ctx context.Context, id uuid.UUID, e
 	return nil
 }
 
-// GetPending retorna notificaciones pendientes para reintento
-func (r *NotificationRepository) GetPending(ctx context.Context, olderThan time.Duration) ([]*domain.Notification, error) {
-	query := `
-		SELECT id, user_id, template_code, type, channel, subject, content,
-		       data, status, sent_at, delivered_at, opened_at, error_message,
-		       provider_message_id, metadata, created_at, updated_at
-		FROM notifications
-		WHERE status IN ('pending', 'failed')
-		  AND created_at < $1
-		ORDER BY created_at ASC
-		LIMIT 100
-	`
-
-	rows, err := r.db.Query(ctx, query, time.Now().Add(-olderThan))
-	if err != nil {
-		return nil, fmt.Errorf("get pending: %w", err)
-	}
-	defer rows.Close()
-
-	var results []*domain.Notification
-	for rows.Next() {
-		var n domain.Notification
-		if err := rows.Scan(
-			&n.ID,
-			&n.UserID,
-			&n.TemplateCode,
-			&n.Type,
-			&n.Channel,
-			&n.Subject,
-			&n.Content,
-			&n.Data,
-			&n.Status,
-			&n.SentAt,
-			&n.DeliveredAt,
-			&n.OpenedAt,
-			&n.ErrorMessage,
-			&n.ProviderMessageID,
-			&n.Metadata,
-			&n.CreatedAt,
-			&n.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		results = append(results, &n)
-	}
-
-	return results, nil
-}
-
-// UpdateFromWebhook actualiza una notificación desde datos del webhook del proveedor
-func (r *NotificationRepository) UpdateFromWebhook(ctx context.Context, providerMessageID string, status domain.NotificationStatus) error {
+// UpdateFromWebhook actualiza una notificación desde datos del webhook del proveedor.
+// Usa el timestamp del evento del proveedor para la columna de timestamp
+// correspondiente según el estado reportado (delivered_at, opened_at).
+func (r *NotificationRepository) UpdateFromWebhook(ctx context.Context, providerMessageID string, status domain.NotificationStatus, eventTimestamp time.Time) error {
 	query := `
 		UPDATE notifications
-		SET status = $2, 
-		    provider_message_id = COALESCE(provider_message_id, $3),
+		SET status = $1,
+		    delivered_at = CASE WHEN $1 = 'delivered' THEN $3 ELSE delivered_at END,
+		    opened_at    = CASE WHEN $1 = 'opened'    THEN $3 ELSE opened_at END,
 		    updated_at = NOW()
-		WHERE provider_message_id = $3
+		WHERE provider_message_id = $2
 	`
 
-	_, err := r.db.Exec(ctx, query, status, providerMessageID, providerMessageID)
+	_, err := r.db.Exec(ctx, query, status, providerMessageID, eventTimestamp)
 	if err != nil {
 		return fmt.Errorf("update from webhook: %w", err)
 	}

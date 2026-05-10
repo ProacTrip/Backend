@@ -1,12 +1,13 @@
 // Consumer de eventos de notificaciones.
-// Consume eventos de Dragonfly Streams y procesaenvíos de emails.
+// Consume eventos de Dragonfly Streams y procesa envíos de emails.
+// Usa backoff exponencial cuando el handler falla para evitar
+// reintentos en tight-loop y proteger la base de datos.
 package consumer
 
 import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -18,16 +19,19 @@ import (
 )
 
 // =============================================================================
-// Notification Event Consumer - Consume eventos y envía emails
+// Consumer de Eventos de Notificaciones
+// Consume eventos del stream de Dragonfly y despacha envíos de email.
 // =============================================================================
 
+// NotificationConsumer consume eventos del stream de notificaciones
+// y los despacha al caso de uso correspondiente.
 type NotificationConsumer struct {
 	rdb        *redis.Client
 	usecase    *send_verification_email.UseCase
 	group      string
 	consumer   string
 	streamName string
-	running    atomic.Bool // true while the main consume loop is alive
+	running    atomic.Bool // true mientras el loop principal de consumo está vivo
 }
 
 // =============================================================================
@@ -44,9 +48,9 @@ func NewNotificationConsumer(rdb *redis.Client, uc *send_verification_email.UseC
 	}
 }
 
-// Start comienza a consumir eventos
+// Start comienza a consumir eventos del stream.
 func (c *NotificationConsumer) Start(ctx context.Context) error {
-	// Ensure consumer group exists (idempotent)
+	// Asegurar que el consumer group existe (idempotente)
 	if err := eventbus.EnsureConsumerGroup(ctx, c.rdb, c.streamName, c.group); err != nil {
 		return fmt.Errorf("ensure consumer group: %w", err)
 	}
@@ -62,18 +66,24 @@ func (c *NotificationConsumer) Start(ctx context.Context) error {
 	return nil
 }
 
-// IsRunning reports whether the main consume goroutine is alive.
-// Used by /ready health checks.
+// IsRunning reporta si el goroutine principal de consumo está vivo.
+// Usado por health checks de /ready.
 func (c *NotificationConsumer) IsRunning() bool { return c.running.Load() }
 
-// Name returns a human-readable identifier for health check reporting.
+// Name retorna un identificador legible para reportes de health check.
 func (c *NotificationConsumer) Name() string { return "notification-consumer" }
 
 // =============================================================================
-// Worker loop
+// Worker loop con backoff exponencial
 // =============================================================================
 
 func (c *NotificationConsumer) consume(ctx context.Context) {
+	const (
+		initialBackoff = 1 * time.Second
+		maxBackoff     = 30 * time.Second
+	)
+	backoff := initialBackoff
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -97,9 +107,34 @@ func (c *NotificationConsumer) consume(ctx context.Context) {
 			continue
 		}
 
+		// Resetear backoff cuando XReadGroup funciona — el stream está sano.
+		backoff = initialBackoff
+
+		// Procesar mensajes del lote. Si alguno falla, hacer backoff
+		// antes del siguiente XReadGroup para evitar tight-loop de reintentos.
+		hadFailure := false
 		for _, stream := range messages {
 			for _, msg := range stream.Messages {
-				c.processMessage(ctx, msg)
+				if err := c.processMessage(ctx, msg); err != nil {
+					hadFailure = true
+					// No detenemos el procesamiento del lote — intentamos
+					// procesar los demás mensajes aunque uno falle.
+				}
+			}
+		}
+
+		if hadFailure {
+			slog.Warn("algunos mensajes del lote fallaron, esperando antes de reintentar",
+				slog.Duration("backoff", backoff),
+			)
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return
+			}
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
 			}
 		}
 	}
@@ -109,62 +144,64 @@ func (c *NotificationConsumer) consume(ctx context.Context) {
 // Procesamiento de mensajes
 // =============================================================================
 
-func (c *NotificationConsumer) processMessage(ctx context.Context, msg redis.XMessage) {
-	// Get event type directly from flat payload
+// processMessage procesa un mensaje individual del stream.
+// Retorna error si el handler falla (el mensaje queda en PEL para reintento).
+// Retorna nil si el mensaje fue procesado exitosamente o si fue descartado
+// (ACK) por ser inválido (ej. sin event_type).
+func (c *NotificationConsumer) processMessage(ctx context.Context, msg redis.XMessage) error {
+	// Obtener event_type del payload plano
 	eventTypeVal, ok := msg.Values["event_type"]
 	if !ok {
 		slog.Error("missing event_type in message", "msg_id", msg.ID)
-		if err := c.rdb.XAck(ctx, c.streamName, c.group, msg.ID).Err(); err != nil {
-			// Only log if it's a real error (network, timeout, etc)
-			if !strings.Contains(err.Error(), "unknown") && !strings.Contains(err.Error(), "nil") {
-				slog.Error("xack error", "error", err, "msg_id", msg.ID)
-			}
-		}
-		return
+		c.ackOrWarn(ctx, msg.ID)
+		return nil // Descartado — ya se hizo ACK, no reintentar.
 	}
 	eventType, ok := eventTypeVal.(string)
 	if !ok {
 		slog.Error("invalid event_type type", "msg_id", msg.ID, "value", eventTypeVal)
-		if err := c.rdb.XAck(ctx, c.streamName, c.group, msg.ID).Err(); err != nil {
-			// Only log if it's a real error (network, timeout, etc)
-			if !strings.Contains(err.Error(), "unknown") && !strings.Contains(err.Error(), "nil") {
-				slog.Error("xack error", "error", err, "msg_id", msg.ID)
-			}
-		}
-		return
+		c.ackOrWarn(ctx, msg.ID)
+		return nil // Descartado — ya se hizo ACK, no reintentar.
 	}
 
-	// Handle based on type
+	// Despachar según tipo de evento
 	var handleErr error
 	switch eventType {
 	case string(eventbus.UserRegistered):
 		handleErr = c.handleUserRegistered(ctx, msg.Values)
 	default:
 		slog.Warn("unknown event type", "type", eventType, "msg_id", msg.ID)
-		if err := c.rdb.XAck(ctx, c.streamName, c.group, msg.ID).Err(); err != nil {
-			// Only log if it's a real error (network, timeout, etc)
-			if !strings.Contains(err.Error(), "unknown") && !strings.Contains(err.Error(), "nil") {
-				slog.Error("xack error", "error", err, "msg_id", msg.ID)
-			}
-		}
-		return
+		c.ackOrWarn(ctx, msg.ID)
+		return nil // Descartado — tipo desconocido, ACK y seguir.
 	}
 
 	if handleErr != nil {
 		slog.Error("failed to handle event", "error", handleErr, "msg_id", msg.ID)
-		// Don't ACK — leave in PEL for retry
-		return
+		// No hacer ACK — dejar en PEL para reintento con backoff.
+		return handleErr
 	}
 
-	// ACK only if handling succeeded
-	if count, err := c.rdb.XAck(ctx, c.streamName, c.group, msg.ID).Result(); err != nil {
-		// Only log if it's a real error (network, timeout, etc)
-		// Ignore if it's just "no such message" or "already acked"
-		if !strings.Contains(err.Error(), "unknown") && !strings.Contains(err.Error(), "nil") {
-			slog.Error("xack error", "error", err, "msg_id", msg.ID)
-		}
+	// ACK solo si el handler fue exitoso.
+	c.ackOrWarn(ctx, msg.ID)
+	return nil
+}
+
+// ackOrWarn confirma el mensaje en el stream. Si XAck falla (ej. error de red,
+// mensaje ya confirmado), loguea una advertencia pero nunca crashea el consumer.
+func (c *NotificationConsumer) ackOrWarn(ctx context.Context, msgID string) {
+	count, err := c.rdb.XAck(ctx, c.streamName, c.group, msgID).Result()
+	if err != nil {
+		// Error de red, timeout, o mensaje ya no está en PEL.
+		// Loguear y seguir — nunca crashear el consumer por un ACK.
+		slog.Warn("xack warning (no bloqueante)",
+			slog.String("error", err.Error()),
+			slog.String("msg_id", msgID),
+		)
+		return
+	}
+	if count == 0 {
+		slog.Debug("xack: mensaje ya estaba confirmado", "msg_id", msgID)
 	} else {
-		slog.Debug("xack success", "count", count, "msg_id", msg.ID)
+		slog.Info("xack success", "count", count, "msg_id", msgID)
 	}
 }
 
@@ -187,27 +224,38 @@ func (c *NotificationConsumer) handleUserRegistered(ctx context.Context, payload
 		return fmt.Errorf("missing email")
 	}
 
-	// Get verification token from payload (generated by auth module)
+	// Obtener token de verificación del payload (generado por el módulo auth)
 	verificationToken, _ := payload["verification_token"].(string)
 	if verificationToken == "" {
-		// Token no está en el evento - el usuario deberá solicitar reenvío
+		// Token no está en el evento — el usuario deberá solicitar reenvío
 		// o el token se genera en el momento de verificar
 		slog.Warn("verification token not in event, email will require user action", "user_id", userID)
 		verificationToken = "pending" // Placeholder
 	}
 
-	// Send verification email
-	if err := c.usecase.Execute(ctx, userID, email, verificationToken); err != nil {
+	// Extraer first_name del payload (opcional)
+	firstName, _ := payload["first_name"].(string)
+
+	// Enviar email de verificación
+	cmd := send_verification_email.Command{
+		UserID:            userID,
+		Email:             email,
+		VerificationToken: verificationToken,
+		FirstName:         firstName,
+	}
+	if _, err := c.usecase.Execute(ctx, cmd); err != nil {
 		slog.Error("failed to send verification email", "error", err, "user_id", userID)
-		// Don't ack - leave in PEL for retry
+		// No hacer ACK — dejar en PEL para reintento con backoff.
 		return err
 	}
 
-	slog.Info("verification email queued", "user_id", userID, "email", email)
+	slog.Info("verification email sent", "user_id", userID, "email", email)
 	return nil
 }
 
-// rescueOrphans re-clama mensajes huérfanos cada 30 segundos
+// rescueOrphans reclama mensajes huérfanos cada 30 segundos.
+// Usa XAUTOCLAIM para reasignar mensajes que quedaron en PEL
+// porque el worker original crasheó antes de hacer ACK.
 func (c *NotificationConsumer) rescueOrphans(ctx context.Context) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()

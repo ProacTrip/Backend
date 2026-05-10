@@ -3,6 +3,8 @@
 package domain
 
 import (
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -30,34 +32,71 @@ const (
 	NotificationChannelWebsocket NotificationChannel = "websocket"
 )
 
-// NotificationStatus representa el estado de entrega (alineado con migration)
+// NotificationStatus representa el estado de entrega de una notificación.
+// Los valores están alineados con el CHECK constraint de la base de datos.
 type NotificationStatus string
 
+// Estados válidos para una notificación según la máquina de estados del dominio.
 const (
-	NotificationStatusPending    NotificationStatus = "pending"
-	NotificationStatusProcessing NotificationStatus = "processing"
-	NotificationStatusSent       NotificationStatus = "sent"
-	NotificationStatusDelivered  NotificationStatus = "delivered"
-	NotificationStatusFailed     NotificationStatus = "failed"
-	NotificationStatusBounced    NotificationStatus = "bounced"
+	NotificationStatusPending   NotificationStatus = "pending"   // Estado inicial.
+	NotificationStatusSent      NotificationStatus = "sent"      // Enviada al proveedor.
+	NotificationStatusDelivered NotificationStatus = "delivered" // Confirmada entregada por webhook.
+	NotificationStatusOpened    NotificationStatus = "opened"    // Abierta por el destinatario.
+	NotificationStatusFailed    NotificationStatus = "failed"    // Falló el envío.
+	NotificationStatusBounced   NotificationStatus = "bounced"   // Rebotada por el proveedor.
 )
 
-// Notification representa una notificación completa (alineada con migration)
+// =============================================================================
+// Máquina de estados — transiciones válidas
+// =============================================================================
+
+// validTransitions define las transiciones de estado permitidas para NotificationStatus.
+var validTransitions = map[NotificationStatus][]NotificationStatus{
+	NotificationStatusPending:   {NotificationStatusSent, NotificationStatusFailed},
+	NotificationStatusSent:      {NotificationStatusDelivered, NotificationStatusFailed, NotificationStatusBounced},
+	NotificationStatusDelivered: {NotificationStatusOpened, NotificationStatusBounced},
+	NotificationStatusOpened:    {},
+	NotificationStatusFailed:    {NotificationStatusPending},
+	NotificationStatusBounced:   {},
+}
+
+// ErrInvalidStateTransition se retorna cuando se intenta una transición de estado
+// que no está definida en validTransitions.
+var ErrInvalidStateTransition = errors.New("NOTIF_INVALID_TRANSITION: transición de estado inválida")
+
+// Transition valida que la transición al estado target sea permitida según la
+// máquina de estados definida en validTransitions.
+func (n *Notification) Transition(target NotificationStatus) error {
+	allowed, ok := validTransitions[n.Status]
+	if !ok {
+		return ErrInvalidStateTransition
+	}
+	for _, s := range allowed {
+		if s == target {
+			return nil
+		}
+	}
+	return ErrInvalidStateTransition
+}
+
+// Notification representa una notificación completa alineada con la migración 001_notifications.
+// Contiene todos los campos del registro incluyendo tracking de entrega y reintentos.
 type Notification struct {
 	ID                uuid.UUID           `json:"id"`
 	UserID            uuid.UUID           `json:"user_id"`
-	TemplateCode      string              `json:"template_code,omitempty"` // Resend template ID
+	TemplateCode      string              `json:"template_code,omitempty"` // ID del template de Resend.
 	Type              NotificationType    `json:"type"`                    // transactional/marketing/system
 	Channel           NotificationChannel `json:"channel"`                 // email/sms/websocket (NOT NULL)
 	Subject           string              `json:"subject,omitempty"`
 	Content           string              `json:"content"` // NOT NULL
 	Data              map[string]any      `json:"data,omitempty"`
-	Status            NotificationStatus  `json:"status"` // pending/processing/sent/delivered/failed/bounced
+	Status            NotificationStatus  `json:"status"` // pending/sent/delivered/opened/failed/bounced
 	SentAt            *time.Time          `json:"sent_at,omitzero"`
 	DeliveredAt       *time.Time          `json:"delivered_at,omitzero"`
 	OpenedAt          *time.Time          `json:"opened_at,omitzero"`
 	ErrorMessage      string              `json:"error_message,omitempty"`
-	ProviderMessageID string              `json:"provider_message_id,omitempty"` // Resend message ID
+	ProviderMessageID string              `json:"provider_message_id,omitempty"` // ID del mensaje en Resend.
+	RetryCount        int                 `json:"retry_count,omitempty"`         // Contador de reintentos (solo en memoria).
 	Metadata          map[string]any      `json:"metadata,omitempty"`
 	CreatedAt         time.Time           `json:"created_at"`
 	UpdatedAt         time.Time           `json:"updated_at"`
@@ -77,10 +116,14 @@ func NewNotification(
 	subject string,
 	templateCode string,
 	data map[string]any,
-) *Notification {
+) (*Notification, error) {
+	id, err := uuid.NewV7()
+	if err != nil {
+		return nil, fmt.Errorf("generar UUID de notificación: %w", err)
+	}
 	now := time.Now()
 	return &Notification{
-		ID:           uuid.Must(uuid.NewV7()),
+		ID:           id,
 		UserID:       userID,
 		TemplateCode: templateCode,
 		Type:         nType,
@@ -92,18 +135,18 @@ func NewNotification(
 		Metadata:     map[string]any{},
 		CreatedAt:    now,
 		UpdatedAt:    now,
-	}
+	}, nil
 }
 
-// NewEmailNotification helper para crear notifications de email
+// NewEmailNotification helper para crear notificaciones de email.
 func NewEmailNotification(
 	userID uuid.UUID,
 	subject string,
 	content string,
-	templateCode string,
 	nType NotificationType,
+	templateCode string,
 	data map[string]any,
-) *Notification {
+) (*Notification, error) {
 	return NewNotification(
 		userID,
 		NotificationChannelEmail,
@@ -115,42 +158,66 @@ func NewEmailNotification(
 	)
 }
 
-// MarkSent actualiza el estado a enviado con provider message ID
-func (n *Notification) MarkSent(providerMessageID string) {
+// MarkSent actualiza el estado a enviado con el provider message ID de Resend.
+// Si la notificación venía de un reintento (estado failed → pending → sent),
+// el RetryCount se mantiene para trazabilidad de cuántos intentos tomó.
+func (n *Notification) MarkSent(providerMessageID string) error {
+	if err := n.Transition(NotificationStatusSent); err != nil {
+		return err
+	}
 	n.Status = NotificationStatusSent
 	n.ProviderMessageID = providerMessageID
 	now := time.Now()
 	n.SentAt = &now
 	n.UpdatedAt = now
+	return nil
 }
 
-// MarkDelivered actualiza el estado a entregado (desde webhook)
-func (n *Notification) MarkDelivered() {
+// MarkDelivered actualiza el estado a entregado (desde webhook).
+func (n *Notification) MarkDelivered() error {
+	if err := n.Transition(NotificationStatusDelivered); err != nil {
+		return err
+	}
 	n.Status = NotificationStatusDelivered
 	now := time.Now()
 	n.DeliveredAt = &now
 	n.UpdatedAt = now
+	return nil
 }
 
-// MarkOpened actualiza el estado a abierto (desde webhook)
-func (n *Notification) MarkOpened() {
-	n.Status = NotificationStatusDelivered
+// MarkOpened actualiza el estado a abierto (desde webhook).
+func (n *Notification) MarkOpened() error {
+	if err := n.Transition(NotificationStatusOpened); err != nil {
+		return err
+	}
+	n.Status = NotificationStatusOpened
 	now := time.Now()
 	n.OpenedAt = &now
 	n.UpdatedAt = now
+	return nil
 }
 
-// MarkFailed registra el error
-func (n *Notification) MarkFailed(errMsg string) {
+// MarkFailed registra el error de envío e incrementa el contador de reintentos.
+func (n *Notification) MarkFailed(errMsg string) error {
+	if err := n.Transition(NotificationStatusFailed); err != nil {
+		return err
+	}
 	n.Status = NotificationStatusFailed
 	n.ErrorMessage = errMsg
+	n.ProviderMessageID = "" // Limpiar ID residual de intento previo.
+	n.RetryCount++
 	n.UpdatedAt = time.Now()
+	return nil
 }
 
-// MarkBounced marca como bounce (desde webhook)
-func (n *Notification) MarkBounced() {
+// MarkBounced marca como rebotado (desde webhook).
+func (n *Notification) MarkBounced() error {
+	if err := n.Transition(NotificationStatusBounced); err != nil {
+		return err
+	}
 	n.Status = NotificationStatusBounced
 	n.UpdatedAt = time.Now()
+	return nil
 }
 
 // IsRetryable indica si puede reintentarse (basado en status)
@@ -158,7 +225,14 @@ func (n *Notification) IsRetryable() bool {
 	return n.Status == NotificationStatusPending || n.Status == NotificationStatusFailed
 }
 
-// IdempotencyKey devuelve una clave estable para deduplicación
-func (n *Notification) IdempotencyKey() string {
-	return string(n.Type) + ":" + n.UserID.String()
+// CanRetry verifica que la notificación esté en un estado reintentable
+// y que no haya superado el máximo de intentos configurado.
+// Retorna false si maxAttempts <= 0 (política sin reintentos).
+func (n *Notification) CanRetry(maxAttempts int) bool {
+	if maxAttempts <= 0 {
+		return false
+	}
+	return n.IsRetryable() && n.RetryCount < maxAttempts
 }
+
+
