@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -67,6 +68,7 @@ type UseCase struct {
 	medicalProfileRepo MedicalProfileRepo
 	encryptionService  EncryptionSvc
 	eventPublisher     EventPublisher
+	wg                 sync.WaitGroup
 }
 
 // NewUseCase crea una nueva instancia del caso de uso.
@@ -78,6 +80,9 @@ func NewUseCase(deps UseCaseDeps) *UseCase {
 		eventPublisher:     deps.EventPublisher,
 	}
 }
+
+// Wait espera a que todos los eventos publicados asíncronamente terminen.
+func (uc *UseCase) Wait() { uc.wg.Wait() }
 
 // Execute resuelve un conflicto médico pendiente según la acción solicitada.
 func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*ResolveResponse, error) {
@@ -167,7 +172,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*ResolveResponse, 
 
 	// Emit event (best-effort)
 	if uc.eventPublisher != nil {
-		go func() {
+		uc.wg.Go(func() {
 			bgCtx := context.WithoutCancel(ctx)
 			_, err := uc.eventPublisher.Publish(bgCtx,
 				eventbus.StreamName("user.medical_pending.resolved"),
@@ -184,7 +189,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*ResolveResponse, 
 					slog.String("error", err.Error()),
 				)
 			}
-		}()
+		})
 	}
 
 	return &ResolveResponse{
@@ -205,7 +210,7 @@ func (uc *UseCase) setMedicalField(mp *domain.MedicalProfileV2, fieldName, value
 		// Encriptar
 		encrypted, err := uc.encryptionService.Encrypt(value)
 		if err != nil {
-			return fmt.Errorf("%w: encrypt %s: %w", domain.ErrEncryptionFailed, fieldName, err)
+			return fmt.Errorf("%w: encrypt %s: %w", domain.ErrEncryptionError, fieldName, err)
 		}
 		encodedValue := base64.StdEncoding.EncodeToString(encrypted)
 

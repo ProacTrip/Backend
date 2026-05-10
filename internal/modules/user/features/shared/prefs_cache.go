@@ -9,18 +9,18 @@ import (
 )
 
 const (
-	// ProfilePrefsCacheTTL is the TTL for cached profile preferences
-	ProfilePrefsCacheTTL = 30 * time.Minute // 30 minutes
+	// ProfilePrefsCacheTTL es el TTL para las preferencias cacheadas del perfil
+	ProfilePrefsCacheTTL = 30 * time.Minute // 30 minutos
 
-	// profilePrefsKeyPrefix is the cache key prefix
+	// profilePrefsKeyPrefix es el prefijo de la clave de cache
 	profilePrefsKeyPrefix = "profile:"
 	profilePrefsKeySuffix = ":prefs"
 )
 
-// GetProfilePrefs retrieves cached user preferences from Dragonfly.
-// Returns (currency, language, countryCode, timezone, found, error).
-// On cache miss, found=false and all string values are empty — the caller
-// should fall back to the next tier (geoip or environment defaults).
+// GetProfilePrefs obtiene las preferencias cacheadas del usuario desde Dragonfly.
+// Retorna (currency, language, countryCode, timezone, found, error).
+// En cache miss, found=false y todos los strings vacíos — el caller
+// debe hacer fallback al siguiente nivel (geoip o defaults de entorno).
 func GetProfilePrefs(ctx context.Context, rdb *redis.Client, userID string) (currency, language, countryCode, timezone string, found bool, err error) {
 	key := profilePrefsKeyPrefix + userID + profilePrefsKeySuffix
 
@@ -29,12 +29,12 @@ func GetProfilePrefs(ctx context.Context, rdb *redis.Client, userID string) (cur
 		return "", "", "", "", false, fmt.Errorf("get profile prefs: %w", err)
 	}
 
-	// No fields at all → cache miss
+	// Sin campos → cache miss
 	if len(fields) == 0 {
 		return "", "", "", "", false, nil
 	}
 
-	// Found — extract individual fields (may be partial)
+	// Encontrado — extraer campos individuales (pueden ser parciales)
 	currency = fields["currency"]
 	language = fields["language"]
 	countryCode = fields["country_code"]
@@ -43,9 +43,9 @@ func GetProfilePrefs(ctx context.Context, rdb *redis.Client, userID string) (cur
 	return currency, language, countryCode, timezone, true, nil
 }
 
-// SetProfilePrefs stores user preferences in Dragonfly as a Hash.
-// Cache key: profile:{userID}:prefs
-// Fields: currency, language, country_code, timezone
+// SetProfilePrefs guarda las preferencias del usuario en Dragonfly como un Hash.
+// Clave de cache: profile:{userID}:prefs
+// Campos: currency, language, country_code, timezone
 func SetProfilePrefs(ctx context.Context, rdb *redis.Client, userID, currency, language, countryCode, timezone string) error {
 	key := profilePrefsKeyPrefix + userID + profilePrefsKeySuffix
 
@@ -71,7 +71,7 @@ func SetProfilePrefs(ctx context.Context, rdb *redis.Client, userID, currency, l
 		return fmt.Errorf("set profile prefs: %w", err)
 	}
 
-	// Set TTL on the entire hash (future HEXPIRE per-field could be used)
+	// Setear TTL en el hash completo (a futuro podría usarse HEXPIRE por campo)
 	if err := rdb.Expire(ctx, key, ProfilePrefsCacheTTL).Err(); err != nil {
 		return fmt.Errorf("set profile prefs TTL: %w", err)
 	}

@@ -214,7 +214,7 @@ func TestMedicalSource_Values(t *testing.T) {
 
 func TestNewNotificationPreference(t *testing.T) {
 	userID := uuid.Must(uuid.NewV7())
-	np := NewNotificationPreference(userID, NotifChannelEmail, NotifTypePriceAlert)
+	np := NewNotificationPreference(userID, NotifChannelEmail, NotifTypeBookingConfirmation)
 
 	if np.ID == uuid.Nil {
 		t.Error("se esperaba UUIDv7 no nulo")
@@ -225,8 +225,8 @@ func TestNewNotificationPreference(t *testing.T) {
 	if np.Channel != NotifChannelEmail {
 		t.Errorf("Channel = %s, se esperaba email", np.Channel)
 	}
-	if np.NotificationType != NotifTypePriceAlert {
-		t.Errorf("NotificationType = %s, se esperaba price_alert", np.NotificationType)
+	if np.NotificationType != NotifTypeBookingConfirmation {
+		t.Errorf("NotificationType = %s, se esperaba booking_confirmation", np.NotificationType)
 	}
 	if np.Enabled != true {
 		t.Error("Enabled debería ser true por defecto")
@@ -235,7 +235,7 @@ func TestNewNotificationPreference(t *testing.T) {
 
 func TestNotificationPreference_Toggle(t *testing.T) {
 	userID := uuid.Must(uuid.NewV7())
-	np := NewNotificationPreference(userID, NotifChannelEmail, NotifTypePriceAlert)
+	np := NewNotificationPreference(userID, NotifChannelEmail, NotifTypeBookingConfirmation)
 	oldUpdated := np.UpdatedAt
 
 	time.Sleep(1 * time.Millisecond)
@@ -269,8 +269,8 @@ func TestNotificationChannel_Values(t *testing.T) {
 }
 
 func TestNotificationType_Values(t *testing.T) {
-	types := []NotificationType{NotifTypePriceAlert, NotifTypeBookingConfirm, NotifTypeTravelReminder, NotifTypePromoOffer}
-	expected := []string{"price_alert", "booking_confirm", "travel_reminder", "promo_offer"}
+	types := []NotificationType{NotifTypeBookingConfirmation, NotifTypeFlightReminder, NotifTypePromotional}
+	expected := []string{"booking_confirmation", "flight_reminder", "promotional"}
 	for i, nt := range types {
 		if string(nt) != expected[i] {
 			t.Errorf("NotificationType[%d] = %s, se esperaba %s", i, nt, expected[i])
@@ -395,7 +395,7 @@ func TestDocumentType_JSON(t *testing.T) {
 func TestNewSavedSearch(t *testing.T) {
 	userID := uuid.Must(uuid.NewV7())
 	params := map[string]any{"origin": "MAD", "destination": "BCN"}
-	search, err := NewSavedSearch(userID, "My Search", params)
+	search, err := NewSavedSearch(userID, "My Search", params, "test-hash-123")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,14 +409,14 @@ func TestNewSavedSearch(t *testing.T) {
 	if search.AlertEnabled != false {
 		t.Error("AlertEnabled debería ser false por defecto")
 	}
-	if search.SearchHash == "" {
-		t.Error("SearchHash no debería estar vacío")
+	if search.SearchHash != "test-hash-123" {
+		t.Errorf("SearchHash = %s, se esperaba test-hash-123", search.SearchHash)
 	}
 }
 
 func TestSavedSearch_ToggleAlert(t *testing.T) {
 	userID := uuid.Must(uuid.NewV7())
-	search, err := NewSavedSearch(userID, "Test", map[string]any{"q": "test"})
+	search, err := NewSavedSearch(userID, "Test", map[string]any{"q": "test"}, "toggle-hash")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,27 +430,6 @@ func TestSavedSearch_ToggleAlert(t *testing.T) {
 	}
 	if !search.UpdatedAt.After(oldUpdated) {
 		t.Error("UpdatedAt debería haberse actualizado")
-	}
-}
-
-func TestSavedSearch_GenerateSearchHash(t *testing.T) {
-	params1 := map[string]any{"origin": "MAD", "dest": "BCN"}
-	params2 := map[string]any{"origin": "BCN", "dest": "MAD"}
-
-	hash1 := GenerateSearchHash(params1)
-	hash2 := GenerateSearchHash(params2)
-
-	if hash1 == "" {
-		t.Error("hash1 no debería estar vacío")
-	}
-	if hash1 == hash2 {
-		t.Error("hashes diferentes para parámetros diferentes")
-	}
-
-	// Mismo parámetros deberían producir mismo hash
-	hash1b := GenerateSearchHash(params1)
-	if hash1 != hash1b {
-		t.Error("mismos parámetros deberían producir mismo hash")
 	}
 }
 
@@ -499,7 +478,7 @@ func TestFavorite_SetNotes(t *testing.T) {
 
 func TestFavorite_JSON(t *testing.T) {
 	userID := uuid.Must(uuid.NewV7())
-	fav := NewFavorite(userID, uuid.Must(uuid.NewV7()), FavoriteEntityDestination, "Paris")
+	fav := NewFavorite(userID, uuid.Must(uuid.NewV7()), FavoriteEntityActivity, "Safari en Kenia")
 
 	data, err := json.Marshal(fav)
 	if err != nil {
@@ -509,11 +488,11 @@ func TestFavorite_JSON(t *testing.T) {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("unmarshal error: %v", err)
 	}
-	if decoded["entity_type"] != "destination" {
-		t.Errorf("entity_type = %v, se esperaba destination", decoded["entity_type"])
+	if decoded["entity_type"] != "activity" {
+		t.Errorf("entity_type = %v, se esperaba activity", decoded["entity_type"])
 	}
-	if decoded["title"] != "Paris" {
-		t.Errorf("title = %v, se esperaba Paris", decoded["title"])
+	if decoded["title"] != "Safari en Kenia" {
+		t.Errorf("title = %v, se esperaba Safari en Kenia", decoded["title"])
 	}
 	// notes debe omitirse cuando es nil
 	if _, exists := decoded["notes"]; exists {
@@ -527,13 +506,10 @@ func TestFavorite_JSON(t *testing.T) {
 
 func TestFavoriteEntityType_Values(t *testing.T) {
 	types := []FavoriteEntityType{
-		FavoriteEntityHotel, FavoriteEntityFlight, FavoriteEntityAirport,
-		FavoriteEntityAirline, FavoriteEntityHotelChain, FavoriteEntityCountry,
-		FavoriteEntityDestination, FavoriteEntityActivity,
+		FavoriteEntityHotel, FavoriteEntityFlight, FavoriteEntityActivity,
 	}
 	expected := []string{
-		"hotel", "flight", "airport", "airline",
-		"hotel_chain", "country", "destination", "activity",
+		"hotel", "flight", "activity",
 	}
 	for i, et := range types {
 		if string(et) != expected[i] {
@@ -543,14 +519,14 @@ func TestFavoriteEntityType_Values(t *testing.T) {
 }
 
 func TestIsValidFavoriteEntityType(t *testing.T) {
-	valid := []string{"hotel", "flight", "airport", "airline", "hotel_chain", "country", "destination", "activity"}
+	valid := []string{"hotel", "flight", "activity"}
 	for _, v := range valid {
 		if !IsValidFavoriteEntityType(v) {
 			t.Errorf("IsValidFavoriteEntityType(%q) debería ser true", v)
 		}
 	}
 
-	invalid := []string{"", "car", "train", "invalid", "airport_"}
+	invalid := []string{"", "car", "train", "invalid", "airport", "airline", "hotel_chain", "country", "destination"}
 	for _, iv := range invalid {
 		if IsValidFavoriteEntityType(iv) {
 			t.Errorf("IsValidFavoriteEntityType(%q) debería ser false", iv)

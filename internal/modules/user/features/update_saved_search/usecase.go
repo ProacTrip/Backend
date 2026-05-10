@@ -23,20 +23,27 @@ type SavedSearchRepo interface {
 	Update(ctx context.Context, search *domain.SavedSearch) error
 }
 
+// HashService es el puerto local para hashing de contenido.
+type HashService interface {
+	Hash(data []byte) string
+}
+
 // =============================================================================
 // UseCase
 // =============================================================================
 
 type UseCaseDeps struct {
 	SavedSearchRepo SavedSearchRepo
+	HashService     HashService
 }
 
 type UseCase struct {
-	repo SavedSearchRepo
+	repo   SavedSearchRepo
+	hasher HashService
 }
 
 func NewUseCase(deps UseCaseDeps) *UseCase {
-	return &UseCase{repo: deps.SavedSearchRepo}
+	return &UseCase{repo: deps.SavedSearchRepo, hasher: deps.HashService}
 }
 
 // Execute actualiza una búsqueda guardada con merge parcial.
@@ -77,7 +84,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) error {
 			return fmt.Errorf("unmarshal parameters: %w", err)
 		}
 
-		newHash = domain.GenerateSearchHash(paramsMap)
+		newHash = uc.hasher.Hash(*cmd.Parameters)
 		if newHash == "" {
 			return fmt.Errorf("failed to generate search hash")
 		}

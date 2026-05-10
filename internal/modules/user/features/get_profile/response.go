@@ -53,7 +53,7 @@ type TravelPreferencesResponse struct {
 }
 
 // NotificationPreferencesResponse es un mapa keyed por tipo de notificación.
-// Keys: "booking_confirm", "price_alert", "travel_reminder", "promo_offer", etc.
+// Keys canónicas: "booking_confirmation", "flight_reminder", "promotional".
 type NotificationPreferencesResponse map[string]ChannelPreferences
 
 // ChannelPreferences agrupa canales habilitados para un tipo de notificación.

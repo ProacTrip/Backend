@@ -70,10 +70,10 @@ func NewAvatarValidator(rdb *redis.Client, repo domain.ProfileRepository) *Avata
 	}
 }
 
-// IsRunning reports whether the main consume goroutine is alive.
+// IsRunning indica si la goroutine principal de consumo está activa.
 func (v *AvatarValidator) IsRunning() bool { return v.running.Load() }
 
-// Name returns a human-readable identifier for health check reporting.
+// Name devuelve un identificador legible para reportes de health check.
 func (v *AvatarValidator) Name() string { return "avatar-validator" }
 
 // Run inicia el consumer en background. Retorna inmediatamente.

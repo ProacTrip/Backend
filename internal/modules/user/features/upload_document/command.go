@@ -92,9 +92,9 @@ func parseEnvInt(key string, defaultVal int64) int64 {
 
 // UploadDocumentCommand contiene los datos extraídos del multipart form.
 type UploadDocumentCommand struct {
-	FileBytes []byte // archivo completo ya leído y validado en handler
+	FileBytes []byte // archivo completo leído en el handler
 	FileName  string // nombre del archivo
 	FileSize  int64  // tamaño real en bytes
-	MimeType  string // MIME type detectado por magic bytes
 	UserID    string // user_id desde el token de auth
+	MimeType  string `json:"-"` // detectado por el usecase, no viene del handler
 }

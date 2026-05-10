@@ -72,15 +72,17 @@ func (r *MedicalPendingUpdateRepository) Create(ctx context.Context, update *dom
 // =============================================================================
 
 // GetByUserID recupera todas las actualizaciones pendientes (status='pending')
-// para un usuario.
+// para un usuario. Incluye el file_name del documento fuente vía LEFT JOIN.
 func (r *MedicalPendingUpdateRepository) GetByUserID(ctx context.Context, userID uuid.UUID) ([]*domain.MedicalPendingUpdate, error) {
 	query := `
-		SELECT id, user_id, source_type, source_document_id, conversation_id,
-		       field_name, current_value, proposed_value,
-		       suggested_at, expires_at, status, resolved_at
-		FROM medical_pending_updates
-		WHERE user_id = $1 AND status = 'pending'
-		ORDER BY suggested_at DESC
+		SELECT pu.id, pu.user_id, pu.source_type, pu.source_document_id, pu.conversation_id,
+		       pu.field_name, pu.current_value, pu.proposed_value,
+		       pu.suggested_at, pu.expires_at, pu.status, pu.resolved_at,
+		       d.file_name AS source_file_name
+		FROM medical_pending_updates pu
+		LEFT JOIN user_documents d ON pu.source_document_id = d.id
+		WHERE pu.user_id = $1 AND pu.status = 'pending'
+		ORDER BY pu.suggested_at DESC
 	`
 
 	rows, err := r.db.Query(ctx, query, userID)
@@ -207,6 +209,7 @@ func scanMedicalPendingUpdates(rows pgx.Rows) ([]*domain.MedicalPendingUpdate, e
 			&pu.ExpiresAt,
 			&statusStr,
 			&pu.ResolvedAt,
+			&pu.SourceFileName,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan pending update: %w", err)

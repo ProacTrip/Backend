@@ -97,6 +97,7 @@ type MedicalPendingUpdate struct {
 	UserID           uuid.UUID                    `json:"user_id"`
 	SourceType       string                       `json:"source_type"`        // "ocr" o "nlp"
 	SourceDocumentID *uuid.UUID                   `json:"source_document_id,omitzero"`
+	SourceFileName   *string                      `json:"source_file_name,omitzero"`
 	ConversationID   *uuid.UUID                   `json:"conversation_id,omitzero"`
 	FieldName        string                       `json:"field_name"`
 	CurrentValue     *string                      `json:"current_value,omitzero"`

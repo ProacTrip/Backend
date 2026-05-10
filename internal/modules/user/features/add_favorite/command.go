@@ -12,7 +12,7 @@ import (
 type Command struct {
 	UserID     string  `json:"-"`                         // Del token, nunca del body
 	EntityID   string  `json:"entity_id"`                 // UUID requerido
-	EntityType string  `json:"entity_type"`               // hotel|flight|destination
+	EntityType string  `json:"entity_type"`               // hotel|flight|activity
 	Title      string  `json:"title"`                     // Requerido
 	Notes      *string `json:"notes,omitzero"`            // Opcional
 }

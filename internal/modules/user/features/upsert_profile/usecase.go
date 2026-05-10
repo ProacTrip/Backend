@@ -58,10 +58,10 @@ func NewUseCaseComplete(
 	}
 }
 
-// Execute creates or updates a user profile with optional environment-based prefs.
+// Execute crea o actualiza un perfil de usuario con preferencias de entorno opcionales.
 // El perfil se crea basado en user_id (FK al dominio Auth)
 // El Upsert usa user_id como clave de conflicto
-// email: denormalized from the registration event (avoids cross-DB joins).
+// email: desnormalizado del evento de registro (evita joins cross-DB).
 func (uc *UseCase) Execute(ctx context.Context, userID uuid.UUID, email string, envPrefs ...domain.EnvPrefs) error {
 	// Crear nuevo perfil con los defaults de la migración
 	profile := domain.NewUserProfile(userID, email)
@@ -92,9 +92,9 @@ func (uc *UseCase) Execute(ctx context.Context, userID uuid.UUID, email string, 
 	return nil
 }
 
-// createDefaults seeds the related tables with default values.
-// All inserts are idempotent (INSERT ... ON CONFLICT DO NOTHING in repos).
-// Failures are logged as warnings — they don't block profile creation.
+// createDefaults genera las tablas relacionadas con valores por defecto.
+// Todos los inserts son idempotentes (INSERT ... ON CONFLICT DO NOTHING en los repos).
+// Los fallos se loguean como warnings — no bloquean la creación del perfil.
 func (uc *UseCase) createDefaults(ctx context.Context, userID uuid.UUID) {
 	if uc.travelRepo != nil {
 		travelPrefs := domain.NewTravelPreferences(userID)
@@ -117,14 +117,14 @@ func (uc *UseCase) createDefaults(ctx context.Context, userID uuid.UUID) {
 	}
 
 	if uc.notifRepo != nil {
-		np1 := domain.NewNotificationPreference(userID, domain.NotifChannelEmail, domain.NotifTypeBookingConfirm)
+		np1 := domain.NewNotificationPreference(userID, domain.NotifChannelEmail, domain.NotifTypeBookingConfirmation)
 		if err := uc.notifRepo.Upsert(ctx, np1); err != nil {
 			slog.WarnContext(ctx, "create notif pref default failed",
 				slog.String("user_id", userID.String()),
 				slog.String("error", err.Error()),
 			)
 		}
-		np2 := domain.NewNotificationPreference(userID, domain.NotifChannelEmail, domain.NotifTypeTravelReminder)
+		np2 := domain.NewNotificationPreference(userID, domain.NotifChannelEmail, domain.NotifTypeFlightReminder)
 		if err := uc.notifRepo.Upsert(ctx, np2); err != nil {
 			slog.WarnContext(ctx, "create notif pref default failed",
 				slog.String("user_id", userID.String()),
@@ -142,7 +142,7 @@ func (uc *UseCase) populatePrefsCache(ctx context.Context, userID uuid.UUID, pro
 		return
 	}
 
-	// Use WithoutCancel so the cache write survives handler context cancellation
+	// Usar WithoutCancel para que la escritura de cache sobreviva la cancelación del contexto del handler
 	bgCtx := context.WithoutCancel(ctx)
 
 	if err := shared.SetProfilePrefs(bgCtx, uc.rdb,
@@ -159,19 +159,19 @@ func (uc *UseCase) populatePrefsCache(ctx context.Context, userID uuid.UUID, pro
 	}
 }
 
-// HandleVerification handles the email verification event
-// This is called when verify-email endpoint is hit
-// Actualiza preferencias u otras configuraciones si es necesario
+// HandleVerification maneja el evento de verificación de email.
+// Se llama cuando el endpoint verify-email es accedido.
+// Actualiza preferencias u otras configuraciones si es necesario.
 func (uc *UseCase) HandleVerification(ctx context.Context, userID uuid.UUID) error {
-	// Check if profile exists by user_id
+	// Verificar si el perfil existe por user_id
 	existing, err := uc.repo.GetByUserID(ctx, userID)
 	if err != nil && !errors.Is(err, domain.ErrProfileNotFound) {
 		return fmt.Errorf("check profile for verification: %w", err)
 	}
 
 	if existing == nil {
-		// Edge case: verify-email clicked before any event was processed
-		// Create a minimal profile first (email empty — will be filled by registration event)
+		// Caso borde: verify-email cliqueado antes de que se procese cualquier evento
+		// Crear un perfil mínimo primero (email vacío — será completado por el evento de registro)
 		profile := domain.NewUserProfile(userID, "")
 		if err := uc.repo.UpsertProfile(ctx, profile); err != nil {
 			return fmt.Errorf("create profile on verification: %w", err)

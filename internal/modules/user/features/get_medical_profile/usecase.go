@@ -100,11 +100,11 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*MedicalProfileRes
 			// Decodificar base64 y desencriptar
 			ciphertext, err := base64.StdEncoding.DecodeString(field.Value)
 			if err != nil {
-				return nil, fmt.Errorf("%w: base64 decode %s: %w", domain.ErrDecryptionFailed, key, err)
+				return nil, fmt.Errorf("%w: base64 decode %s: %w", domain.ErrDecryptionError, key, err)
 			}
 			plaintext, err := uc.encryptionService.Decrypt(ciphertext)
 			if err != nil {
-				return nil, fmt.Errorf("%w: decrypt %s: %w", domain.ErrDecryptionFailed, key, err)
+				return nil, fmt.Errorf("%w: decrypt %s: %w", domain.ErrDecryptionError, key, err)
 			}
 			entry.Value = plaintext
 

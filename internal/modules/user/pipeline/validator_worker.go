@@ -77,10 +77,10 @@ func NewValidatorWorker(rdb *redis.Client, docRepo DocumentUpdater, r2 Validator
 	}
 }
 
-// IsRunning reports whether the main consume goroutine is alive.
+// IsRunning indica si la goroutine principal de consumo está activa.
 func (v *ValidatorWorker) IsRunning() bool { return v.running.Load() }
 
-// Name returns a human-readable identifier for health check reporting.
+// Name devuelve un identificador legible para reportes de health check.
 func (v *ValidatorWorker) Name() string { return "doc-validator" }
 
 // Run inicia el consumer en background. Retorna inmediatamente.
@@ -255,14 +255,14 @@ func (v *ValidatorWorker) processMessage(ctx context.Context, msg redis.XMessage
 }
 
 // =============================================================================
-// Cross-validation
+// Validación cruzada
 // =============================================================================
 
 // crossValidate verifica que el archivo en R2 coincida con el MIME detectado.
 //
-// MIME VALIDATION PRIORITY:
-// Magic bytes (512) read in handler is the SOURCE OF TRUTH.
-// Extension and R2 metadata MIME are CONSISTENCY CHECKS only.
+// PRIORIDAD DE VALIDACIÓN MIME:
+// Los magic bytes (512) leídos en el handler son la FUENTE DE VERDAD.
+// La extensión y el MIME de metadatos de R2 son SOLO VERIFICACIONES DE CONSISTENCIA.
 // - If magic bytes says PDF but extension is .jpg → REJECT (suspicious mismatch)
 // - If all three agree → PASS
 //  1. Extension matches MIME (consistency check against magic bytes detection)
@@ -270,7 +270,7 @@ func (v *ValidatorWorker) processMessage(ctx context.Context, msg redis.XMessage
 //  3. Polyglot detection: file is valid for ONE format only
 //  4. PDF-specific: header, trailer, page object
 //
-// Returns empty string on success, or rejection reason.
+// Devuelve string vacío si es exitoso, o la razón de rechazo.
 func (v *ValidatorWorker) crossValidate(ctx context.Context, storageKey, detectedMime string, docID uuid.UUID) string {
 	// 1. Validate file extension matches detected MIME
 	ext := strings.ToLower(filepath.Ext(storageKey))
@@ -318,7 +318,7 @@ func (v *ValidatorWorker) crossValidate(ctx context.Context, storageKey, detecte
 
 // extMatchesMime checks if the file extension is compatible with the MIME type.
 func extMatchesMime(actual, expected string) bool {
-	// Strip leading dot for comparison
+	// Quitar punto inicial para comparar
 	actual = strings.TrimPrefix(actual, ".")
 	expected = strings.TrimPrefix(expected, ".")
 
@@ -331,7 +331,7 @@ func extMatchesMime(actual, expected string) bool {
 }
 
 // isPolyglot checks if the file bytes match magic bytes for more than one accepted format.
-// The detectedMime is the one that already matched — we check if any OTHER format also matches.
+// detectedMime es el que ya coincidió — verificamos si algún OTRO formato también coincide.
 func isPolyglot(data []byte, detectedMime string) bool {
 	if len(data) < 4 {
 		return false
@@ -360,20 +360,20 @@ func validatePDFStructure(data []byte) string {
 		return "PDF too small for validation"
 	}
 
-	// Check %PDF header in first 8 bytes
+	// Verificar encabezado %PDF en los primeros 8 bytes
 	header := data[:min(8, len(data))]
 	if !bytes.Contains(header, []byte("%PDF-")) {
 		return "PDF missing %PDF- header"
 	}
 
-	// Check %%EOF trailer in last 1024 bytes
+	// Verificar trailer %%EOF en los últimos 1024 bytes
 	tailStart := max(0, len(data)-1024)
 	tail := data[tailStart:]
 	if !bytes.Contains(tail, []byte("%%EOF")) {
 		return "PDF missing %%EOF trailer"
 	}
 
-	// Check at least 1 page object: /Type /Page or /Type/Page
+	// Verificar al menos 1 objeto página: /Type /Page o /Type/Page
 	if !bytes.Contains(data, []byte("/Type /Page")) && !bytes.Contains(data, []byte("/Type/Page")) {
 		return "PDF has no page objects (/Type /Page)"
 	}

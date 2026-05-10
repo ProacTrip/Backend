@@ -92,6 +92,11 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*ListPendingRespon
 			source.DocumentID = &sid
 		}
 
+		// File name si existe (proviene del JOIN con user_documents)
+		if pu.SourceFileName != nil {
+			source.FileName = pu.SourceFileName
+		}
+
 		entry := ConflictEntry{
 			ID:            pu.ID.String(),
 			Field:         pu.FieldName,

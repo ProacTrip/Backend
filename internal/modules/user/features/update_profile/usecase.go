@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 
 	"github.com/google/uuid"
 
@@ -38,6 +39,7 @@ type UseCaseDeps struct {
 type UseCase struct {
 	profileRepo    ProfileRepo
 	eventPublisher EventPublisher
+	wg             sync.WaitGroup
 }
 
 func NewUseCase(deps UseCaseDeps) *UseCase {
@@ -46,6 +48,9 @@ func NewUseCase(deps UseCaseDeps) *UseCase {
 		eventPublisher: deps.EventPublisher,
 	}
 }
+
+// Wait espera a que todos los eventos publicados asíncronamente terminen.
+func (uc *UseCase) Wait() { uc.wg.Wait() }
 
 // Execute valida el comando y actualiza el perfil con un update parcial.
 // Solo los campos no-nil en el comando se aplican.
@@ -58,10 +63,10 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) error {
 	// 1. Verificar que el perfil existe
 	existing, err := uc.profileRepo.GetByUserID(ctx, userID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get profile by user_id: %w", err)
 	}
 	if existing == nil {
-		return domain.ErrProfileNotFound
+		return domain.ErrProfileNotFound // sentinel directo — el error mapper hace errors.Is
 	}
 
 	// 2. Validar género si se envió
@@ -71,7 +76,8 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) error {
 		}
 	}
 
-	// 3. Validar nacionalidad (2 letras ISO 3166-1 alpha-2)
+	// 3. Validar nacionalidad (ISO 3166-1 alpha-2, 2 letras).
+	// La validación completa contra una lista de países se difiere.
 	if cmd.Nationality != nil {
 		if len(*cmd.Nationality) != 2 {
 			return domain.ErrInvalidCountryCode
@@ -99,7 +105,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) error {
 
 	// 6. Emitir evento (best-effort)
 	if uc.eventPublisher != nil {
-		go func() {
+		uc.wg.Go(func() {
 			bgCtx := context.WithoutCancel(ctx)
 			_, err := uc.eventPublisher.Publish(bgCtx,
 				eventbus.StreamName("user.profile.updated"),
@@ -113,7 +119,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) error {
 					slog.String("error", err.Error()),
 				)
 			}
-		}()
+		})
 	}
 
 	return nil

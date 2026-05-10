@@ -13,6 +13,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/ProacTrip/Backend/internal/modules/auth/domain"
+	sharedauth "github.com/ProacTrip/Backend/internal/shared/auth"
 )
 
 // Servicio de tokens usando PASETO V4 Local.
@@ -332,20 +333,9 @@ type TokenPair struct {
 	RefreshExp   time.Time
 }
 
-type AccessClaims struct {
-	UserID    uuid.UUID
-	Email     string
-	RoleID    uuid.UUID
-	Role      string
-	SessionID uuid.UUID
-	JTI       uuid.UUID
-}
-
-// GetUserID returns the user ID as a UUID for interface satisfaction.
-func (c AccessClaims) GetUserID() uuid.UUID { return c.UserID }
-
-// GetRole returns the role name for admin middleware checks.
-func (c AccessClaims) GetRole() string { return c.Role }
+// AccessClaims es un alias de tipo para backward compatibility.
+// La definición canónica está en internal/shared/auth/claims.go.
+type AccessClaims = sharedauth.AccessClaims
 
 type RefreshClaims struct {
 	UserID    uuid.UUID

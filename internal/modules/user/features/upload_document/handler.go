@@ -1,6 +1,6 @@
 // Handler HTTP para POST /v1/user/documents.
 // Recibe el archivo como multipart/form-data.
-// Checks Content-Length upfront, magic bytes sync, size capping via LimitReader.
+// Handler es thin: extrae claims, parsea el form y delega toda validación al usecase.
 package upload_document
 
 import (
@@ -11,8 +11,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/ProacTrip/Backend/internal/modules/auth/adapters/token"
-	"github.com/ProacTrip/Backend/internal/modules/user/adapters/filetype"
+	sharedauth "github.com/ProacTrip/Backend/internal/shared/auth"
 	"github.com/ProacTrip/Backend/internal/modules/user/domain"
 	httperr "github.com/ProacTrip/Backend/internal/shared/http"
 )
@@ -27,11 +26,11 @@ func NewHandler(usecase *UseCase) *Handler {
 	return &Handler{usecase: usecase}
 }
 
-// Handle extrae user_claims, procesa el multipart form, valida y sube el documento.
+// Handle extrae user_claims, procesa el multipart form y delega al usecase.
 func (h *Handler) Handle(c *echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "no-store, private")
 
-	claims, err := echo.ContextGet[*token.AccessClaims](c, "user_claims")
+	claims, err := echo.ContextGet[*sharedauth.AccessClaims](c, "user_claims")
 	if err != nil {
 		return httperr.MapError(c, err)
 	}
@@ -68,61 +67,28 @@ func (h *Handler) Handle(c *echo.Context) error {
 	}
 	defer file.Close()
 
-	// 4. Leer primeros 512 bytes para magic bytes
-	headerBytes := make([]byte, 512)
-	n, err := io.ReadFull(file, headerBytes)
-	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
-		return httperr.MapError(c, fmt.Errorf("leer header del archivo: %w", err))
-	}
-	headerBytes = headerBytes[:n]
-
-	// 5. Magic bytes check sincrónico
-	detectedMime, err := filetype.DetectMimeType(headerBytes)
-	if err != nil || !filetype.IsAccepted(detectedMime) {
-		return httperr.MapError(c, domain.ErrInvalidFileType)
-	}
-
-	// 6. Determinar el límite de tamaño según MIME type
-	maxSize := MaxSizeForMIME(detectedMime)
-
-	// 7. Seek al inicio + leer todo con LimitReader para cap el stream
-	seeker, ok := file.(io.Seeker)
-	if !ok {
-		return httperr.MapError(c, fmt.Errorf("file does not support seeking"))
-	}
-	if _, err := seeker.Seek(0, io.SeekStart); err != nil {
-		return httperr.MapError(c, fmt.Errorf("seek archivo: %w", err))
-	}
-
-	lr := io.LimitReader(file, maxSize+1) // +1 para detectar truncation
+	// 4. Leer el archivo completo (capped a MaxFormSizeBytes para prevenir OOM)
+	// La validación de tamaño por MIME type la hace el usecase.
+	lr := io.LimitReader(file, MaxFormSizeBytes()+1)
 	fileBytes, readErr := io.ReadAll(lr)
 	if readErr != nil {
 		return httperr.MapError(c, fmt.Errorf("leer archivo: %w", readErr))
 	}
 
-	// 8. Truncation check: si leímos > maxSize, se excedió el límite por MIME
-	actualSize := int64(len(fileBytes))
-	if actualSize > maxSize {
-		return httperr.MapError(c, fmt.Errorf("FILE_TOO_LARGE: %d bytes exceeds max %d bytes for %s: %w",
-			actualSize, maxSize, detectedMime, domain.ErrFileTooLarge))
-	}
-
-	// 9. Obtener file_name del form
+	// 5. Obtener file_name del form
 	fileName := c.FormValue("file_name")
 	if fileName == "" {
 		fileName = fileHeader.Filename
 	}
 
-	// 10. Construir comando
+	// 6. Construir comando y delegar al usecase
 	cmd := UploadDocumentCommand{
 		FileBytes: fileBytes,
 		FileName:  fileName,
-		FileSize:  actualSize,
-		MimeType:  detectedMime,
+		FileSize:  int64(len(fileBytes)),
 		UserID:    claims.UserID.String(),
 	}
 
-	// 11. Ejecutar caso de uso
 	resp, err := h.usecase.Execute(c.Request().Context(), cmd)
 	if err != nil {
 		return httperr.MapError(c, err)
@@ -130,5 +96,3 @@ func (h *Handler) Handle(c *echo.Context) error {
 
 	return c.JSON(http.StatusAccepted, resp)
 }
-
-

@@ -20,7 +20,7 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/ProacTrip/Backend/internal/modules/auth/adapters/token"
+	sharedauth "github.com/ProacTrip/Backend/internal/shared/auth"
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/search_flights"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/shared"
@@ -157,7 +157,7 @@ func TestHandlerIntegration_AuthenticatedUser_UsesProfilePrefs(t *testing.T) {
 	c, rec := newEchoContext(t, minimalValidBody())
 
 	// Set auth claims to simulate authenticated user
-	c.Set("user_claims", &token.AccessClaims{
+	c.Set("user_claims", &sharedauth.AccessClaims{
 		UserID:    userID,
 		Email:     "brazilian@example.com",
 		RoleID:    uuid.Nil,
@@ -225,7 +225,7 @@ func TestHandlerIntegration_ProfilePrefsBeatEnvCache(t *testing.T) {
 	rdb.Set(ctx, "env:1.2.3.4", string(raw), 0)
 
 	c, rec := newEchoContext(t, minimalValidBody())
-	c.Set("user_claims", &token.AccessClaims{UserID: userID})
+	c.Set("user_claims", &sharedauth.AccessClaims{UserID: userID})
 
 	err := handler.Handle(c)
 	if err != nil {
@@ -369,7 +369,7 @@ func TestHandlerIntegration_ExplicitWinsOverProfilePrefs(t *testing.T) {
 	body := `{"trip_type":"round_trip","departure":"EZE","arrival":"MAD","outbound_date":"2026-06-01","return_date":"2026-06-15","gl":"GB","hl":"en","currency":"GBP"}`
 
 	c, rec := newEchoContext(t, body)
-	c.Set("user_claims", &token.AccessClaims{UserID: userID})
+	c.Set("user_claims", &sharedauth.AccessClaims{UserID: userID})
 
 	err := handler.Handle(c)
 	if err != nil {
@@ -415,7 +415,7 @@ func TestHandlerIntegration_SingleExplicitWins(t *testing.T) {
 	body := `{"trip_type":"round_trip","departure":"EZE","arrival":"MAD","outbound_date":"2026-06-01","return_date":"2026-06-15","currency":"GBP"}`
 
 	c, rec := newEchoContext(t, body)
-	c.Set("user_claims", &token.AccessClaims{UserID: userID})
+	c.Set("user_claims", &sharedauth.AccessClaims{UserID: userID})
 
 	err := handler.Handle(c)
 	if err != nil {

@@ -22,13 +22,9 @@ type SavedSearchRepo interface {
 	GetByHash(ctx context.Context, userID uuid.UUID, searchHash string) (*domain.SavedSearch, error)
 }
 
-// =============================================================================
-// Response
-// =============================================================================
-
-type Response struct {
-	SearchID string `json:"search_id"`
-	Message  string `json:"message"`
+// HashService es el puerto local para hashing de contenido.
+type HashService interface {
+	Hash(data []byte) string
 }
 
 // =============================================================================
@@ -37,14 +33,25 @@ type Response struct {
 
 type UseCaseDeps struct {
 	SavedSearchRepo SavedSearchRepo
+	HashService     HashService
 }
 
 type UseCase struct {
-	repo SavedSearchRepo
+	repo    SavedSearchRepo
+	hasher  HashService
 }
 
 func NewUseCase(deps UseCaseDeps) *UseCase {
-	return &UseCase{repo: deps.SavedSearchRepo}
+	return &UseCase{repo: deps.SavedSearchRepo, hasher: deps.HashService}
+}
+
+// =============================================================================
+// Response
+// =============================================================================
+
+type Response struct {
+	SearchID string `json:"search_id"`
+	Message  string `json:"message"`
 }
 
 // Execute crea una búsqueda guardada con deduplicación por hash de parámetros.
@@ -61,7 +68,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 	}
 
 	// 2. Calcular hash de dedup
-	searchHash := domain.GenerateSearchHash(paramsMap)
+	searchHash := uc.hasher.Hash(cmd.Parameters)
 	if searchHash == "" {
 		return nil, fmt.Errorf("failed to generate search hash")
 	}

@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -61,6 +62,7 @@ type UseCase struct {
 	medicalProfileRepo MedicalProfileRepo
 	encryptionService  EncryptionSvc
 	eventPublisher     EventPublisher
+	wg                 sync.WaitGroup
 }
 
 // NewUseCase crea una nueva instancia del caso de uso.
@@ -71,6 +73,9 @@ func NewUseCase(deps UseCaseDeps) *UseCase {
 		eventPublisher:     deps.EventPublisher,
 	}
 }
+
+// Wait espera a que todos los eventos publicados asíncronamente terminen.
+func (uc *UseCase) Wait() { uc.wg.Wait() }
 
 // Execute valida el comando, encripta campos y actualiza el perfil médico.
 func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*UpdateMedicalProfileResponse, error) {
@@ -125,7 +130,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*UpdateMedicalProf
 		// Encriptar el valor
 		encrypted, err := uc.encryptionService.Encrypt(*fieldValue)
 		if err != nil {
-			return nil, fmt.Errorf("%w: encrypt %s: %w", domain.ErrEncryptionFailed, fieldName, err)
+			return nil, fmt.Errorf("%w: encrypt %s: %w", domain.ErrEncryptionError, fieldName, err)
 		}
 
 		// Codificar en base64 para almacenar como string JSONB
@@ -153,7 +158,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*UpdateMedicalProf
 
 	// Emit event (best-effort)
 	if uc.eventPublisher != nil {
-		go func() {
+		uc.wg.Go(func() {
 			bgCtx := context.WithoutCancel(ctx)
 			_, err := uc.eventPublisher.Publish(bgCtx,
 				eventbus.StreamName("user.medical_profile.updated"),
@@ -167,7 +172,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*UpdateMedicalProf
 					slog.String("error", err.Error()),
 				)
 			}
-		}()
+		})
 	}
 
 	return &UpdateMedicalProfileResponse{

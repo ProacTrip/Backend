@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/ProacTrip/Backend/internal/modules/auth/adapters/token"
+	sharedauth "github.com/ProacTrip/Backend/internal/shared/auth"
 	httperr "github.com/ProacTrip/Backend/internal/shared/http"
 	"github.com/labstack/echo/v5"
 )
@@ -28,7 +28,7 @@ func (h *Handler) Handle(c *echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "no-store")
 
 	// Extraer user claims del contexto (cookie auth)
-	claims, err := echo.ContextGet[*token.AccessClaims](c, "user_claims")
+	claims, err := echo.ContextGet[*sharedauth.AccessClaims](c, "user_claims")
 	if err != nil {
 		return httperr.MapError(c, err)
 	}

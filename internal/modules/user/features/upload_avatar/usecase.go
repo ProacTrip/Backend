@@ -74,6 +74,6 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		UploadURL:  uploadURL,
 		StorageKey: storageKey,
 		ExpiresAt:  expiresAt,
-		Message:    "PUT the file binary to upload_url, then call /avatar/confirm.",
+		Message:    "Subí el archivo binario a upload_url, luego llamá a /avatar/confirm.",
 	}, nil
 }

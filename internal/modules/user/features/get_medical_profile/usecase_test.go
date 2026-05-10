@@ -306,8 +306,8 @@ func TestGetMedicalProfile_DecryptionError(t *testing.T) {
 	if err == nil {
 		t.Fatal("se esperaba error de desencriptación")
 	}
-	if !errors.Is(err, domain.ErrDecryptionFailed) {
-		t.Errorf("error = %v, se esperaba ErrDecryptionFailed", err)
+	if !errors.Is(err, domain.ErrDecryptionError) {
+		t.Errorf("error = %v, se esperaba ErrDecryptionError", err)
 	}
 }
 

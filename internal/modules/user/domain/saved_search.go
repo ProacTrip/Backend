@@ -8,12 +8,17 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"lukechampine.com/blake3"
 )
 
 // =============================================================================
 // SavedSearch — Búsqueda guardada con hash de deduplicación
 // =============================================================================
+
+// HashService define el puerto de dominio para hashing de contenido.
+// Separa la implementación criptográfica (blake3) del dominio.
+type HashService interface {
+	Hash(data []byte) string
+}
 
 // SavedSearch representa una búsqueda guardada por el usuario.
 // Alineado con la migración saved_searches.
@@ -34,8 +39,8 @@ type SavedSearch struct {
 }
 
 // NewSavedSearch crea una nueva búsqueda guardada.
-// Calcula automáticamente el hash de los parámetros para deduplicación.
-func NewSavedSearch(userID uuid.UUID, name string, parameters map[string]any) (*SavedSearch, error) {
+// searchHash debe ser pre-calculado por el caso de uso usando HashService.
+func NewSavedSearch(userID uuid.UUID, name string, parameters map[string]any, searchHash string) (*SavedSearch, error) {
 	now := time.Now()
 	paramsJSON, err := json.Marshal(parameters)
 	if err != nil {
@@ -46,7 +51,7 @@ func NewSavedSearch(userID uuid.UUID, name string, parameters map[string]any) (*
 		UserID:            userID,
 		Name:              &name,
 		Parameters:        paramsJSON,
-		SearchHash:        GenerateSearchHash(parameters),
+		SearchHash:        searchHash,
 		ParametersVersion: 1,
 		AlertEnabled:      false,
 		CreatedAt:         now,
@@ -71,19 +76,4 @@ func (ss *SavedSearch) SetFilters(filters map[string]any) error {
 	return nil
 }
 
-// =============================================================================
-// Utilidades
-// =============================================================================
 
-// GenerateSearchHash genera un blake3 content hash for deduplication (not cryptographic signature).
-// Se usa para detectar búsquedas duplicadas del mismo usuario.
-func GenerateSearchHash(params map[string]any) string {
-	// Marshal determinista (sorted keys) para hash consistente
-	data, err := json.Marshal(params)
-	if err != nil {
-		// Fallback: usar un hash vacío en caso de error (no debería ocurrir)
-		return ""
-	}
-	h := blake3.Sum256(data)
-	return fmt.Sprintf("%x", h)
-}

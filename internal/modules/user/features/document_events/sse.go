@@ -16,7 +16,7 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/ProacTrip/Backend/internal/modules/auth/adapters/token"
+	sharedauth "github.com/ProacTrip/Backend/internal/shared/auth"
 	"github.com/ProacTrip/Backend/internal/modules/user/domain"
 	httperr "github.com/ProacTrip/Backend/internal/shared/http"
 )
@@ -40,7 +40,7 @@ func NewHandler(docRepo DocRepo, dragonfly *redis.Client) *Handler {
 // Handle establece la conexión SSE y streamea eventos del pipeline.
 func (h *Handler) Handle(c *echo.Context) error {
 	// Extraer user claims
-	claims, err := echo.ContextGet[*token.AccessClaims](c, "user_claims")
+	claims, err := echo.ContextGet[*sharedauth.AccessClaims](c, "user_claims")
 	if err != nil {
 		return httperr.MapError(c, err)
 	}

@@ -9,6 +9,21 @@ import (
 )
 
 // =============================================================================
+// Constantes: valores por defecto del perfil
+// =============================================================================
+
+// Valores por defecto usados como fallback cuando no hay EnvPrefs del evento
+// de registro ni llamada a UpsertProfile. Son sobreescritos por:
+//   - Evento UserRegistered con EnvPrefs (detección de entorno)
+//   - Caso de uso UpsertProfile
+const (
+	DefaultTimezone  = "UTC"
+	DefaultLanguage  = "es"
+	DefaultCurrency  = "EUR"
+	DefaultRole      = "client"
+)
+
+// =============================================================================
 // Tipos de perfil de usuario
 // =============================================================================
 
@@ -35,17 +50,17 @@ const (
 type UserProfile struct {
 	ID              uuid.UUID  `json:"id"`      // PK - diferente de user_id
 	UserID          uuid.UUID  `json:"user_id"` // FK al dominio Auth
-	Email           string     `json:"email,omitzero"` // denormalized from registration event
-	FirstName       *string    `json:"first_name,omitempty"`
-	LastName        *string    `json:"last_name,omitempty"`
+	Email           string     `json:"email"` // denormalized from registration event
+	FirstName       *string    `json:"first_name,omitzero"`
+	LastName        *string    `json:"last_name,omitzero"`
 	DateOfBirth     *time.Time `json:"date_of_birth,omitzero"`
-	Gender          *Gender    `json:"gender,omitempty"`
-	Nationality     *string    `json:"nationality,omitempty"`
-	Phone           *string    `json:"phone,omitempty"`
+	Gender          *Gender    `json:"gender,omitzero"`
+	Nationality     *string    `json:"nationality,omitzero"`
+	Phone           *string    `json:"phone,omitzero"`
 	PhoneVerified   bool       `json:"phone_verified"`
-	AvatarURL       *string    `json:"avatar_url,omitempty"`
-	CurrentLocation *string    `json:"current_location,omitempty"`
-	Bio             *string    `json:"bio,omitempty"`
+	AvatarURL       *string    `json:"avatar_url,omitzero"`
+	CurrentLocation *string    `json:"current_location,omitzero"`
+	Bio             *string    `json:"bio,omitzero"`
 	TimezoneName    string     `json:"timezone_name"` // NOT NULL DEFAULT 'UTC'
 	LanguageCode    string     `json:"language_code"` // NOT NULL DEFAULT 'es'
 	CurrencyCode    string     `json:"currency_code"` // NOT NULL DEFAULT 'EUR'
@@ -65,13 +80,15 @@ type UserProfile struct {
 func NewUserProfile(userID uuid.UUID, email string) *UserProfile {
 	now := time.Now()
 	return &UserProfile{
-		ID:            uuid.New(),
+		ID:            uuid.Must(uuid.NewV7()),
 		UserID:        userID,
 		Email:         email,
-		TimezoneName:  "UTC",
-		LanguageCode:  "es",
-		CurrencyCode:  "EUR",
-		Role:          "client",
+		// Valores por defecto: usan DefaultTimezone/DefaultLanguage/DefaultCurrency.
+		// Son sobreescritos por EnvPrefs del evento de registro o por UpsertProfile.
+		TimezoneName:  DefaultTimezone,
+		LanguageCode:  DefaultLanguage,
+		CurrencyCode:  DefaultCurrency,
+		// Role es asignado por el sistema de auth, no por la factoría del perfil.
 		IsPublic:      false,
 		PhoneVerified: false,
 		CreatedAt:     now,

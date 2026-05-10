@@ -90,7 +90,7 @@ func TestGetProfile_HappyPath(t *testing.T) {
 	travelPrefs.PreferredClass = domain.CabinClassBusiness
 
 	notifPrefs := []*domain.NotificationPreference{
-		domain.NewNotificationPreference(userID, domain.NotifChannelEmail, domain.NotifTypePriceAlert),
+		domain.NewNotificationPreference(userID, domain.NotifChannelEmail, domain.NotifTypeBookingConfirmation),
 	}
 
 	uc := NewUseCase(UseCaseDeps{
@@ -178,5 +178,77 @@ func TestGetProfile_TravelPrefsAndNotifPrefsMayBeNil(t *testing.T) {
 	}
 	if resp.NotificationPreferences != nil {
 		t.Error("NotificationPreferences debería ser nil cuando no hay datos")
+	}
+}
+
+func TestGetProfile_NotificationPreferencesGroupedByType(t *testing.T) {
+	// Verifica que notification_preferences se agrupen por notification_type
+	// y no por channel (USER_API.md § Get Profile)
+	userID := uuid.Must(uuid.NewV7())
+	profile := domain.NewUserProfile(userID, "test@example.com")
+
+	// Tres preferencias: 2 tipos con distintos canales
+	notifPrefs := []*domain.NotificationPreference{
+		domain.NewNotificationPreference(userID, domain.NotifChannelEmail, domain.NotifTypeBookingConfirmation),
+		domain.NewNotificationPreference(userID, domain.NotifChannelSMS, domain.NotifTypeBookingConfirmation),
+		domain.NewNotificationPreference(userID, domain.NotifChannelEmail, domain.NotifTypePromotional),
+	}
+
+	// booking_confirmation: email=true, sms=true (websocket debe estar false)
+	notifPrefs[0].Enabled = true
+	notifPrefs[1].Enabled = true
+	// promotional: email=true (sms y websocket deben estar false)
+	notifPrefs[2].Enabled = true
+
+	uc := NewUseCase(UseCaseDeps{
+		ProfileRepo:    &mockProfileRepo{getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.UserProfile, error) { return profile, nil }},
+		TravelPrefsRepo: &mockTravelPrefsRepo{getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.TravelPreferences, error) { return nil, domain.ErrTravelPrefsNotFound }},
+		NotifPrefsRepo: &mockNotifPrefsRepo{getByUserIDFn: func(ctx context.Context, id uuid.UUID) ([]*domain.NotificationPreference, error) { return notifPrefs, nil }},
+	})
+
+	cmd := Command{UserID: userID.String()}
+	resp, err := uc.Execute(t.Context(), cmd)
+	if err != nil {
+		t.Fatalf("error inesperado: %v", err)
+	}
+
+	// Debe tener 2 tipos de notificación (booking_confirmation y promotional)
+	if len(resp.NotificationPreferences) != 2 {
+		t.Fatalf("len(NotificationPreferences) = %d, se esperaba 2", len(resp.NotificationPreferences))
+	}
+
+	// booking_confirmation: email=true, sms=true, websocket=false
+	booking, ok := resp.NotificationPreferences["booking_confirmation"]
+	if !ok {
+		t.Fatal("NotificationPreferences no contiene 'booking_confirmation'")
+	}
+	if !booking.Email {
+		t.Error("booking_confirmation.Email debería ser true")
+	}
+	if !booking.SMS {
+		t.Error("booking_confirmation.SMS debería ser true")
+	}
+	if booking.Websocket {
+		t.Error("booking_confirmation.Websocket debería ser false (no configurado)")
+	}
+
+	// promotional: email=true, sms=false, websocket=false
+	promo, ok := resp.NotificationPreferences["promotional"]
+	if !ok {
+		t.Fatal("NotificationPreferences no contiene 'promotional'")
+	}
+	if !promo.Email {
+		t.Error("promotional.Email debería ser true")
+	}
+	if promo.SMS {
+		t.Error("promotional.SMS debería ser false (no configurado)")
+	}
+	if promo.Websocket {
+		t.Error("promotional.Websocket debería ser false (no configurado)")
+	}
+
+	// flight_reminder no debería estar presente (no configurado)
+	if _, exists := resp.NotificationPreferences["flight_reminder"]; exists {
+		t.Error("flight_reminder no debería aparecer (no configurado)")
 	}
 }

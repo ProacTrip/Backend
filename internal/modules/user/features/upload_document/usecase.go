@@ -149,7 +149,7 @@ func (uc *UseCase) CheckRateLimit(ctx context.Context, userIDStr string) error {
 }
 
 // Execute procesa la subida del documento.
-// Order: Max docs → Size validation → Magic bytes → blake3 → Dedup user → Dedup global (with lock) → Upload
+// Order: Magic bytes → MIME detection → Size validation → Max docs → blake3 → Dedup → Upload
 func (uc *UseCase) Execute(ctx context.Context, cmd UploadDocumentCommand) (*UploadDocumentResponse, error) {
 	// 1. Parsear userID (auth verified by handler)
 	userID, err := uuid.Parse(cmd.UserID)
@@ -157,27 +157,12 @@ func (uc *UseCase) Execute(ctx context.Context, cmd UploadDocumentCommand) (*Upl
 		return nil, fmt.Errorf("invalid user_id: %w", err)
 	}
 
-	// 2. Max documents per user check (count ALL docs, all statuses)
-	count, err := uc.docRepo.CountByUserID(ctx, userID)
-	if err != nil {
-		return nil, fmt.Errorf("contar documentos del usuario: %w", err)
-	}
-	if count >= uc.maxDocumentsPerUser {
-		return nil, domain.ErrMaxDocumentsReached
-	}
-
-	// 3. Content-Length / size validation según MIME type
-	maxSize := MaxSizeForMIME(cmd.MimeType)
 	realSize := int64(len(cmd.FileBytes))
-	if realSize > maxSize {
-		return nil, fmt.Errorf("FILE_TOO_LARGE: %d bytes exceeds max %d bytes for %s: %w",
-			realSize, maxSize, cmd.MimeType, domain.ErrFileTooLarge)
-	}
 	if realSize == 0 {
 		return nil, domain.ErrFileTooLarge
 	}
 
-	// 4. Magic bytes validation (double check after handler)
+	// 2. Magic bytes detection — el usecase detecta el MIME type real
 	headerSize := 512
 	if len(cmd.FileBytes) < headerSize {
 		headerSize = len(cmd.FileBytes)
@@ -186,9 +171,31 @@ func (uc *UseCase) Execute(ctx context.Context, cmd UploadDocumentCommand) (*Upl
 	if err != nil || !filetype.IsAccepted(detectedMime) {
 		return nil, domain.ErrInvalidFileType
 	}
+	cmd.MimeType = detectedMime // establecido para que reuseGlobalDedup y demás lo consuman
+
+	// 3. Size validation según MIME type detectado
+	maxSize := MaxSizeForMIME(detectedMime)
+	if realSize > maxSize {
+		return nil, fmt.Errorf("FILE_TOO_LARGE: %d bytes exceeds max %d bytes for %s: %w",
+			realSize, maxSize, detectedMime, domain.ErrFileTooLarge)
+	}
+
+	// 4. Max documents per user check (count ALL docs, all statuses)
+	count, err := uc.docRepo.CountByUserID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("contar documentos del usuario: %w", err)
+	}
+	if count >= uc.maxDocumentsPerUser {
+		return nil, domain.ErrMaxDocumentsReached
+	}
 
 	// 5. blake3 content hash (for dedup)
 	contentHash := filetype.ContentHash(cmd.FileBytes)
+
+	// Si Dragonfly no está configurado, los dedup checks no pueden realizarse
+	if uc.dragonfly == nil {
+		return nil, fmt.Errorf("dragonfly client is required for dedup")
+	}
 
 	// 6. Dedup — per-user reject
 	dedupUserKey := fmt.Sprintf("{dedup}:user:%s:%s", userID.String(), contentHash)
@@ -334,7 +341,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd UploadDocumentCommand) (*Upl
 		DocumentID: docID.String(),
 		Status:     string(domain.OCRStatusQueued),
 		EventsURL:  fmt.Sprintf("/v1/user/documents/%s/events", docID.String()),
-		Message:    "Document received. Processing has started. Track progress via events_url.",
+		Message:    "Documento recibido. El procesamiento ha comenzado. Seguí el progreso vía events_url.",
 	}
 
 	return resp, nil
@@ -427,6 +434,6 @@ func (uc *UseCase) reuseGlobalDedup(
 		DocumentID: docID.String(),
 		Status:     string(domain.OCRStatusQueued),
 		EventsURL:  fmt.Sprintf("/v1/user/documents/%s/events", docID.String()),
-		Message:    "Document reused from global deduplication. Processing started.",
+		Message:    "Documento reutilizado por deduplicación global. Procesamiento iniciado.",
 	}, true
 }

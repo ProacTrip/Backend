@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ProacTrip/Backend/internal/modules/auth/adapters/token"
+	sharedauth "github.com/ProacTrip/Backend/internal/shared/auth"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/ai_search"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/shared"
 	"github.com/google/uuid"
@@ -131,7 +131,7 @@ func TestHandler_AuthUser(t *testing.T) {
 	c, rec := newEchoContext(`{"message": "Vuelos baratos"}`)
 
 	// Simulate auth middleware: set user claims in Echo context
-	c.Set("user_claims", &token.AccessClaims{
+	c.Set("user_claims", &sharedauth.AccessClaims{
 		UserID:    userID,
 		Email:     "test@example.com",
 		RoleID:    uuid.Nil,

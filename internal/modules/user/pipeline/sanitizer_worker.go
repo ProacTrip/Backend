@@ -71,10 +71,10 @@ func NewSanitizerWorker(rdb *redis.Client, r2 SanitizerR2Client, docRepo Documen
 	}
 }
 
-// IsRunning reports whether the main consume goroutine is alive.
+// IsRunning indica si la goroutine principal de consumo está activa.
 func (s *SanitizerWorker) IsRunning() bool { return s.running.Load() }
 
-// Name returns a human-readable identifier.
+// Name devuelve un identificador legible.
 func (s *SanitizerWorker) Name() string { return "doc-sanitizer" }
 
 // Run inicia el consumer en background.
@@ -214,7 +214,7 @@ func (s *SanitizerWorker) processMessage(ctx context.Context, msg redis.XMessage
 
 	// NOTE: raw/ file is NOT deleted here.
 	// raw/ is retained for audit, debugging, and re-processing.
-	// Only DELETE /v1/user/documents/:id handler deletes raw/.
+	// Solo el handler DELETE /v1/user/documents/:id elimina archivos raw/.
 	//
 	// 6. Subir archivo sanitizado a R2/processed/
 	cleanContentType := mimeType
@@ -312,8 +312,8 @@ func sanitizePNG(data []byte) ([]byte, error) {
 }
 
 // sanitizePDF strips dangerous entries from PDF structure.
-// Approaches: parse PDF object structure, remove dangerous entries, write clean PDF.
-// Strips:
+// Enfoque: analiza la estructura de objetos PDF, elimina entradas peligrosas, escribe PDF limpio.
+// Elimina:
 //   - JavaScript (/JS, /JavaScript entries)
 //   - Embedded files (/EmbeddedFile, /EmbeddedFiles)
 //   - OpenAction, AA (Additional Actions)

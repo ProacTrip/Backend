@@ -15,6 +15,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/ProacTrip/Backend/internal/modules/user/adapters/encryption"
+	"github.com/ProacTrip/Backend/internal/modules/user/adapters/hash"
 	deepseekocr "github.com/ProacTrip/Backend/internal/modules/user/adapters/ocr/deepseek"
 	"github.com/ProacTrip/Backend/internal/modules/user/adapters/postgres"
 	"github.com/ProacTrip/Backend/internal/modules/user/adapters/storage"
@@ -151,7 +152,9 @@ func NewModule(cfg Config) (*Module, error) {
 	m := &Module{}
 
 	// 0. Run pending migrations BEFORE any DB operation
-	if err := runMigrations(context.Background(), cfg.PostgresPool); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := runMigrations(ctx, cfg.PostgresPool); err != nil {
 		return nil, fmt.Errorf("user migrations: %w", err)
 	}
 
@@ -300,26 +303,47 @@ func NewModule(cfg Config) (*Module, error) {
 	}
 
 	// Document Types — catálogo público (siempre disponible)
-	m.DocumentTypesHandler = document_types.NewHandler(docRepo)
+	docTypesUC := document_types.NewUseCase(document_types.UseCaseDeps{
+		TypeRepo: docRepo,
+	})
+	m.DocumentTypesHandler = document_types.NewHandler(docTypesUC)
 
 	// List Documents
-	m.ListDocumentsHandler = list_documents.NewHandler(docRepo)
+	listDocsUC := list_documents.NewUseCase(list_documents.UseCaseDeps{
+		DocRepo: docRepo,
+	})
+	m.ListDocumentsHandler = list_documents.NewHandler(listDocsUC)
 
 	// Get Document
-	m.GetDocumentHandler = get_document.NewHandler(docRepo)
+	getDocUC := get_document.NewUseCase(get_document.UseCaseDeps{
+		DocRepo: docRepo,
+	})
+	m.GetDocumentHandler = get_document.NewHandler(getDocUC)
 
 	// Download Document
 	if m.R2Storage != nil {
-		m.DownloadDocumentHandler = download_document.NewHandler(docRepo, m.R2Storage)
+		downloadDocUC := download_document.NewUseCase(download_document.UseCaseDeps{
+			DocRepo: docRepo,
+			Storage: m.R2Storage,
+		})
+		m.DownloadDocumentHandler = download_document.NewHandler(downloadDocUC)
 	}
 
 	// Delete Document
 	if m.R2Storage != nil {
-		m.DeleteDocumentHandler = delete_document.NewHandler(docRepo, m.R2Storage)
+		deleteDocUC := delete_document.NewUseCase(delete_document.UseCaseDeps{
+			DocRepo: docRepo,
+			R2:      m.R2Storage,
+		})
+		m.DeleteDocumentHandler = delete_document.NewHandler(deleteDocUC)
 	}
 
 	// Verify Document (admin only)
-	m.VerifyDocumentHandler = verify_document.NewHandler(docRepo, cfg.RedisClient)
+	verifyDocUC := verify_document.NewUseCase(verify_document.UseCaseDeps{
+		DocRepo:   docRepo,
+		Dragonfly: cfg.RedisClient,
+	})
+	m.VerifyDocumentHandler = verify_document.NewHandler(verifyDocUC)
 
 	// Document Events (SSE)
 	m.DocumentEventsHandler = document_events.NewHandler(docRepo, cfg.RedisClient)
@@ -331,9 +355,13 @@ func NewModule(cfg Config) (*Module, error) {
 	favRepo := postgres.NewFavoriteRepository(cfg.PostgresPool)
 	m.FavoriteRepo = favRepo
 
+	// Hash Service (blake3) para deduplicación de búsquedas guardadas
+	hashSvc := hash.NewBlake3Service()
+
 	// 15. Inicializar Features de Búsquedas Guardadas (Phase 6)
 	createSavedSearchUC := create_saved_search.NewUseCase(create_saved_search.UseCaseDeps{
 		SavedSearchRepo: searchRepo,
+		HashService:     hashSvc,
 	})
 	m.CreateSavedSearchHandler = create_saved_search.NewHandler(createSavedSearchUC)
 
@@ -344,6 +372,7 @@ func NewModule(cfg Config) (*Module, error) {
 
 	updateSavedSearchUC := update_saved_search.NewUseCase(update_saved_search.UseCaseDeps{
 		SavedSearchRepo: searchRepo,
+		HashService:     hashSvc,
 	})
 	m.UpdateSavedSearchHandler = update_saved_search.NewHandler(updateSavedSearchUC)
 
@@ -433,12 +462,16 @@ func (m *Module) RegisterRoutes(g *echo.Group, authMW echo.MiddlewareFunc) {
 	g.PUT("/profile/travel-preferences", m.UpdateTravelPrefsHandler.Handle, authMW)
 	g.PUT("/profile/notifications", m.UpdateNotifPrefsHandler.Handle, authMW)
 
-	// Phase 3 — Medical (solo si EncryptionService está disponible)
+	// Phase 3 — Medical
+	// GetMedicalProfile y UpdateMedicalProfile requieren encriptación
 	if m.GetMedicalProfileHandler != nil {
 		g.GET("/profile/medical", m.GetMedicalProfileHandler.Handle, authMW)
 		g.PUT("/profile/medical", m.UpdateMedicalProfileHandler.Handle, authMW)
-		g.GET("/profile/medical/pending", m.ListPendingMedicalHandler.Handle, authMW)
 		g.POST("/profile/medical/pending/resolve", m.ResolveMedicalPendingHandler.Handle, authMW)
+	}
+	// ListPendingMedicalHandler NO requiere encriptación — gate independiente
+	if m.ListPendingMedicalHandler != nil {
+		g.GET("/profile/medical/pending", m.ListPendingMedicalHandler.Handle, authMW)
 	}
 
 	// Phase 4 — Avatar
@@ -614,6 +647,10 @@ func registerUserErrorMappings() {
 			return serrors.ErrNotFound("Perfil de usuario no encontrado", err)
 		case errors.Is(err, domain.ErrMedicalProfileNotFound):
 			return serrors.ErrNotFound("Perfil médico no encontrado", err)
+		case errors.Is(err, domain.ErrTravelPrefsNotFound):
+			return serrors.ErrNotFound("Preferencias de viaje no encontradas", err)
+		case errors.Is(err, domain.ErrNotifPrefsNotFound):
+			return serrors.ErrNotFound("Preferencias de notificación no encontradas", err)
 
 		case errors.Is(err, domain.ErrInvalidGender):
 			return serrors.ErrBadRequest("Género inválido. Valores permitidos: male, female, non_binary, prefer_not_to_say", err)
@@ -625,6 +662,8 @@ func registerUserErrorMappings() {
 			return serrors.ErrBadRequest("Código de moneda inválido. Debe ser ISO 4217 (3 letras)", err)
 		case errors.Is(err, domain.ErrInvalidTimezone):
 			return serrors.ErrBadRequest("Zona horaria inválida. Formato IANA: Area/City", err)
+		case errors.Is(err, domain.ErrInvalidEnum):
+			return serrors.ErrBadRequest(err.Error(), err)
 		case errors.Is(err, domain.ErrInvalidPreferredClass):
 			return serrors.ErrBadRequest("Clase de cabina inválida. Valores permitidos: economy, premium_economy, business, first", err)
 		case errors.Is(err, domain.ErrInvalidSeatPreference):
@@ -632,11 +671,11 @@ func registerUserErrorMappings() {
 		case errors.Is(err, domain.ErrInvalidChannel):
 			return serrors.ErrBadRequest("Canal de notificación inválido. Valores permitidos: email, sms, websocket", err)
 		case errors.Is(err, domain.ErrInvalidNotificationType):
-			return serrors.ErrBadRequest("Tipo de notificación inválido. Valores permitidos: price_alert, booking_confirm, travel_reminder, promo_offer, booking_confirmation, flight_reminder, promotional", err)
+			return serrors.ErrBadRequest("Tipo de notificación inválido. Valores permitidos: booking_confirmation, flight_reminder, promotional", err)
 		case errors.Is(err, domain.ErrInvalidBloodType):
 			return serrors.ErrBadRequest("Tipo de sangre inválido", err)
 
-		case errors.Is(err, domain.ErrEncryptionFailed), errors.Is(err, domain.ErrDecryptionFailed):
+		case errors.Is(err, domain.ErrEncryptionError), errors.Is(err, domain.ErrDecryptionError):
 			return serrors.ErrInternalError("Error interno de encriptación", err)
 
 		case errors.Is(err, domain.ErrInvalidMimeType):
@@ -651,7 +690,7 @@ func registerUserErrorMappings() {
 		case errors.Is(err, domain.ErrInvalidFileType):
 			return serrors.ErrBadRequest("Tipo de archivo no permitido", err)
 		case errors.Is(err, domain.ErrFileTooLarge):
-			return serrors.ErrPayloadTooLarge(err.Error(), err)
+			return serrors.ErrBadRequest(err.Error(), err)
 		case errors.Is(err, domain.ErrDocumentNotReady):
 			return serrors.ErrBadRequest("El documento aún no está listo para procesar", err)
 		case errors.Is(err, domain.ErrMaxDocumentsReached):
@@ -671,7 +710,7 @@ func registerUserErrorMappings() {
 		case errors.Is(err, domain.ErrDuplicateFavorite):
 			return serrors.ErrConflict("El favorito ya existe para esta entidad", err)
 		case errors.Is(err, domain.ErrInvalidFavoriteEntityType):
-			return serrors.ErrBadRequest("Tipo de entidad favorita inválido. Valores permitidos: hotel, flight, airport, airline, hotel_chain, country, destination, activity", err)
+			return serrors.ErrBadRequest("Tipo de entidad favorita inválido. Valores permitidos: hotel, flight, activity", err)
 
 		case errors.Is(err, domain.ErrPendingUpdateNotFound):
 			return serrors.ErrNotFound("Actualización pendiente no encontrada", err)

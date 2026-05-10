@@ -61,7 +61,7 @@ func (m *integrationMockRepo) Update(ctx context.Context, profile *domain.UserPr
 	if profile.Nationality != nil { p.Nationality = profile.Nationality }
 	if profile.Phone != nil { p.Phone = profile.Phone }
 	if profile.Bio != nil { p.Bio = profile.Bio }
-	if profile.IsPublic != nil { p.IsPublic = profile.IsPublic }
+	p.IsPublic = profile.IsPublic // bool — siempre asignar, no puede ser nil
 	return nil
 }
 

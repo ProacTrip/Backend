@@ -14,6 +14,7 @@ var (
 	ErrNotifPrefsNotFound      = errors.New("NOTIF_PREFS_NOT_FOUND: preferencias de notificación no encontradas")
 
 	// Validación de campos
+	ErrInvalidEnum            = errors.New("INVALID_ENUM: valor de enumeración inválido")
 	ErrInvalidGender          = errors.New("INVALID_GENDER: género inválido")
 	ErrInvalidBloodType       = errors.New("INVALID_BLOOD_TYPE: tipo de sangre inválido")
 	ErrInvalidPreferredClass  = errors.New("INVALID_PREFERRED_CLASS: clase de cabina inválida")
@@ -26,13 +27,12 @@ var (
 	ErrInvalidTimezone        = errors.New("INVALID_TIMEZONE: zona horaria inválida")
 
 	// Encriptación
-	ErrEncryptionFailed = errors.New("ENCRYPTION_FAILED: fallo al encriptar datos")
-	ErrDecryptionFailed = errors.New("DECRYPTION_FAILED: fallo al desencriptar datos")
+	ErrEncryptionError = errors.New("ENCRYPTION_ERROR: fallo al encriptar datos")
+	ErrDecryptionError = errors.New("DECRYPTION_ERROR: fallo al desencriptar datos")
 
 	// Documentos
 	ErrDocumentNotFound     = errors.New("DOCUMENT_NOT_FOUND: documento no encontrado")
 	ErrInvalidDocumentType  = errors.New("INVALID_DOCUMENT_TYPE: tipo de documento inválido")
-	ErrInvalidOCRStatus     = errors.New("INVALID_OCR_STATUS: estado OCR inválido")
 	ErrInvalidFileType      = errors.New("INVALID_FILE_TYPE: tipo de archivo no permitido")
 	ErrFileTooLarge         = errors.New("FILE_TOO_LARGE: el archivo excede el tamaño máximo permitido")
 	ErrDocumentNotReady     = errors.New("DOCUMENT_NOT_READY: el documento aún no está listo para procesar")

@@ -25,11 +25,7 @@ const (
 type NotificationType string
 
 const (
-	NotifTypePriceAlert     NotificationType = "price_alert"
-	NotifTypeBookingConfirm NotificationType = "booking_confirm"
-	NotifTypeTravelReminder NotificationType = "travel_reminder"
-	NotifTypePromoOffer     NotificationType = "promo_offer"
-	// Spec-aligned aliases
+	// Tipos canónicos de notificación (USER_API.md).
 	NotifTypeBookingConfirmation NotificationType = "booking_confirmation"
 	NotifTypeFlightReminder      NotificationType = "flight_reminder"
 	NotifTypePromotional         NotificationType = "promotional"

@@ -36,8 +36,14 @@ func (s *profileRepoStub) Update(ctx context.Context, p *UserProfile) error {
 func (s *profileRepoStub) UpdateLocale(ctx context.Context, id uuid.UUID, tz, lang, curr, loc string) error {
 	return s.updateLocaleFn(ctx, id, tz, lang, curr, loc)
 }
+func (s *profileRepoStub) UpsertProfile(ctx context.Context, p *UserProfile) error {
+	return nil
+}
 func (s *profileRepoStub) UpdateAvatar(ctx context.Context, id uuid.UUID, url string) error {
 	return s.updateAvatarFn(ctx, id, url)
+}
+func (s *profileRepoStub) UpdatePreferences(ctx context.Context, id uuid.UUID, tz, lang, curr string, isPublic bool) error {
+	return nil
 }
 
 // Compile-time: profileRepoStub implements ProfileRepository

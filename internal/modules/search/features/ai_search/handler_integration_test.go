@@ -18,7 +18,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ProacTrip/Backend/internal/modules/auth/adapters/token"
+	sharedauth "github.com/ProacTrip/Backend/internal/shared/auth"
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/ai_search"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/search_flights"
@@ -509,7 +509,7 @@ func TestIntegration_TurnLimit_Authenticated(t *testing.T) {
 	c, rec := newAIEchoContext(`{"message": "Una consulta más", "conversation_id": "conv_auth_full"}`)
 
 	// Set auth claims
-	c.Set("user_claims", &token.AccessClaims{
+	c.Set("user_claims", &sharedauth.AccessClaims{
 		UserID:    userID,
 		Email:     "test@example.com",
 		RoleID:    uuid.Nil,

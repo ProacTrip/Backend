@@ -35,6 +35,14 @@ func (m *mockSavedSearchRepo) GetByHash(ctx context.Context, userID uuid.UUID, s
 	return nil, nil
 }
 
+type mockHashService struct {
+	hash string
+}
+
+func (m *mockHashService) Hash(data []byte) string {
+	return m.hash
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
@@ -63,6 +71,7 @@ func TestCreateSavedSearch_HappyPath(t *testing.T) {
 				return nil
 			},
 		},
+		HashService: &mockHashService{hash: "abc123"},
 	})
 
 	resp, err := uc.Execute(t.Context(), cmd)
@@ -88,9 +97,7 @@ func TestCreateSavedSearch_Duplicate(t *testing.T) {
 		Parameters: params,
 	}
 
-	// Pre-crear una búsqueda con el mismo hash
-	paramsMap := map[string]any{"origin": "EZE", "destination": "MAD"}
-	existingHash := domain.GenerateSearchHash(paramsMap)
+	existingHash := "dup-hash-123"
 
 	uc := NewUseCase(UseCaseDeps{
 		SavedSearchRepo: &mockSavedSearchRepo{
@@ -101,6 +108,7 @@ func TestCreateSavedSearch_Duplicate(t *testing.T) {
 				return nil, nil
 			},
 		},
+		HashService: &mockHashService{hash: existingHash},
 	})
 
 	_, err := uc.Execute(t.Context(), cmd)
@@ -177,6 +185,7 @@ func TestCreateSavedSearch_WithName(t *testing.T) {
 				return nil
 			},
 		},
+		HashService: &mockHashService{hash: "xyz789"},
 	})
 
 	_, err := uc.Execute(t.Context(), cmd)

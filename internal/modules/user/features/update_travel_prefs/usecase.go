@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 
 	"github.com/google/uuid"
 
@@ -36,6 +37,7 @@ type UseCaseDeps struct {
 type UseCase struct {
 	travelPrefsRepo TravelPrefsRepo
 	eventPublisher  EventPublisher
+	wg              sync.WaitGroup
 }
 
 func NewUseCase(deps UseCaseDeps) *UseCase {
@@ -44,6 +46,9 @@ func NewUseCase(deps UseCaseDeps) *UseCase {
 		eventPublisher:  deps.EventPublisher,
 	}
 }
+
+// Wait espera a que todos los eventos publicados asíncronamente terminen.
+func (uc *UseCase) Wait() { uc.wg.Wait() }
 
 // Execute valida los enums y actualiza (o crea) las preferencias.
 func (uc *UseCase) Execute(ctx context.Context, cmd Command) error {
@@ -146,7 +151,7 @@ func (uc *UseCase) publishEvent(ctx context.Context, userID uuid.UUID) {
 	if uc.eventPublisher == nil {
 		return
 	}
-	go func() {
+	uc.wg.Go(func() {
 		bgCtx := context.WithoutCancel(ctx)
 		_, err := uc.eventPublisher.Publish(bgCtx,
 			eventbus.StreamName("user.travel_preferences.updated"),
@@ -160,5 +165,5 @@ func (uc *UseCase) publishEvent(ctx context.Context, userID uuid.UUID) {
 				slog.String("error", err.Error()),
 			)
 		}
-	}()
+	})
 }

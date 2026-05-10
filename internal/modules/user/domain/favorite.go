@@ -16,25 +16,15 @@ import (
 type FavoriteEntityType string
 
 const (
-	FavoriteEntityHotel       FavoriteEntityType = "hotel"
-	FavoriteEntityFlight      FavoriteEntityType = "flight"
-	FavoriteEntityAirport     FavoriteEntityType = "airport"
-	FavoriteEntityAirline     FavoriteEntityType = "airline"
-	FavoriteEntityHotelChain  FavoriteEntityType = "hotel_chain"
-	FavoriteEntityCountry     FavoriteEntityType = "country"
-	FavoriteEntityDestination FavoriteEntityType = "destination"
-	FavoriteEntityActivity    FavoriteEntityType = "activity"
+	FavoriteEntityHotel   FavoriteEntityType = "hotel"
+	FavoriteEntityFlight  FavoriteEntityType = "flight"
+	FavoriteEntityActivity FavoriteEntityType = "activity"
 )
 
 var validFavoriteEntityTypes = map[FavoriteEntityType]bool{
-	FavoriteEntityHotel:      true,
-	FavoriteEntityFlight:     true,
-	FavoriteEntityAirport:    true,
-	FavoriteEntityAirline:    true,
-	FavoriteEntityHotelChain: true,
-	FavoriteEntityCountry:    true,
-	FavoriteEntityDestination: true,
-	FavoriteEntityActivity:   true,
+	FavoriteEntityHotel:   true,
+	FavoriteEntityFlight:  true,
+	FavoriteEntityActivity: true,
 }
 
 // IsValidFavoriteEntityType verifica si el string es un tipo de entidad favorita válido.

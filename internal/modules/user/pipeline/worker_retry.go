@@ -1,13 +1,13 @@
-// Worker retry logic with Dead Letter Queue (DLQ).
-// All pipeline workers (Validator, Sanitizer, OCR, Avatar) use this.
+// Lógica de reintento de workers con Dead Letter Queue (DLQ).
+// Todos los workers del pipeline (Validator, Sanitizer, OCR, Avatar) usan esto.
 //
-// On failure: increment retry count in message metadata.
-//   - If retries < MaxRetries: wait exponential backoff, message stays in PEL
-//   - If retries >= MaxRetries: XACK (remove from PEL), produce to DLQ stream
+// En caso de fallo: incrementa contador de reintentos en metadatos del mensaje.
+//   - Si reintentos < MaxRetries: espera backoff exponencial, mensaje permanece en PEL
+//   - Si reintentos >= MaxRetries: XACK (remover de PEL), producir al stream DLQ
 //
-// DLQ streams:
-//   - {events}:doc:dlq for document workers (Validator, Sanitizer, OCR)
-//   - {events}:avatar:dlq for avatar worker
+// Streams DLQ:
+//   - {events}:doc:dlq para workers de documentos (Validator, Sanitizer, OCR)
+//   - {events}:avatar:dlq para el worker de avatar
 package pipeline
 
 import (
@@ -20,7 +20,7 @@ import (
 )
 
 // =============================================================================
-// Retry configuration
+// Configuración de reintentos
 // =============================================================================
 
 const (
@@ -46,7 +46,7 @@ const (
 // =============================================================================
 
 // EnsureDLQStreams creates the DLQ streams and consumer groups if they don't exist.
-// Streams start from "0" to preserve all dead-lettered messages.
+// Los streams comienzan desde "0" para preservar todos los mensajes dead-lettered.
 func EnsureDLQStreams(ctx context.Context, rdb *redis.Client) error {
 	for _, cfg := range []struct {
 		stream string
@@ -64,11 +64,11 @@ func EnsureDLQStreams(ctx context.Context, rdb *redis.Client) error {
 }
 
 // =============================================================================
-// Retry logic
+// Lógica de reintentos
 // =============================================================================
 
 // retryCount extracts the retry count from message metadata.
-// Returns 0 if not present or unparseable.
+// Devuelve 0 si no está presente o no se puede parsear.
 func retryCount(msg redis.XMessage) int {
 	val, ok := msg.Values["_retry_count"]
 	if !ok {
@@ -90,7 +90,7 @@ func retryCount(msg redis.XMessage) int {
 	}
 }
 
-// RetryBackoff calculates exponential backoff: base * 2^retry, capped at max.
+// RetryBackoff calcula backoff exponencial: base * 2^reintento, limitado a max.
 func RetryBackoff(retry int) time.Duration {
 	if retry <= 0 {
 		return RetryBaseWait
@@ -102,16 +102,16 @@ func RetryBackoff(retry int) time.Duration {
 	return d
 }
 
-// ShouldRetry returns true if the message can be retried.
-// When false, the message should be moved to DLQ.
+// ShouldRetry devuelve true si el mensaje puede ser reintentado.
+// Cuando es false, el mensaje debe moverse a DLQ.
 func ShouldRetry(msg redis.XMessage) bool {
 	return retryCount(msg) < MaxRetries
 }
 
-// MoveToDLQ XACKs the message from its source stream and produces
-// a dead-letter entry with original payload + error + retry count + timestamp.
+// MoveToDLQ hace XACK del mensaje de su stream origen y produce
+// una entrada dead-letter con payload original + error + reintentos + timestamp.
 func MoveToDLQ(ctx context.Context, rdb *redis.Client, sourceStream, sourceGroup, dlqStream, msgID string, msg redis.XMessage, errMsg string) error {
-	// Build DLQ payload: original values + metadata
+	// Construir payload DLQ: valores originales + metadatos
 	dlqPayload := make(map[string]interface{})
 	for k, v := range msg.Values {
 		dlqPayload[k] = v
@@ -127,7 +127,7 @@ func MoveToDLQ(ctx context.Context, rdb *redis.Client, sourceStream, sourceGroup
 		return fmt.Errorf("dlq: xack source: %w", err)
 	}
 
-	// Produce to DLQ stream
+	// Producir al stream DLQ
 	if _, err := rdb.XAdd(ctx, &redis.XAddArgs{
 		Stream: dlqStream,
 		ID:     "*",

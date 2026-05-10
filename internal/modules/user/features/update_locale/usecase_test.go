@@ -48,16 +48,16 @@ func TestUpdateLocale_ValidTimezone(t *testing.T) {
 	called := false
 	uc := NewUseCase(UseCaseDeps{
 		ProfileRepo: &mockProfileRepo{
-			updateLocaleFn: func(ctx context.Context, id uuid.UUID, timezone, language, currency string) error {
+			updateLocaleFn: func(ctx context.Context, id uuid.UUID, tzStr, langStr, curStr, locStr string) error {
 				called = true
-				if timezone != tz {
-					t.Errorf("timezone = %s, esperado %s", timezone, tz)
+				if tzStr != tz {
+					t.Errorf("tz = %s, esperado %s", tzStr, tz)
 				}
-				if language != lang {
-					t.Errorf("language = %s, esperado %s", language, lang)
+				if langStr != lang {
+					t.Errorf("lang = %s, esperado %s", langStr, lang)
 				}
-				if currency != cur {
-					t.Errorf("currency = %s, esperado %s", currency, currency)
+				if curStr != cur {
+					t.Errorf("cur = %s, esperado %s", curStr, cur)
 				}
 				return nil
 			},
@@ -135,13 +135,13 @@ func TestUpdateLocale_OnlyPartialFields(t *testing.T) {
 	called := false
 	uc := NewUseCase(UseCaseDeps{
 		ProfileRepo: &mockProfileRepo{
-			updateLocaleFn: func(ctx context.Context, id uuid.UUID, timezone, language, currency string) error {
+			updateLocaleFn: func(ctx context.Context, id uuid.UUID, tzStr, langStr, curStr, locStr string) error {
 				called = true
-				if timezone != tz {
-					t.Error("timezone mal")
+				if tzStr != tz {
+					t.Error("tz mal")
 				}
-				if language != "" {
-					t.Error("language debería ser vacío")
+				if langStr != "" {
+					t.Error("lang debería ser vacío")
 				}
 				return nil
 			},

@@ -24,7 +24,7 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/ProacTrip/Backend/internal/modules/auth/adapters/token"
+	sharedauth "github.com/ProacTrip/Backend/internal/shared/auth"
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/hotel_details"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/shared"
@@ -125,7 +125,7 @@ func TestHandlerIntegration_HotelDetails_AuthenticatedUser_UsesProfilePrefs(t *t
 	}
 
 	c, rec := newHotelDetailsEchoContext(t, minimalHotelDetailsBody())
-	c.Set("user_claims", &token.AccessClaims{
+	c.Set("user_claims", &sharedauth.AccessClaims{
 		UserID:    userID,
 		Email:     "brazilian@example.com",
 		RoleID:    uuid.Nil,
@@ -200,7 +200,7 @@ func TestHandlerIntegration_HotelDetails_ExplicitWinsOverProfilePrefs(t *testing
 	body := `{"id":"prop_abc123","check_in_date":"2026-06-15","check_out_date":"2026-06-20","currency":"GBP"}`
 
 	c, rec := newHotelDetailsEchoContext(t, body)
-	c.Set("user_claims", &token.AccessClaims{UserID: userID})
+	c.Set("user_claims", &sharedauth.AccessClaims{UserID: userID})
 
 	err := handler.Handle(c)
 	if err != nil {

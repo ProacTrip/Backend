@@ -83,6 +83,6 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 
 	return &Response{
 		Status:  "validating",
-		Message: "Avatar upload confirmed. Validation in progress.",
+		Message: "Carga de avatar confirmada. Validación en progreso.",
 	}, nil
 }

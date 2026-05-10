@@ -102,10 +102,10 @@ func NewOCRWorker(
 	}
 }
 
-// IsRunning reports whether the main consume goroutine is alive.
+// IsRunning indica si la goroutine principal de consumo está activa.
 func (w *OCRWorker) IsRunning() bool { return w.running.Load() }
 
-// Name returns a human-readable identifier.
+// Name devuelve un identificador legible.
 func (w *OCRWorker) Name() string { return "doc-ocr" }
 
 // Run inicia el consumer en background.
@@ -135,6 +135,7 @@ func (w *OCRWorker) consume(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		default:
 		}
 
 		messages, err := w.rdb.XReadGroup(ctx, &redis.XReadGroupArgs{
@@ -322,11 +323,13 @@ func (w *OCRWorker) processMessage(ctx context.Context, msg redis.XMessage) {
 
 // medicalFieldMap mapea nombres de campos OCR a campos del perfil médico.
 var medicalFieldMap = map[string]string{
-	"blood_type":    "blood_type",
-	"allergies":     "allergies",
-	"medications":   "medications",
-	"conditions":    "conditions",
-	"vaccinations":  "vaccinations",
+	"blood_type":        "blood_type",
+	"allergies":         "allergies",
+	"medications":       "medications",
+	"conditions":        "conditions",
+	"vaccinations":      "vaccinations",
+	"emergency_contact": "emergency_contact",
+	"insurance_info":    "insurance_info",
 }
 
 // compareAndApplyMedicalData compara los datos médicos extraídos con el perfil actual.

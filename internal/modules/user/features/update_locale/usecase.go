@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -38,6 +39,7 @@ type UseCase struct {
 	profileRepo    ProfileRepo
 	eventPublisher EventPublisher
 	redisClient    *redis.Client
+	wg             sync.WaitGroup
 }
 
 func NewUseCase(deps UseCaseDeps) *UseCase {
@@ -47,6 +49,9 @@ func NewUseCase(deps UseCaseDeps) *UseCase {
 		redisClient:    deps.RedisClient,
 	}
 }
+
+// Wait espera a que todos los eventos publicados asíncronamente terminen.
+func (uc *UseCase) Wait() { uc.wg.Wait() }
 
 // Execute valida los códigos de locale y actualiza.
 func (uc *UseCase) Execute(ctx context.Context, cmd Command) error {
@@ -101,7 +106,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) error {
 
 	// Emit event (best-effort)
 	if uc.eventPublisher != nil {
-		go func() {
+		uc.wg.Go(func() {
 			bgCtx := context.WithoutCancel(ctx)
 			_, err := uc.eventPublisher.Publish(bgCtx,
 				eventbus.StreamName("user.locale.updated"),
@@ -119,7 +124,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) error {
 					slog.String("error", err.Error()),
 				)
 			}
-		}()
+		})
 	}
 
 	return nil

@@ -44,7 +44,7 @@ func (m *mockNotifPrefsRepo) Delete(ctx context.Context, userID uuid.UUID, ch do
 func TestUpdateNotifPrefs_UpsertEnabled(t *testing.T) {
 	userID := uuid.Must(uuid.NewV7())
 	channel := "email"
-	notifType := "price_alert"
+	notifType := "booking_confirmation"
 	enabled := true
 
 	called := false
@@ -55,8 +55,8 @@ func TestUpdateNotifPrefs_UpsertEnabled(t *testing.T) {
 				if p.Channel != domain.NotifChannelEmail {
 					t.Errorf("Channel = %s, esperado email", p.Channel)
 				}
-				if p.NotificationType != domain.NotifTypePriceAlert {
-					t.Errorf("NotificationType = %s, esperado price_alert", p.NotificationType)
+				if p.NotificationType != domain.NotifTypeBookingConfirmation {
+					t.Errorf("NotificationType = %s, esperado booking_confirmation", p.NotificationType)
 				}
 				if !p.Enabled {
 					t.Error("Enabled debería ser true")
@@ -81,22 +81,26 @@ func TestUpdateNotifPrefs_UpsertEnabled(t *testing.T) {
 	}
 }
 
-func TestUpdateNotifPrefs_DeleteWhenDisabled(t *testing.T) {
+func TestUpdateNotifPrefs_DisabledUpsertsWithFalse(t *testing.T) {
+	// enabled=false mantiene el registro para audit trail — siempre hace upsert
 	userID := uuid.Must(uuid.NewV7())
 	channel := "websocket"
-	notifType := "promo_offer"
+	notifType := "promotional"
 	enabled := false
 
 	called := false
 	uc := NewUseCase(UseCaseDeps{
 		NotifPrefsRepo: &mockNotifPrefsRepo{
-			deleteFn: func(ctx context.Context, id uuid.UUID, ch domain.NotificationChannel, nt domain.NotificationType) error {
+			upsertFn: func(ctx context.Context, p *domain.NotificationPreference) error {
 				called = true
-				if ch != domain.NotifChannelWebSocket {
-					t.Errorf("Channel = %s, esperado websocket", ch)
+				if p.Channel != domain.NotifChannelWebSocket {
+					t.Errorf("Channel = %s, esperado websocket", p.Channel)
 				}
-				if nt != domain.NotifTypePromoOffer {
-					t.Errorf("Type = %s, esperado promo_offer", nt)
+				if p.NotificationType != domain.NotifTypePromotional {
+					t.Errorf("Type = %s, esperado promotional", p.NotificationType)
+				}
+				if p.Enabled {
+					t.Error("Enabled debería ser false")
 				}
 				return nil
 			},
@@ -114,7 +118,7 @@ func TestUpdateNotifPrefs_DeleteWhenDisabled(t *testing.T) {
 		t.Fatalf("error inesperado: %v", err)
 	}
 	if !called {
-		t.Error("Delete debería haber sido llamado cuando enabled=false")
+		t.Error("Upsert debería haber sido llamado (enabled=false preserva audit trail)")
 	}
 }
 
@@ -126,12 +130,12 @@ func TestUpdateNotifPrefs_InvalidChannel(t *testing.T) {
 	cmd := Command{
 		UserID:           userID.String(),
 		Channel:          "carrier_pigeon",
-		NotificationType: "price_alert",
+			NotificationType: "booking_confirmation",
 		Enabled:          true,
 	}
 	err := uc.Execute(t.Context(), cmd)
-	if !errors.Is(err, domain.ErrInvalidChannel) {
-		t.Errorf("se esperaba ErrInvalidChannel, obtuve %v", err)
+	if !errors.Is(err, domain.ErrInvalidEnum) {
+		t.Errorf("se esperaba ErrInvalidEnum, obtuve %v", err)
 	}
 }
 
@@ -149,12 +153,12 @@ func TestUpdateNotifPrefs_ValidChannels(t *testing.T) {
 		{"invalid", "fax", false},
 	}
 
-	for _, tc := range tests {
+		for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd := Command{
 				UserID:           userID.String(),
 				Channel:          tc.channel,
-				NotificationType: "price_alert",
+		NotificationType: "booking_confirmation",
 				Enabled:          true,
 			}
 			uc := NewUseCase(UseCaseDeps{NotifPrefsRepo: &mockNotifPrefsRepo{}})
@@ -162,8 +166,8 @@ func TestUpdateNotifPrefs_ValidChannels(t *testing.T) {
 			if tc.valid && err != nil {
 				t.Errorf("no se esperaba error para %s: %v", tc.channel, err)
 			}
-			if !tc.valid && !errors.Is(err, domain.ErrInvalidChannel) {
-				t.Errorf("se esperaba ErrInvalidChannel para %s, obtuve %v", tc.channel, err)
+			if !tc.valid && !errors.Is(err, domain.ErrInvalidEnum) {
+				t.Errorf("se esperaba ErrInvalidEnum para %s, obtuve %v", tc.channel, err)
 			}
 		})
 	}
@@ -178,7 +182,7 @@ func TestUpdateNotifPrefs_SMSAcceptedWithWarning(t *testing.T) {
 	cmd := Command{
 		UserID:           userID.String(),
 		Channel:          "sms",
-		NotificationType: "travel_reminder",
+		NotificationType: "flight_reminder",
 		Enabled:          true,
 	}
 	err := uc.Execute(t.Context(), cmd)

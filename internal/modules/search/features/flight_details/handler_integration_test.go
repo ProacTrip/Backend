@@ -20,7 +20,7 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/ProacTrip/Backend/internal/modules/auth/adapters/token"
+	sharedauth "github.com/ProacTrip/Backend/internal/shared/auth"
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/flight_details"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/shared"
@@ -132,7 +132,7 @@ func TestHandlerIntegration_FlightDetails_AuthenticatedUser_UsesProfilePrefs(t *
 	rdb.Set(ctx, "env:203.0.113.42", string(raw), 0)
 
 	c, rec := newFlightDetailsEchoContext(t, minimalFlightDetailsBody())
-	c.Set("user_claims", &token.AccessClaims{
+	c.Set("user_claims", &sharedauth.AccessClaims{
 		UserID:    userID,
 		Email:     "brazilian@example.com",
 		RoleID:    uuid.Nil,
@@ -228,7 +228,7 @@ func TestHandlerIntegration_FlightDetails_ExplicitWinsOverProfilePrefs(t *testin
 	body := `{"booking_token":"tok_xyz","departure":"EZE","arrival":"MAD","outbound_date":"2026-06-01","currency":"GBP"}`
 
 	c, rec := newFlightDetailsEchoContext(t, body)
-	c.Set("user_claims", &token.AccessClaims{UserID: userID})
+	c.Set("user_claims", &sharedauth.AccessClaims{UserID: userID})
 
 	err := handler.Handle(c)
 	if err != nil {
