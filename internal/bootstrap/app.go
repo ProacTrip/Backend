@@ -35,6 +35,7 @@ import (
 	"github.com/ProacTrip/Backend/internal/shared/database"
 	sharederrors "github.com/ProacTrip/Backend/internal/shared/errors"
 	"github.com/ProacTrip/Backend/internal/shared/eventbus"
+	sharedhttp "github.com/ProacTrip/Backend/internal/shared/http"
 	sharedmiddleware "github.com/ProacTrip/Backend/internal/shared/middleware"
 	"github.com/ProacTrip/Backend/internal/shared/ratelimit"
 
@@ -72,9 +73,12 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	e := echo.New()
 	e.Logger = logger
 
-	// Echo v5.1.0: RealIP() no confía en X-Forwarded-For por defecto.
-	// LegacyIPExtractor mantiene compatibilidad con proxies (Docker, nginx, Cloudflare)
-	e.IPExtractor = echo.LegacyIPExtractor()
+	// Echo v5.1.0: IP extraction segura con X-Forwarded-For.
+	// Solo confía en loopback y rangos privados (Cloudflare re-escribe XFF).
+	e.IPExtractor = echo.ExtractIPFromXFFHeader(
+		echo.TrustLoopback(true),
+		echo.TrustPrivateNet(true),
+	)
 
 	// Middleware: request ID, traceparent, logging, recovery, CORS
 	e.Use(middleware.RequestID())
@@ -129,7 +133,7 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOrigins:     []string{cfg.Frontend.GetURL()},
 		AllowCredentials: true,
-		AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodOptions},
+		AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions},
 		AllowHeaders: []string{
 			echo.HeaderContentType,
 			echo.HeaderAccept,
@@ -152,28 +156,10 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		}
 
 		if he, ok := errors.AsType[*echo.HTTPError](err); ok {
-			// Error de Echo: usar el código original del HTTPError
-			// 400 para bad request, 404 para not found, etc.
-			problem := sharederrors.ErrBadRequest(
-				fmt.Sprintf("HTTP %d: %s", he.Code, he.Message),
-				err,
-			).WithInstance(c.Request().URL.Path)
+			traceID := sharedhttp.GetOrGenerateTraceID(c)
+			instance := c.Request().URL.Path
 
-			// Ajustar el status según el código de Echo
-			switch he.Code {
-			case http.StatusNotFound:
-				problem = sharederrors.ErrNotFound(he.Message, err).WithInstance(c.Request().URL.Path)
-			case http.StatusMethodNotAllowed:
-				problem = sharederrors.ErrBadRequest(he.Message, err).WithInstance(c.Request().URL.Path)
-			case http.StatusBadRequest:
-				problem = sharederrors.ErrBadRequest(he.Message, err).WithInstance(c.Request().URL.Path)
-			case http.StatusUnauthorized:
-				problem = sharederrors.ErrUnauthorized(he.Message, err).WithInstance(c.Request().URL.Path)
-			case http.StatusForbidden:
-				problem = sharederrors.ErrForbidden(he.Message, err).WithInstance(c.Request().URL.Path)
-			case http.StatusTooManyRequests:
-				problem = sharederrors.ErrTooManyRequests(he.Message, err).WithInstance(c.Request().URL.Path)
-			}
+			problem := sharedhttp.MapHTTPErrorToProblem(he, instance, traceID)
 
 			_ = c.JSON(he.Code, problem)
 			return
@@ -271,6 +257,7 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		OAuthConfig:          cfg.OAuth,
 		FrontendURL:          cfg.Frontend.GetURL(),
 		IsProduction:         cfg.Server.Env == "production",
+		CookieDomain:         cfg.CookieDomain,
 		EventPublisher:       eventBus,
 	})
 	if err != nil {
@@ -307,6 +294,9 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		slog.Warn("notification consumer failed to start", "error", err)
 		// No es fatal - el servidor puede iniciar sin el consumer
 	}
+
+	// Wire resend-verification feature (notification module must exist first)
+	authMod.WireResendVerification(notifMod.SendVerificationEmailUseCase)
 
 	// Start user consumer (BACKGROUND - consume eventos de Dragonfly Streams)
 	if err := userMod.EventConsumer.Start(appCtx); err != nil {
@@ -387,7 +377,7 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		IsProduction: cfg.Server.Env == "production",
 		TokenSvc:     authMod.TokenService,
 		UserRepo:     authMod.Repository,
-		CookieDomain: ".proactrip.com",
+		CookieDomain: cfg.CookieDomain,
 	})
 
 	// Rutas
@@ -430,21 +420,24 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	authGroup := e.Group("/v1/auth")
 
 	// Register endpoint - usa RegisterHandler() que incluye soporte de idempotency
-	authGroup.POST("/register", authMod.RegisterHandler().Handle)
+	authGroup.POST("/register", authMod.RegisterHandler().Handle, anonRateLimitMW)
 
 	// Verify-email endpoint
-	authGroup.POST("/verify-email", authMod.VerifyEmailHandler().Handle)
+	authGroup.POST("/verify-email", authMod.VerifyEmailHandler().Handle, anonRateLimitMW)
 
 	// Login endpoint
-	authGroup.POST("/login", authMod.LoginHandler.Handle)
+	authGroup.POST("/login", authMod.LoginHandler.Handle, anonRateLimitMW)
 
 	// Logout endpoints — auth middleware + authenticated rate limiting
 	authGroup.POST("/logout", authMod.LogoutHandler.Handle, authMiddleware.Handle, authRateLimitMW)
 	authGroup.POST("/logout/all", authMod.LogoutHandler.HandleAll, authMiddleware.Handle, authRateLimitMW)
 
 	// OAuth endpoints — públicas, sin auth middleware (obviamente)
-	authGroup.GET("/oauth/:provider", authMod.OAuthAuthorizeHandler.Handle)
+	authGroup.GET("/oauth/:provider", authMod.OAuthAuthorizeHandler.Handle, anonRateLimitMW)
 	authGroup.GET("/oauth/:provider/callback", authMod.OAuthCallbackHandler.Handle)
+
+	// Resend-verification endpoint — pública con rate limiting anónimo
+	authGroup.POST("/resend-verification", authMod.ResendVerificationHandler.Handle, anonRateLimitMW)
 
 	// Me endpoint — auth middleware + authenticated rate limiting
 	authGroup.GET("/me", authMod.MeHandler.Handle, authMiddleware.Handle, authRateLimitMW)

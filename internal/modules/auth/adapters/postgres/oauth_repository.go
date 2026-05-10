@@ -139,7 +139,7 @@ func (r *OAuthRepository) GetAuthIdentitiesByUser(ctx context.Context, userID uu
 	}
 
 	if len(identities) == 0 {
-		return nil, domain.ErrIdentityNotFound
+		return nil, nil
 	}
 
 	return identities, nil

@@ -17,6 +17,10 @@ const (
 	AnonCookieDomain    = ".proactrip.com"
 )
 
+// AnonymousCookieMiddleware generates and persists a unique anonymous user ID
+// via a long-lived HttpOnly cookie. The cookie uses __Secure- prefix and Domain
+// in production, and plain names in development. The anon ID is stored in the
+// Echo context under AnonContextKey for downstream rate-limit middleware.
 func AnonymousCookieMiddleware(skipper func(c *echo.Context) bool, isProduction bool) echo.MiddlewareFunc {
 	if skipper == nil {
 		skipper = func(c *echo.Context) bool { return false }
@@ -49,7 +53,7 @@ func extractOrGenerateAnonID(c *echo.Context, isProduction bool) string {
 		Path:     "/",
 		MaxAge:   AnonCookieMaxAgeSec,
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   isProduction,
 		SameSite: http.SameSiteLaxMode,
 	}
 
@@ -66,6 +70,8 @@ func extractOrGenerateAnonID(c *echo.Context, isProduction bool) string {
 	return anonID
 }
 
+// AnonIDFromContext extracts the anonymous user ID from the Echo context.
+// Returns empty string if none was set (caller skipped AnonymousCookieMiddleware).
 func AnonIDFromContext(c *echo.Context) string {
 	if v := c.Get(AnonContextKey); v != nil {
 		if s, ok := v.(string); ok {

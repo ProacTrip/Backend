@@ -132,38 +132,75 @@ func TestAnonymousRateLimitMiddleware(t *testing.T) {
 }
 
 func TestAnonymousCookieMiddlewareSetsCookieAttributes(t *testing.T) {
-	e, _, _ := setupEchoWithRateLimiter(t, 10)
+	t.Run("non-production", func(t *testing.T) {
+		e, _, _ := setupEchoWithRateLimiter(t, 10)
 
-	anonMW := ratelimit.AnonymousCookieMiddleware(nil, false)
-	e.GET("/test", func(c *echo.Context) error {
-		return c.String(http.StatusOK, "ok")
-	}, anonMW)
+		anonMW := ratelimit.AnonymousCookieMiddleware(nil, false)
+		e.GET("/test", func(c *echo.Context) error {
+			return c.String(http.StatusOK, "ok")
+		}, anonMW)
 
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
 
-	cookies := rec.Result().Cookies()
-	if len(cookies) == 0 {
-		t.Fatal("no cookies set")
-	}
+		cookies := rec.Result().Cookies()
+		if len(cookies) == 0 {
+			t.Fatal("no cookies set")
+		}
 
-	cookie := cookies[0]
-	if !cookie.HttpOnly {
-		t.Error("cookie should be HttpOnly")
-	}
-	if !cookie.Secure {
-		t.Error("cookie should be Secure")
-	}
-	if cookie.SameSite != http.SameSiteLaxMode {
-		t.Errorf("cookie SameSite = %d, want Lax", cookie.SameSite)
-	}
-	if cookie.Path != "/" {
-		t.Errorf("cookie Path = %s, want /", cookie.Path)
-	}
-	if cookie.Value == "" {
-		t.Error("cookie value should not be empty")
-	}
+		cookie := cookies[0]
+		if !cookie.HttpOnly {
+			t.Error("cookie should be HttpOnly")
+		}
+		if cookie.Secure {
+			t.Error("cookie should NOT be Secure in non-production")
+		}
+		if cookie.SameSite != http.SameSiteLaxMode {
+			t.Errorf("cookie SameSite = %d, want Lax", cookie.SameSite)
+		}
+		if cookie.Path != "/" {
+			t.Errorf("cookie Path = %s, want /", cookie.Path)
+		}
+		if cookie.Value == "" {
+			t.Error("cookie value should not be empty")
+		}
+	})
+
+	t.Run("production", func(t *testing.T) {
+		e, _, _ := setupEchoWithRateLimiter(t, 10)
+
+		anonMW := ratelimit.AnonymousCookieMiddleware(nil, true)
+		e.GET("/test", func(c *echo.Context) error {
+			return c.String(http.StatusOK, "ok")
+		}, anonMW)
+
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		cookies := rec.Result().Cookies()
+		if len(cookies) == 0 {
+			t.Fatal("no cookies set")
+		}
+
+		cookie := cookies[0]
+		if !cookie.HttpOnly {
+			t.Error("cookie should be HttpOnly")
+		}
+		if !cookie.Secure {
+			t.Error("cookie should be Secure in production")
+		}
+		if cookie.SameSite != http.SameSiteLaxMode {
+			t.Errorf("cookie SameSite = %d, want Lax", cookie.SameSite)
+		}
+		if cookie.Path != "/" {
+			t.Errorf("cookie Path = %s, want /", cookie.Path)
+		}
+		if cookie.Value == "" {
+			t.Error("cookie value should not be empty")
+		}
+	})
 }
 
 func TestAnonymousCookieMiddlewareReusesExistingCookie(t *testing.T) {

@@ -2,6 +2,7 @@ package me
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/ProacTrip/Backend/internal/modules/auth/adapters/token"
 	"github.com/ProacTrip/Backend/internal/modules/auth/domain"
@@ -58,7 +59,7 @@ func (h *Handler) Handle(c *echo.Context) error {
 		return httperr.MapError(c, err)
 	}
 
-	return c.JSON(200, Response{
+	return c.JSON(http.StatusOK, Response{
 		User: UserResponse{
 			ID:            user.ID,
 			Email:         user.Email,

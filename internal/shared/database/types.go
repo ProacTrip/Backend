@@ -22,7 +22,7 @@ const (
 
 // DBConfig contiene la configuración para un pool de base de datos
 type DBConfig struct {
-	URL             string
+	DSN             string
 	MaxOpenConns    int
 	MaxIdleConns    int
 	MaxConnLifetime time.Duration

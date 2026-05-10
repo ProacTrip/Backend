@@ -31,12 +31,12 @@ type TokenService interface {
 
 // EventPublisher publica eventos en Dragonfly Streams.
 type EventPublisher interface {
-	Publish(ctx context.Context, stream string, payload map[string]interface{}) (string, error)
+	Publish(ctx context.Context, stream string, payload map[string]any) (string, error)
 }
 
 // OAuthProviderSelector resuelve el proveedor OAuth por código.
 type OAuthProviderSelector interface {
-	GetProvider(code string) (domain.OAuthProvider, error)
+	GetProvider(providerCode string) (domain.OAuthProvider, error)
 }
 
 // UseCase — lógica de negocio del callback OAuth.
@@ -100,13 +100,13 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 	}
 
 	// 3. Obtener el proveedor OAuth
-	provider, err := uc.providerSel.GetProvider("google")
+	provider, err := uc.providerSel.GetProvider(cmd.Provider)
 	if err != nil {
 		return nil, err
 	}
 
 	// 4. Intercambiar código por tokens
-	oauthToken, err := provider.ExchangeCode(ctx, cmd.Code, codeVerifier)
+	oauthToken, err := provider.ExchangeCode(ctx, cmd.ProviderCode, codeVerifier)
 	if err != nil {
 		return nil, err
 	}
@@ -146,11 +146,11 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 				if err := uc.repo.Update(ctx, user); err != nil {
 					return nil, fmt.Errorf("activar usuario vía OAuth: %w", err)
 				}
-				slog.InfoContext(ctx, "usuario activado vía OAuth",
-					slog.String("user_id", user.ID.String()),
-					slog.String("email", user.Email),
-					slog.String("provider", "google"),
-				)
+			slog.InfoContext(ctx, "usuario activado vía OAuth",
+				slog.String("user_id", user.ID.String()),
+				slog.String("email", user.Email),
+				slog.String("provider", cmd.Provider),
+			)
 			default:
 				return nil, domain.ErrAccountInactive
 			}
@@ -171,7 +171,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		slog.InfoContext(ctx, "usuario creado vía OAuth",
 			slog.String("user_id", user.ID.String()),
 			slog.String("email", user.Email),
-			slog.String("provider", "google"),
+			slog.String("provider", cmd.Provider),
 		)
 	} else {
 		return nil, fmt.Errorf("buscar usuario por email: %w", err)
@@ -179,7 +179,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 
 	// 7. Buscar identidad de autenticación existente
 	var identity *domain.AuthIdentity
-	existingIdentity, err := uc.oauthRepo.GetAuthIdentityByProvider(ctx, "google", userInfo.ProviderUserID)
+	existingIdentity, err := uc.oauthRepo.GetAuthIdentityByProvider(ctx, cmd.Provider, userInfo.ProviderUserID)
 	if err == nil {
 		// Identidad ya existe → actualizar tokens y datos
 		identity = existingIdentity
@@ -202,7 +202,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		}
 	} else if errors.Is(err, domain.ErrIdentityNotFound) {
 		// Identidad no existe → crear nueva
-		identity = domain.NewAuthIdentity(user.ID, "google", userInfo.ProviderUserID,
+		identity = domain.NewAuthIdentity(user.ID, cmd.Provider, userInfo.ProviderUserID,
 			userInfo.Email, userInfo.Name, userInfo.Picture)
 		identity.AccessTokenEnc = oauthToken.AccessToken
 		identity.RefreshTokenEnc = oauthToken.RefreshToken
@@ -222,23 +222,28 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 	// 8. Publicar evento auth.user.registered si es usuario nuevo
 	if isNewUser && uc.eventPublisher != nil {
 		streamName := eventbus.StreamName("auth.user.registered")
-		flatPayload := map[string]interface{}{
+		flatPayload := map[string]any{
 			"event_type":   "user_registered",
 			"event_version": int64(1),
 			"aggregate_id": user.ID.String(),
 			"timestamp":    time.Now().UnixMilli(),
 			"user_id":      user.ID.String(),
 			"email":        user.Email,
-			"provider":     "google",
+			"provider":     cmd.Provider,
 		}
-		_, _ = uc.eventPublisher.Publish(ctx, streamName, flatPayload)
+		if _, err := uc.eventPublisher.Publish(ctx, streamName, flatPayload); err != nil {
+			slog.ErrorContext(ctx, "failed to publish auth user event",
+				slog.String("event", "auth.user.registered"),
+				slog.Any("error", err),
+			)
+		}
 	}
 
 	// 9. Registrar login exitoso
 	user.RecordLogin()
 	if err := uc.repo.Update(ctx, user); err != nil {
-		slog.ErrorContext(ctx, "error al registrar login OAuth",
-			slog.String("email", user.Email),
+		slog.ErrorContext(ctx, "failed to update user login record after OAuth",
+			slog.String("user_id", user.ID.String()),
 			slog.Any("error", err),
 		)
 	}
@@ -265,7 +270,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 // getAndDeleteOAuthState recupera y elimina atómicamente el estado OAuth de Dragonfly.
 // Usa GET+DEL en pipeline para simular atomicidad (one-time use).
 func (uc *UseCase) getAndDeleteOAuthState(ctx context.Context, stateValue string) (string, error) {
-	cacheKey := fmt.Sprintf("oauth:state:%s", stateValue)
+	cacheKey := fmt.Sprintf("{auth}:oauth:state:%s", stateValue)
 
 	// GET + DEL en un pipeline para one-time use (evita replay attacks)
 	pipe := uc.dragonfly.Pipeline()

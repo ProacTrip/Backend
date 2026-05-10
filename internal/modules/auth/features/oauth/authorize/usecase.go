@@ -25,7 +25,7 @@ type OAuthStateTokenService interface {
 
 // OAuthProviderSelector resuelve el proveedor OAuth por código (ej. "google").
 type OAuthProviderSelector interface {
-	GetProvider(code string) (domain.OAuthProvider, error)
+	GetProvider(providerCode string) (domain.OAuthProvider, error)
 }
 
 // UseCase — lógica de negocio de la autorización OAuth.
@@ -83,7 +83,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 	// 5. Calcular code_challenge = SHA256(code_verifier) en base64url sin padding
 	codeChallenge := generateCodeChallenge(codeVerifier)
 
-	// 6. Cachear state en Dragonfly: key="oauth:state:{state_value}", TTL=10min
+	// 6. Cachear state en Dragonfly: key="{auth}:oauth:state:{state_value}", TTL=10min
 	// El valor se guarda como JSON: { "code_verifier": "...", "created_at": "..." }
 	oauthState := domain.OAuthState{
 		CodeVerifier: codeVerifier,
@@ -94,7 +94,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		return nil, fmt.Errorf("serializar estado OAuth: %w", err)
 	}
 
-	cacheKey := fmt.Sprintf("oauth:state:%s", stateValue)
+	cacheKey := fmt.Sprintf("{auth}:oauth:state:%s", stateValue)
 	if err := uc.dragonfly.Set(ctx, cacheKey, string(stateJSON), 10*time.Minute).Err(); err != nil {
 		return nil, fmt.Errorf("cachear estado OAuth en Dragonfly: %w", err)
 	}

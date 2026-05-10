@@ -30,7 +30,6 @@ func (m *mockResolver) ResolveDefaults(ctx context.Context, ip string) (currency
 }
 
 func TestEnvironmentResolver_ResolvesDefaultsFromIP(t *testing.T) {
-	ctx := context.Background()
 	resolver := &mockResolver{
 		currency:    "ARS",
 		language:    "es",
@@ -38,7 +37,7 @@ func TestEnvironmentResolver_ResolvesDefaultsFromIP(t *testing.T) {
 		timezone:    "America/Argentina/Buenos_Aires",
 	}
 
-	currency, language, countryCode, timezone, err := resolver.ResolveDefaults(ctx, "190.191.192.193")
+	currency, language, countryCode, timezone, err := resolver.ResolveDefaults(t.Context(), "190.191.192.193")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -58,12 +57,11 @@ func TestEnvironmentResolver_ResolvesDefaultsFromIP(t *testing.T) {
 }
 
 func TestEnvironmentResolver_ReturnsError(t *testing.T) {
-	ctx := context.Background()
 	resolver := &mockResolver{
 		err: errors.New("geoip unavailable"),
 	}
 
-	_, _, _, _, err := resolver.ResolveDefaults(ctx, "127.0.0.1")
+	_, _, _, _, err := resolver.ResolveDefaults(t.Context(), "127.0.0.1")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

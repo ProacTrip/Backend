@@ -1,10 +1,13 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"errors"
 	"log/slog"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/ProacTrip/Backend/internal/config"
 	"github.com/ProacTrip/Backend/internal/modules/auth/adapters/oauth"
@@ -19,7 +22,9 @@ import (
 	oacallback "github.com/ProacTrip/Backend/internal/modules/auth/features/oauth/callback"
 	"github.com/ProacTrip/Backend/internal/modules/auth/features/me"
 	"github.com/ProacTrip/Backend/internal/modules/auth/features/register"
+	"github.com/ProacTrip/Backend/internal/modules/auth/features/resend_verification"
 	"github.com/ProacTrip/Backend/internal/modules/auth/features/verify_email"
+	sendverification "github.com/ProacTrip/Backend/internal/modules/notification/features/send_verification_email"
 	serrors "github.com/ProacTrip/Backend/internal/shared/errors"
 	"github.com/ProacTrip/Backend/internal/shared/eventbus"
 	"github.com/redis/go-redis/v9"
@@ -60,6 +65,9 @@ type Module struct {
 	OAuthAuthorizeHandler *oauthorize.Handler
 	OAuthCallback         *oacallback.UseCase
 	OAuthCallbackHandler  *oacallback.Handler
+
+	// Resend Verification — wired after notification module is initialized
+	ResendVerificationHandler *resend_verification.Handler
 }
 
 // Config contiene la configuración del módulo Auth
@@ -83,6 +91,7 @@ type Config struct {
 	OAuthConfig  config.OAuthConfig // credenciales OAuth de config.Config
 	FrontendURL  string             // URL del frontend para redirects (callback)
 	IsProduction bool
+	CookieDomain string             // Dominio para cookies (.proactrip.com en prod, vacío en dev)
 
 	// Event Bus
 	EventPublisher *eventbus.EventBus
@@ -148,7 +157,7 @@ func NewModule(cfg Config) (*Module, error) {
 	})
 	// Register Handler con soporte de idempotency (Dragonfly)
 	m.RegisterHandler = func() *register.Handler {
-		return register.NewHandlerWithIdempotency(m.Register, cfg.DragonflyClient, cfg.IsProduction)
+		return register.NewHandlerWithIdempotency(m.Register, cfg.DragonflyClient, cfg.IsProduction, cfg.CookieDomain)
 	}
 
 	// Verify Email
@@ -158,7 +167,7 @@ func NewModule(cfg Config) (*Module, error) {
 		TokenSvc:  m.TokenService,
 	})
 	m.VerifyEmailHandler = func() *verify_email.Handler {
-		return verify_email.NewHandler(m.VerifyEmail, cfg.IsProduction)
+		return verify_email.NewHandler(m.VerifyEmail, cfg.IsProduction, cfg.CookieDomain)
 	}
 
 	// Login
@@ -167,14 +176,14 @@ func NewModule(cfg Config) (*Module, error) {
 		Hasher:   m.PasswordHasher,
 		TokenSvc: m.TokenService,
 	})
-	m.LoginHandler = login.NewHandler(m.Login, cfg.IsProduction)
+	m.LoginHandler = login.NewHandler(m.Login, cfg.IsProduction, cfg.CookieDomain)
 
 	// Logout
 	m.Logout = logout.NewUseCase(logout.UseCaseDeps{
 		TokenSvc:    m.TokenService,
 		DragonflyDB: cfg.DragonflyClient,
 	})
-	m.LogoutHandler = logout.NewHandler(m.Logout, cfg.IsProduction)
+	m.LogoutHandler = logout.NewHandler(m.Logout, cfg.IsProduction, cfg.CookieDomain)
 
 	// Me (current user)
 	m.MeHandler = me.NewHandler(m.TokenService, m.Repository)
@@ -202,12 +211,12 @@ func NewModule(cfg Config) (*Module, error) {
 		Dragonfly:      cfg.DragonflyClient,
 		EventPublisher: m.EventPublisher,
 	})
-	m.OAuthCallbackHandler = oacallback.NewHandler(m.OAuthCallback, cfg.IsProduction, cfg.FrontendURL)
+	m.OAuthCallbackHandler = oacallback.NewHandler(m.OAuthCallback, cfg.IsProduction, cfg.FrontendURL, cfg.CookieDomain)
 
 	// Register domain error mappings
 	registerAuthErrorMappings()
 
-	slog.Info("Auth module initialized", "features", []string{"register", "verify_email", "login", "logout", "oauth_authorize", "oauth_callback"})
+	slog.Info("Auth module initialized", "features", []string{"register", "verify_email", "login", "logout", "resend_verification", "oauth_authorize", "oauth_callback"})
 
 	return m, nil
 }
@@ -219,6 +228,37 @@ func MustNewModule(cfg Config) *Module {
 		panic(err)
 	}
 	return mod
+}
+
+// =============================================================================
+// Resend Verification — Wired after notification module is initialized
+// (notification module is created after auth, so this is called from app.go)
+// =============================================================================
+
+// resendNotificationAdapter adapta el SendVerificationEmailUseCase del módulo
+// notification al NotificationPort local definido en resend_verification/usecase.go.
+type resendNotificationAdapter struct {
+	uc *sendverification.UseCase
+}
+
+// SendVerificationEmail implementa resend_verification.NotificationPort.
+func (a *resendNotificationAdapter) SendVerificationEmail(ctx context.Context, userID uuid.UUID, email, token string) error {
+	return a.uc.Execute(ctx, userID, email, token)
+}
+
+// WireResendVerification crea el usecase y handler del feature resend-verification
+// y los almacena en el Module. Debe llamarse DESPUÉS de que el notification module
+// esté inicializado, pasando su SendVerificationEmailUseCase.
+func (m *Module) WireResendVerification(notifUC *sendverification.UseCase) {
+	adapter := &resendNotificationAdapter{uc: notifUC}
+
+	uc := resend_verification.NewUseCase(resend_verification.UseCaseDeps{
+		Repo:     m.Repository,
+		TokenSvc: m.VerificationService,
+		Notifier: adapter,
+	})
+
+	m.ResendVerificationHandler = resend_verification.NewHandler(uc)
 }
 
 // GeneratePasetoKey genera una clave PASETO aleatoria de 32 bytes
@@ -280,9 +320,9 @@ func registerAuthErrorMappings() {
 
 		// Validación
 		case errors.Is(err, domain.ErrInvalidEmail):
-			return serrors.ErrBadRequest("Dirección de correo inválida", err)
+			return serrors.ErrValidationError("Dirección de correo inválida", err)
 		case errors.Is(err, domain.ErrInvalidInput), errors.Is(err, domain.ErrValidationError):
-			return serrors.ErrBadRequest("Datos de entrada inválidos", err)
+			return serrors.ErrValidationError("Datos de entrada inválidos", err)
 
 		// MFA
 		case errors.Is(err, domain.ErrMFARequired):
@@ -366,8 +406,8 @@ func newOAuthProviderSelector(googleOAuth domain.OAuthProvider) *oauthProviderSe
 
 // GetProvider devuelve el proveedor OAuth por código.
 // Retorna ErrOAuthProviderNotFound si el proveedor no está soportado.
-func (s *oauthProviderSelector) GetProvider(code string) (domain.OAuthProvider, error) {
-	provider, ok := s.providers[code]
+func (s *oauthProviderSelector) GetProvider(providerCode string) (domain.OAuthProvider, error) {
+	provider, ok := s.providers[providerCode]
 	if !ok {
 		return nil, domain.ErrOAuthProviderNotFound
 	}

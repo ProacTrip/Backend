@@ -20,8 +20,7 @@ const (
 	accessTTL  = 15 * time.Minute   // 900 segundos
 	refreshTTL = 7 * 24 * time.Hour // 604800 segundos
 
-	// Config de cookies para producción
-	cookieDomain   = ".proactrip.com" // Cambiar en producción
+	// Config de cookies
 	cookiePath     = "/"
 	cookieSameSite = http.SameSiteLaxMode
 )
@@ -36,18 +35,20 @@ const (
 // 2. Partitioned es para iframes/cross-site embedding, no subdominios
 // 3. Con Partitioned + Domain amplio, las cookies no se envían entre subdominios
 // 4. SameSite=Lax + Domain=.proactrip.com es suficiente para compartir cookies
-// - Domain: .proactrip.com (compartido entre subdominios)
-func SetAuthCookiesFromTokens(c *echo.Context, accessToken, refreshToken string) error {
+// - Domain: configurable desde COOKIE_DOMAIN (ej. .proactrip.com en prod, vacío en dev)
+func SetAuthCookiesFromTokens(c *echo.Context, accessToken, refreshToken, cookieDomain string) error {
 	// Access token cookie - producción multi-subdominio
 	accessCookie := &http.Cookie{
 		Name:     accessCookieName,
 		Value:    accessToken,
 		Path:     cookiePath,
-		Domain:   cookieDomain,
 		MaxAge:   int(accessTTL.Seconds()),
 		HttpOnly: true,
 		Secure:   true,
 		SameSite: cookieSameSite,
+	}
+	if cookieDomain != "" {
+		accessCookie.Domain = cookieDomain
 	}
 
 	// Refresh token cookie
@@ -55,11 +56,13 @@ func SetAuthCookiesFromTokens(c *echo.Context, accessToken, refreshToken string)
 		Name:     refreshCookieName,
 		Value:    refreshToken,
 		Path:     cookiePath,
-		Domain:   cookieDomain,
 		MaxAge:   int(refreshTTL.Seconds()),
 		HttpOnly: true,
 		Secure:   true,
 		SameSite: cookieSameSite,
+	}
+	if cookieDomain != "" {
+		refreshCookie.Domain = cookieDomain
 	}
 
 	// Production: usar Header().Add() con el string completo
@@ -99,27 +102,31 @@ func SetAuthCookiesDev(c *echo.Context, accessToken, refreshToken string) error 
 
 // ClearAuthCookies limpia las cookies de autenticación (logout)
 // Envía Clear-Site-Data header + cookies con Max-Age=0
-func ClearAuthCookies(c *echo.Context) error {
+func ClearAuthCookies(c *echo.Context, cookieDomain string) error {
 	accessCookie := &http.Cookie{
 		Name:     accessCookieName,
 		Value:    "",
 		Path:     cookiePath,
-		Domain:   cookieDomain,
 		MaxAge:   0,
 		HttpOnly: true,
 		Secure:   true,
 		SameSite: cookieSameSite,
+	}
+	if cookieDomain != "" {
+		accessCookie.Domain = cookieDomain
 	}
 
 	refreshCookie := &http.Cookie{
 		Name:     refreshCookieName,
 		Value:    "",
 		Path:     cookiePath,
-		Domain:   cookieDomain,
 		MaxAge:   0,
 		HttpOnly: true,
 		Secure:   true,
 		SameSite: cookieSameSite,
+	}
+	if cookieDomain != "" {
+		refreshCookie.Domain = cookieDomain
 	}
 
 	c.Response().Header().Add("Set-Cookie", accessCookie.String())

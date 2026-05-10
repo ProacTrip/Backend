@@ -1,7 +1,9 @@
-package eventbus
+package eventbus_test
 
 import (
 	"testing"
+
+	"github.com/ProacTrip/Backend/internal/shared/eventbus"
 )
 
 // =============================================================================
@@ -9,7 +11,7 @@ import (
 // =============================================================================
 
 func TestNewUserRegisteredEvent_AllFieldsIncludingEnv(t *testing.T) {
-	event := NewUserRegisteredEvent(
+	event := eventbus.NewUserRegisteredEvent(
 		"user-123",
 		"test@example.com",
 		"verify-token-abc",
@@ -19,8 +21,8 @@ func TestNewUserRegisteredEvent_AllFieldsIncludingEnv(t *testing.T) {
 		"America/Argentina/Buenos_Aires",
 	)
 
-	if event.EventType != UserRegistered {
-		t.Errorf("EventType = %q, want %q", event.EventType, UserRegistered)
+	if event.EventType != eventbus.UserRegistered {
+		t.Errorf("EventType = %q, want %q", event.EventType, eventbus.UserRegistered)
 	}
 	if event.AggregateID != "user-123" {
 		t.Errorf("AggregateID = %q, want %q", event.AggregateID, "user-123")
@@ -54,7 +56,7 @@ func TestNewUserRegisteredEvent_AllFieldsIncludingEnv(t *testing.T) {
 }
 
 func TestNewUserRegisteredEvent_WithoutEnvFields(t *testing.T) {
-	event := NewUserRegisteredEvent(
+	event := eventbus.NewUserRegisteredEvent(
 		"user-456",
 		"noenv@example.com",
 		"verify-token-xyz",
@@ -91,7 +93,7 @@ func TestNewUserRegisteredEvent_WithoutEnvFields(t *testing.T) {
 
 func TestNewUserRegisteredEvent_PartialEnvFields(t *testing.T) {
 	// Resolver might return some fields but not all
-	event := NewUserRegisteredEvent(
+	event := eventbus.NewUserRegisteredEvent(
 		"user-789",
 		"partial@example.com",
 		"token-123",
@@ -119,7 +121,7 @@ func TestNewUserRegisteredEvent_PartialEnvFields(t *testing.T) {
 
 func TestNewUserRegisteredEvent_EmptyVerificationToken_Omitted(t *testing.T) {
 	// No verification token — base behavior preserved
-	event := NewUserRegisteredEvent("user-000", "no-token@example.com", "", "", "", "", "")
+	event := eventbus.NewUserRegisteredEvent("user-000", "no-token@example.com", "", "", "", "", "")
 
 	payload := event.Payload
 

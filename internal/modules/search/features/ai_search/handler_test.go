@@ -2,6 +2,7 @@ package ai_search_test
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,7 +13,6 @@ import (
 	"github.com/ProacTrip/Backend/internal/modules/search/features/shared"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
-	"github.com/stretchr/testify/assert"
 )
 
 // =============================================================================
@@ -55,15 +55,27 @@ func TestHandler_ValidMessage(t *testing.T) {
 	c, rec := newEchoContext(`{"message": "Busco vuelos de Buenos Aires a Madrid"}`)
 
 	err := handler.Handle(c)
-	assert.NoError(t, err)
-	assert.Equal(t, http.StatusOK, rec.Code)
+	if err != nil {
+		t.Fatalf("Handle() unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
 
 	// Verify response has expected fields
 	var resp ai_search.Response
-	assert.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	assert.NotEmpty(t, resp.ConversationID)
-	assert.NotEmpty(t, resp.Intent)
-	assert.Equal(t, "flights", resp.Intent)
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if resp.ConversationID == "" {
+		t.Error("ConversationID should not be empty")
+	}
+	if resp.Intent == "" {
+		t.Error("Intent should not be empty")
+	}
+	if resp.Intent != "flights" {
+		t.Errorf("Intent = %q, want %q", resp.Intent, "flights")
+	}
 }
 
 // TestHandler_EmptyMessage verifies that an empty message returns 400.
@@ -86,10 +98,15 @@ func TestHandler_EmptyMessage(t *testing.T) {
 	// Handler validates command before usecase and returns HTTPError(400).
 	// In direct handler tests (not routed through Echo middleware),
 	// the error is returned directly and rec.Code is not set.
-	assert.Error(t, err)
+	if err == nil {
+		t.Fatal("expected error for empty message, got nil")
+	}
 	var he *echo.HTTPError
-	if assert.ErrorAs(t, err, &he) {
-		assert.Equal(t, http.StatusBadRequest, he.Code)
+	if !errors.As(err, &he) {
+		t.Fatalf("expected *echo.HTTPError, got %T: %v", err, err)
+	}
+	if he.Code != http.StatusBadRequest {
+		t.Errorf("HTTPError code = %d, want %d", he.Code, http.StatusBadRequest)
 	}
 	_ = rec
 }
@@ -123,8 +140,12 @@ func TestHandler_AuthUser(t *testing.T) {
 	})
 
 	err := handler.Handle(c)
-	assert.NoError(t, err)
-	assert.Equal(t, http.StatusOK, rec.Code)
+	if err != nil {
+		t.Fatalf("Handle() unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
 
 	// Verify the conversation was saved with the authenticated user ID
 	found := false
@@ -134,12 +155,18 @@ func TestHandler_AuthUser(t *testing.T) {
 			break
 		}
 	}
-	assert.True(t, found, "conversation should be saved with authenticated user_id")
+	if !found {
+		t.Error("conversation should be saved with authenticated user_id")
+	}
 
 	// Verify response includes conversation ID
 	var resp ai_search.Response
-	assert.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	assert.NotEmpty(t, resp.ConversationID)
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if resp.ConversationID == "" {
+		t.Error("ConversationID should not be empty")
+	}
 }
 
 // TestHandler_InvalidJSON verifies that malformed JSON returns 400.
@@ -158,10 +185,15 @@ func TestHandler_InvalidJSON(t *testing.T) {
 	// Handler returns HTTPError(400) on bind failure.
 	// In direct handler tests, the error is returned directly.
 	err := handler.Handle(c)
-	assert.Error(t, err)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON, got nil")
+	}
 	var he *echo.HTTPError
-	if assert.ErrorAs(t, err, &he) {
-		assert.Equal(t, http.StatusBadRequest, he.Code)
+	if !errors.As(err, &he) {
+		t.Fatalf("expected *echo.HTTPError, got %T: %v", err, err)
+	}
+	if he.Code != http.StatusBadRequest {
+		t.Errorf("HTTPError code = %d, want %d", he.Code, http.StatusBadRequest)
 	}
 	_ = rec
 }

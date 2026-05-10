@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -218,7 +219,13 @@ func (s *PasetoService) ValidateRefreshToken(ctx context.Context, tokenString st
 		JTI:       jtiUUID,
 	}
 
-	if blacklisted, err := s.isJTIBlacklisted(ctx, jtiUUID); err != nil || blacklisted {
+	blacklisted, err := s.isJTIBlacklisted(ctx, jtiUUID)
+	if err != nil {
+		slog.WarnContext(ctx, "Dragonfly error during JTI blacklist check, continuing (fail-open)",
+			slog.String("error", err.Error()),
+		)
+	}
+	if blacklisted {
 		return nil, domain.ErrTokenRevoked
 	}
 
@@ -254,7 +261,7 @@ func (s *PasetoService) blacklistJTI(ctx context.Context, jti uuid.UUID) error {
 	if s.dragonfly == nil {
 		return nil
 	}
-	key := fmt.Sprintf("auth:blacklist:jti:%s", jti.String())
+	key := fmt.Sprintf("{auth}:blacklist:jti:%s", jti.String())
 	return s.dragonfly.Set(ctx, key, "1", s.refreshTTL).Err()
 }
 
@@ -262,10 +269,14 @@ func (s *PasetoService) isJTIBlacklisted(ctx context.Context, jti uuid.UUID) (bo
 	if s.dragonfly == nil {
 		return false, nil
 	}
-	key := fmt.Sprintf("auth:blacklist:jti:%s", jti.String())
+	key := fmt.Sprintf("{auth}:blacklist:jti:%s", jti.String())
 	result, err := s.dragonfly.Exists(ctx, key).Result()
 	if err != nil {
-		return false, err
+		slog.WarnContext(ctx, "Dragonfly unreachable during JTI blacklist check, allowing token (fail-open)",
+			slog.String("jti", jti.String()),
+			slog.String("error", err.Error()),
+		)
+		return false, nil
 	}
 	return result > 0, nil
 }
@@ -362,9 +373,9 @@ type RoleClaims interface {
 // SSE / OAuth / MFA Token Methods
 // =============================================================================
 
-func (s *PasetoService) GenerateSSEToken(userID, email string) (string, error) {
+func (s *PasetoService) GenerateSSEToken(userID uuid.UUID, email string) (string, error) {
 	token := paseto.NewToken()
-	token.SetSubject(userID)
+	token.SetSubject(userID.String())
 	token.SetString("email", email)
 	token.SetString("type", "sse")
 	token.SetExpiration(time.Now().Add(30 * time.Second))
@@ -383,11 +394,11 @@ func (s *PasetoService) GenerateOAuthStateToken() (string, error) {
 	return token.V4Encrypt(s.symmetricKey, nil), nil
 }
 
-func (s *PasetoService) GenerateMFASessionToken(userID, email string) (string, error) {
+func (s *PasetoService) GenerateMFASessionToken(userID uuid.UUID, email string) (string, error) {
 	jti := uuid.Must(uuid.NewV7())
 
 	token := paseto.NewToken()
-	token.SetSubject(userID)
+	token.SetSubject(userID.String())
 	token.SetString("email", email)
 	token.SetJti(jti.String())
 	token.SetString("type", "mfa_session")
@@ -500,7 +511,12 @@ func isExpiredTokenError(err error) bool {
 	if err == nil {
 		return false
 	}
-	return strings.Contains(err.Error(), "expired") || strings.Contains(err.Error(), "EXPIRED")
+	// go-paseto v2 wraps rule failures (including expiry) in RuleError
+	var ruleErr paseto.RuleError
+	if errors.As(err, &ruleErr) {
+		return strings.Contains(err.Error(), "expired")
+	}
+	return false
 }
 
 // =============================================================================
@@ -510,10 +526,6 @@ func isExpiredTokenError(err error) bool {
 type SSEClaims struct {
 	UserID uuid.UUID
 	Email  string
-}
-
-type OAuthStateClaims struct {
-	State string
 }
 
 type MFAClaims struct {

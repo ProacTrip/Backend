@@ -2,9 +2,9 @@ package register
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
-	"net/mail"
 
 	"github.com/google/uuid"
 
@@ -45,7 +45,7 @@ type TokenService interface {
 // =============================================================================
 
 type EventPublisher interface {
-	Publish(ctx context.Context, stream string, payload map[string]interface{}) (string, error)
+	Publish(ctx context.Context, stream string, payload map[string]any) (string, error)
 }
 
 // =============================================================================
@@ -112,26 +112,16 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command, envIP string) (*Res
 		}
 	}
 
-	// 1. Validar email
-	if _, err := mail.ParseAddress(cmd.Email); err != nil {
-		return nil, domain.ErrInvalidEmail
-	}
-
-	// 2. Verificar si el email ya existe
+	// 1. Verificar si el email ya existe
 	existingUser, err := uc.repo.GetByEmail(ctx, cmd.Email)
-	if err != nil && err != domain.ErrUserNotFound {
+	if err != nil && !errors.Is(err, domain.ErrUserNotFound) {
 		return nil, err
 	}
 	if existingUser != nil {
 		return nil, domain.ErrEmailAlreadyExists
 	}
 
-	// 3. Validar password mínimo 8 caracteres
-	if len(cmd.Password) < 8 {
-		return nil, domain.ErrPasswordTooShort
-	}
-
-	// 4. Hashear contraseña
+	// 2. Hashear contraseña
 	passwordHash, err := uc.hasher.Hash(cmd.Password)
 	if err != nil {
 		return nil, domain.ErrWeakPassword
@@ -189,7 +179,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command, envIP string) (*Res
 			envTimezone,
 		)
 		streamName := eventbus.StreamName("auth.user.registered")
-		flatPayload := map[string]interface{}{
+		flatPayload := map[string]any{
 			"event_type":         "user_registered",
 			"event_version":      int64(1),
 			"aggregate_id":       user.ID.String(),
@@ -211,7 +201,12 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command, envIP string) (*Res
 		if envTimezone != "" {
 			flatPayload["timezone_name"] = envTimezone
 		}
-		_, _ = uc.eventPublisher.Publish(ctx, streamName, flatPayload)
+		if _, err := uc.eventPublisher.Publish(ctx, streamName, flatPayload); err != nil {
+			slog.ErrorContext(ctx, "failed to publish auth user event",
+				slog.String("event", "auth.user.registered"),
+				slog.Any("error", err),
+			)
+		}
 	}
 
 	// Retorna message + tokens para Set-Cookie

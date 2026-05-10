@@ -1,8 +1,10 @@
-package pagination
+package pagination_test
 
 import (
 	"encoding/base64"
 	"testing"
+
+	"github.com/ProacTrip/Backend/internal/shared/pagination"
 )
 
 func TestEncodeCursor(t *testing.T) {
@@ -17,7 +19,7 @@ func TestEncodeCursor(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cursor := EncodeCursor(tt.offset)
+			cursor := pagination.EncodeCursor(tt.offset)
 			if cursor == "" {
 				t.Error("expected non-empty cursor")
 			}
@@ -27,10 +29,10 @@ func TestEncodeCursor(t *testing.T) {
 
 func TestDecodeCursor(t *testing.T) {
 	tests := []struct {
-		name     string
-		cursor   string
-		want     int
-		wantErr  bool
+		name    string
+		cursor  string
+		want    int
+		wantErr bool
 	}{
 		{
 			name:   "empty cursor returns zero",
@@ -39,17 +41,17 @@ func TestDecodeCursor(t *testing.T) {
 		},
 		{
 			name:   "valid cursor",
-			cursor: EncodeCursor(42),
+			cursor: pagination.EncodeCursor(42),
 			want:   42,
 		},
 		{
 			name:   "zero offset",
-			cursor: EncodeCursor(0),
+			cursor: pagination.EncodeCursor(0),
 			want:   0,
 		},
 		{
 			name:   "large offset roundtrip",
-			cursor: EncodeCursor(50000),
+			cursor: pagination.EncodeCursor(50000),
 			want:   50000,
 		},
 		{
@@ -74,7 +76,7 @@ func TestDecodeCursor(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := DecodeCursor(tt.cursor)
+			got, err := pagination.DecodeCursor(tt.cursor)
 			if tt.wantErr && err == nil {
 				t.Errorf("DecodeCursor(%q) expected error, got nil", tt.cursor)
 			}
@@ -91,8 +93,8 @@ func TestDecodeCursor(t *testing.T) {
 func TestEncodeDecodeRoundtrip(t *testing.T) {
 	offsets := []int{0, 1, 10, 50, 100, 999, 10000}
 	for _, offset := range offsets {
-		cursor := EncodeCursor(offset)
-		decoded, err := DecodeCursor(cursor)
+		cursor := pagination.EncodeCursor(offset)
+		decoded, err := pagination.DecodeCursor(cursor)
 		if err != nil {
 			t.Errorf("roundtrip offset=%d: unexpected error: %v", offset, err)
 		}

@@ -91,20 +91,20 @@ func (u *User) RecordFailedLogin(maxAttempts int, lockDuration time.Duration) {
 	}
 }
 
-// IsLocked verifica si la cuenta está bloqueada
+// IsLocked verifica si la cuenta está bloqueada (predicado puro, sin side-effects).
+// Usar MaybeUnlock() antes para desbloqueo automático por tiempo.
 func (u *User) IsLocked() bool {
-	if u.LockedUntil == nil {
-		return false
-	}
-	if u.Status == StatusLocked && time.Now().Before(*u.LockedUntil) {
-		return true
-	}
-	// Desbloquear si pasó el tiempo
-	if u.Status == StatusLocked && time.Now().After(*u.LockedUntil) {
+	return u.LockedUntil != nil && u.Status == StatusLocked && time.Now().Before(*u.LockedUntil)
+}
+
+// MaybeUnlock desbloquea automáticamente si el LockedUntil ya pasó.
+// Debe llamarse ANTES de IsLocked() en el flujo de autenticación.
+func (u *User) MaybeUnlock() {
+	if u.Status == StatusLocked && u.LockedUntil != nil && time.Now().After(*u.LockedUntil) {
 		u.Status = StatusActive
 		u.LockedUntil = nil
+		u.UpdatedAt = time.Now()
 	}
-	return false
 }
 
 // Unlock desbloquea la cuenta

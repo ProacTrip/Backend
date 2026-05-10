@@ -61,8 +61,14 @@ func (rl *RateLimiter) Allow(ctx context.Context, key string, maxRequests int, w
 		return RateLimitResult{}, fmt.Errorf("rate limit script: unexpected result length %d", len(values))
 	}
 
-	current, _ := values[0].(int64)
-	ttlSec, _ := values[1].(int64)
+	current, ok := values[0].(int64)
+	if !ok {
+		return RateLimitResult{}, fmt.Errorf("unexpected rate limit result type for current: %T", values[0])
+	}
+	ttlSec, ok := values[1].(int64)
+	if !ok {
+		return RateLimitResult{}, fmt.Errorf("unexpected rate limit result type for ttl: %T", values[1])
+	}
 
 	limit := int64(maxRequests)
 	remaining := limit - current

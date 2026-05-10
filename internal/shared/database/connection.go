@@ -19,7 +19,7 @@ import (
 func NewConnection(ctx context.Context, url string, maxOpen, minConns, maxIdle int, maxLifetime, maxIdleTime time.Duration) (*pgxpool.Pool, error) {
 	poolConfig, err := pgxpool.ParseConfig(url)
 	if err != nil {
-		return nil, fmt.Errorf("error parseando URL: %w", err)
+		return nil, fmt.Errorf("error parseando DSN: %w", err)
 	}
 
 	poolConfig.MaxConns = int32(maxOpen)
@@ -35,7 +35,8 @@ func NewConnection(ctx context.Context, url string, maxOpen, minConns, maxIdle i
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	var cancel context.CancelFunc
+	ctx, cancel = context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)

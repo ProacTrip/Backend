@@ -47,6 +47,7 @@ func NewUserRegisteredEvent(userID, email, verificationToken, languageCode, curr
 	}
 }
 
+// NewTripCreatedEvent creates a trip_created domain event.
 func NewTripCreatedEvent(tripID, userID string) Event {
 	return Event{
 		EventType:   TripCreated,
@@ -59,6 +60,7 @@ func NewTripCreatedEvent(tripID, userID string) Event {
 	}
 }
 
+// NewTripUpdatedEvent creates a trip_updated domain event.
 func NewTripUpdatedEvent(tripID, userID string) Event {
 	return Event{
 		EventType:   TripUpdated,
@@ -71,6 +73,7 @@ func NewTripUpdatedEvent(tripID, userID string) Event {
 	}
 }
 
+// NewTripDeletedEvent creates a trip_deleted domain event.
 func NewTripDeletedEvent(tripID, userID string) Event {
 	return Event{
 		EventType:   TripDeleted,

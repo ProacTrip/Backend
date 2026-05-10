@@ -112,9 +112,9 @@ func NewPoolManager(cfg PoolConfig) *PoolManager {
 	}
 
 	for dbType, url := range databases {
-		if url != "" { // Solo registrar si hay URL configurada
+		if url != "" { // Solo registrar si hay DSN configurada
 			manager.configs[dbType] = DBConfig{
-				URL:             url,
+				DSN:             url,
 				MaxOpenConns:    cfg.MaxOpenConns,
 				MaxIdleConns:    cfg.MaxIdleConns,
 				MaxConnLifetime: cfg.MaxConnLifetime,
@@ -163,7 +163,7 @@ func (pm *PoolManager) GetPool(dbType DBType) (*pgxpool.Pool, error) {
 	backoffs := []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second}
 
 	for attempt, backoff := range append(backoffs, 0) {
-		newPool, err = NewConnection(context.Background(), cfg.URL, cfg.MaxOpenConns, minConns, cfg.MaxIdleConns, cfg.MaxConnLifetime, cfg.MaxConnIdleTime)
+		newPool, err = NewConnection(context.Background(), cfg.DSN, cfg.MaxOpenConns, minConns, cfg.MaxIdleConns, cfg.MaxConnLifetime, cfg.MaxConnIdleTime)
 		if err == nil {
 			break
 		}

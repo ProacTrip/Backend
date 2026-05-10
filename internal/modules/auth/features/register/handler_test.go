@@ -2,6 +2,7 @@ package register
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,7 +11,29 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/ProacTrip/Backend/internal/modules/auth/adapters/token"
+	"github.com/ProacTrip/Backend/internal/modules/auth/domain"
+	serrors "github.com/ProacTrip/Backend/internal/shared/errors"
 )
+
+// =============================================================================
+// Test setup — register domain error mappers for test isolation
+// =============================================================================
+
+func init() {
+	serrors.RegisterDomainErrorMapper(func(err error) *serrors.Problem {
+		switch {
+		case errors.Is(err, domain.ErrInvalidEmail):
+			return serrors.ErrValidationError("Dirección de correo inválida", err)
+		case errors.Is(err, domain.ErrInvalidInput), errors.Is(err, domain.ErrValidationError):
+			return serrors.ErrValidationError("Datos de entrada inválidos", err)
+		case errors.Is(err, domain.ErrPasswordTooShort), errors.Is(err, domain.ErrWeakPassword):
+			return serrors.ErrBadRequest("La contraseña no cumple los requisitos de seguridad", err)
+		case errors.Is(err, domain.ErrEmailAlreadyExists):
+			return serrors.ErrConflict("El email ya está registrado", err)
+		}
+		return nil
+	})
+}
 
 // =============================================================================
 // Test: handler captures IP from c.RealIP() and passes it to usecase.Execute()

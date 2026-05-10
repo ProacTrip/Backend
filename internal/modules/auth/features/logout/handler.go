@@ -18,12 +18,14 @@ const (
 type Handler struct {
 	usecase      *UseCase
 	isProduction bool
+	cookieDomain string
 }
 
-func NewHandler(usecase *UseCase, isProduction bool) *Handler {
+func NewHandler(usecase *UseCase, isProduction bool, cookieDomain string) *Handler {
 	return &Handler{
 		usecase:      usecase,
 		isProduction: isProduction,
+		cookieDomain: cookieDomain,
 	}
 }
 
@@ -32,12 +34,21 @@ func (h *Handler) Handle(c *echo.Context) error {
 
 	tokenStr := h.extractToken(c)
 
-	_, err := h.usecase.Execute(c.Request().Context(), Command{Token: tokenStr})
+	cmd := Command{Token: tokenStr}
+	if err := cmd.Validate(); err != nil {
+		return httperr.MapError(c, err)
+	}
+
+	_, err := h.usecase.Execute(c.Request().Context(), cmd)
 	if err != nil {
 		return httperr.MapError(c, err)
 	}
 
-	httperr.ClearAuthCookies(c)
+	if h.isProduction {
+		httperr.ClearAuthCookies(c, h.cookieDomain)
+	} else {
+		httperr.ClearAuthCookiesDev(c)
+	}
 
 	return c.JSON(http.StatusOK, map[string]string{"message": "Logged out successfully."})
 }
@@ -47,12 +58,21 @@ func (h *Handler) HandleAll(c *echo.Context) error {
 
 	tokenStr := h.extractToken(c)
 
-	_, err := h.usecase.Execute(c.Request().Context(), Command{Token: tokenStr, LogoutAll: true})
+	cmd := Command{Token: tokenStr, LogoutAll: true}
+	if err := cmd.Validate(); err != nil {
+		return httperr.MapError(c, err)
+	}
+
+	_, err := h.usecase.Execute(c.Request().Context(), cmd)
 	if err != nil {
 		return httperr.MapError(c, err)
 	}
 
-	httperr.ClearAuthCookies(c)
+	if h.isProduction {
+		httperr.ClearAuthCookies(c, h.cookieDomain)
+	} else {
+		httperr.ClearAuthCookiesDev(c)
+	}
 
 	return c.JSON(http.StatusOK, map[string]string{"message": "All sessions have been revoked."})
 }

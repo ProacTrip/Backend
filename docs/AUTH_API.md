@@ -1,45 +1,37 @@
 # Auth Module API Documentation (Cookie-Based)
 
-> **Arquitectura:** Cookie-based authentication con HttpOnly cookies. El frontend nunca manipula tokens.  
-> **Migración:** Desde v1 (token-based), ver [Apéndice de Migración](#apéndice-migración-desde-v1).
+> **Arquitectura:** Cookie-based authentication con HttpOnly cookies. El frontend nunca manipula tokens.
 
 ---
 
 ## Índice
 
-- [Arquitectura](#arquitectura)
-- [Seguridad de Cookies](#seguridad-de-cookies)
-- [Base URLs](#base-urls)
-- [Errores Estándar](#errores-estándar)
-- [Register](#register)
-- [Resend Verification Email](#resend-verification-email)
-- [Verify Email](#verify-email)
-- [Login](#login)
-- [Login MFA](#login-mfa)
-- [Logout](#logout)
-- [Logout All Sessions](#logout-all-sessions)
-- [Refresh Token](#refresh-token)
-- [Change Password](#change-password)
-- [Forgot Password](#forgot-password)
-- [Reset Password](#reset-password)
-- [OAuth Google](#oauth-google)
-- [OAuth Google Callback](#oauth-google-callback)
-- [Current User (Me)](#current-user-me)
-- [MFA — List Active Methods](#mfa--list-active-methods)
-- [MFA — Setup TOTP](#mfa--setup-totp)
-- [MFA — Verify TOTP Setup](#mfa--verify-totp-setup)
-- [MFA — Setup Email](#mfa--setup-email)
-- [MFA — Verify Email Setup](#mfa--verify-email-setup)
-- [MFA — Setup SMS](#mfa--setup-sms)
-- [MFA — Verify SMS Setup](#mfa--verify-sms-setup)
-- [MFA — Disable Method](#mfa--disable-method)
-- [MFA — Disable All Methods](#mfa--disable-all-methods)
-- [SSE Token](#sse-token)
-- [Configuración CORS](#configuración-cors)
-- [Rate Limiting](#rate-limiting)
-- [Cache](#cache)
-- [Apéndice: Migración desde v1](#apéndice-migración-desde-v1)
-- [Notas de Seguridad](#notas-de-seguridad)
+| Endpoint | Estado |
+|----------|--------|
+| [Arquitectura](#arquitectura) | ✅ |
+| [Features Planificadas](#features-planificadas) | — |
+| [Seguridad de Cookies](#seguridad-de-cookies) | ✅ |
+| [Base URLs](#base-urls) | ✅ |
+| [Errores Estándar](#errores-estándar) | ✅ |
+| [Register](#register) | ✅ Implementado |
+| [Resend Verification Email](#resend-verification-email) | ✅ Implementado |
+| [Verify Email](#verify-email) | ✅ Implementado |
+| [Login](#login) | ✅ Implementado |
+| [Login MFA](#login-mfa) | 🚧 Planificado |
+| [Logout](#logout) | ✅ Implementado |
+| [Logout All Sessions](#logout-all-sessions) | ✅ Implementado |
+| [Refresh Token](#refresh-token) | 🚧 Planificado |
+| [Change Password](#change-password) | 🚧 Planificado |
+| [Forgot Password](#forgot-password) | 🚧 Planificado |
+| [Reset Password](#reset-password) | 🚧 Planificado |
+| [OAuth Google](#oauth-google) | ✅ Implementado |
+| [OAuth Google Callback](#oauth-google-callback) | ✅ Implementado |
+| [Current User (Me)](#current-user-me) | ✅ Implementado |
+| [SSE Token](#sse-token) | 🚧 Planificado |
+| [Configuración CORS](#configuración-cors) | ✅ |
+| [Rate Limiting](#rate-limiting) | ✅ |
+| [Cache](#cache) | ✅ |
+| [Notas de Seguridad](#notas-de-seguridad) | ✅ |
 
 ---
 
@@ -68,6 +60,22 @@ El frontend NO almacena ni lee tokens.
 | Refresh Token | `__Secure-refresh_token` | 7 días | Rotación de sesión |
 
 > En despliegues single-domain sin subdominios cruzados, usar `__Host-access_token` y `__Host-refresh_token` para máxima seguridad (impide el atributo `Domain`).
+
+---
+
+## Features Planificadas
+
+Las siguientes features están planificadas pero **no implementadas** aún. Las secciones correspondientes están marcadas con 🚧.
+
+| Feature | Estado | Notas |
+|---------|--------|-------|
+| Login MFA | 🚧 Planificado | Segundo factor post-login (TOTP, email, SMS) |
+| Refresh Token (explícito) | 🚧 Planificado | Rotación vía middleware ya implementada |
+| Change Password | 🚧 Planificado | Requiere sesión activa |
+| Forgot Password | 🚧 Planificado | Flujo de reset vía email |
+| Reset Password | 🚧 Planificado | Token de un solo uso |
+| MFA Setup/Management | 🚧 Planificado | TOTP, email, SMS, recovery codes |
+| SSE Token | 🚧 Planificado | Conexiones SSE autenticadas |
 
 ---
 
@@ -411,7 +419,9 @@ Cuando `mfa_required` es `true`, **no se establecen cookies** hasta completar `/
 
 ---
 
-## Login MFA sera futuro
+## Login MFA 🚧
+
+> 🚧 **Planificado — no implementado.** El segundo factor de autenticación (TOTP, email, SMS) será agregado en una fase posterior. Actualmente el login devuelve directamente las cookies de sesión sin requerir MFA.
 
 ## Logout
 
@@ -485,6 +495,30 @@ Clear-Site-Data: "cookies"
 |--------|------|--------|
 | `TOKEN_INVALID` | 401 | Cookie inválida o expirada |
 | `INTERNAL_ERROR` | 500 | Error inesperado |
+
+---
+
+## Refresh Token 🚧
+
+> 🚧 **Planificado — no implementado.** La rotación de refresh tokens ya ocurre transparentemente vía middleware de autenticación. Un endpoint explícito de refresh será agregado en una fase posterior.
+
+---
+
+## Change Password 🚧
+
+> 🚧 **Planificado — no implementado.**
+
+---
+
+## Forgot Password 🚧
+
+> 🚧 **Planificado — no implementado.**
+
+---
+
+## Reset Password 🚧
+
+> 🚧 **Planificado — no implementado.**
 
 ---
 
@@ -692,6 +726,12 @@ GET /v1/auth/me
 
 ---
 
+## SSE Token 🚧
+
+> 🚧 **Planificado — no implementado.** Tokens de corta duración para conexiones Server-Sent Events.
+
+---
+
 ## Configuración CORS
 
 | Setting | Valor |
@@ -802,11 +842,11 @@ Todos los tokens internos son **PASETO v4 symmetric**. Son opacos para el client
 |-------|-----|-----------|
 | `access_token` (cookie `__Secure-access_token`) | 15 min | Autenticar requests |
 | `refresh_token` (cookie `__Secure-refresh_token`) | 7 días | Rotación de sesión |
-| `session_id` (MFA) | 5 min | Completar MFA |
 | Email verification | 24 horas | Verificar email |
 | Password reset | 1 hora | Reset de contraseña |
-| `sse_token` | 30 seg | Conexiones SSE |
 | OAuth `state` | 5-10 min | Anti-CSRF OAuth |
+
+> 🚧 Los siguientes tipos de token están planificados pero no implementados: `session_id` (MFA, 5 min), `sse_token` (SSE, 30 seg).
 
 ### Hashing de Contraseñas
 
@@ -823,11 +863,12 @@ Cada vez que el backend refresca un `__Secure-access_token`, rota también el `_
 - El backend cachea estos datos 10 min para evitar llamadas repetidas a APIs externas.
 - Los endpoints de auth (`/v1/auth/*`) NO devuelven `environment` — es responsabilidad del frontend.
 
-### MFA
+### MFA 🚧
 
-- Códigos de un solo uso, TTL 5 minutos en Redis.
-- Un código verificado se elimina inmediatamente.
-- Recovery codes de 8 caracteres hexadecimales, mostrados una sola vez.
+> 🚧 **Planificado — no implementado.** MFA con TOTP, email y SMS será agregado en una fase posterior. Las siguientes características están planificadas:
+> - Códigos de un solo uso, TTL 5 minutos
+> - Recovery codes de 8 caracteres hexadecimales (one-time display)
+> - Invalidación de todas las sesiones ante reúso de recovery codes
 
 ### OAuth PKCE
 
@@ -841,7 +882,7 @@ Cada vez que el backend refresca un `__Secure-access_token`, rota también el `_
 |---------|------------|
 | XSS | `HttpOnly cookies + CSP`  |
 | CSRF | `SameSite=Lax` + cookies automáticas |
-| Token Exposure in SSE | SSE authenticated via HttpOnly cookies (no tokens in URL or storage) |
+| Token Exposure in SSE | 🚧 Planificado — SSE authenticated via cookies (no tokens in URL) |
 | Replay de refresh | Rotación continua + invalidación total ante reúso |
 | Third-party cookies | No se usa Partitioned (CHIPS) — SameSite=Lax + Domain=.proactrip.com es suficiente para subdominios |
 | Rate limiting abuse | Multi-tier con DragonflyDB + Lua scripts atómicos (IP, usuario autenticado, cookie anónima) |

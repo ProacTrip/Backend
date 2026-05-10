@@ -8,6 +8,7 @@ package eventbus
 import (
 	"context"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -23,8 +24,15 @@ func NewEventBus(rdb *redis.Client) *EventBus {
 	return &EventBus{rdb: rdb}
 }
 
+// Publish writes an event to a Dragonfly Stream via XADD.
+// The payload is copied before adding a timestamp to avoid mutating the caller's map.
+// The stream name should already include the hashtag prefix (e.g. "{events}:auth.user.registered").
 func (e *EventBus) Publish(ctx context.Context, stream string, payload map[string]interface{}) (string, error) {
-	payload["timestamp"] = fmt.Sprintf("%d", time.Now().UnixMilli())
+	// Copiar payload para evitar mutar el mapa del caller (C5).
+	// Agregamos el timestamp a la copia, no al original.
+	copied := make(map[string]any, len(payload)+1)
+	maps.Copy(copied, payload)
+	copied["timestamp"] = fmt.Sprintf("%d", time.Now().UnixMilli())
 
 	// IMPORTANTE: No agregar hashtag aquí - el caller debe pasar el stream name completo
 	// con hashtag incluido. Esto evita el doble hashtag: {events}:{events}:stream
@@ -35,7 +43,7 @@ func (e *EventBus) Publish(ctx context.Context, stream string, payload map[strin
 	id, err := e.rdb.XAdd(ctx, &redis.XAddArgs{
 		Stream: stream,
 		ID:     "*",
-		Values: payload,
+		Values: copied,
 	}).Result()
 	return id, err
 }

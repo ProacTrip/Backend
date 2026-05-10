@@ -2,8 +2,9 @@ package login
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -48,23 +49,19 @@ func NewUseCase(deps UseCaseDeps) *UseCase {
 }
 
 func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) {
-	if !strings.Contains(cmd.Email, "@") {
-		return nil, domain.ErrInvalidEmail
-	}
-
-	if len(cmd.Password) < 8 {
-		return nil, domain.ErrPasswordTooShort
-	}
-
 	user, err := uc.repo.GetByEmail(ctx, cmd.Email)
 	if err != nil {
-		return nil, domain.ErrInvalidCredentials
+		if errors.Is(err, domain.ErrUserNotFound) {
+			return nil, domain.ErrInvalidCredentials
+		}
+		return nil, fmt.Errorf("get user by email: %w", err)
 	}
 
 	if !user.EmailVerified {
 		return nil, domain.ErrEmailNotVerified
 	}
 
+	user.MaybeUnlock()
 	if user.IsLocked() {
 		return nil, domain.ErrAccountLocked
 	}
@@ -84,14 +81,15 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 	sessionID := uuid.Must(uuid.NewV7())
 	tokenPair, err := uc.tokenSvc.GenerateTokenPair(user.ID, user.Email, user.RoleName, user.RoleID, sessionID)
 	if err != nil {
-		return nil, domain.ErrTokenInvalid
+		return nil, fmt.Errorf("generar tokens de sesión: %w", err)
 	}
 
 	user.RecordLogin()
-	if updateErr := uc.repo.Update(ctx, user); updateErr != nil {
-		slog.ErrorContext(ctx, "failed to record successful login",
-			slog.String("email", cmd.Email),
-			slog.Any("error", updateErr),
+	if err := uc.repo.Update(ctx, user); err != nil {
+		// Login recording is informational — don't fail authentication
+		slog.ErrorContext(ctx, "failed to update user login record",
+			slog.String("user_id", user.ID.String()),
+			slog.Any("error", err),
 		)
 	}
 

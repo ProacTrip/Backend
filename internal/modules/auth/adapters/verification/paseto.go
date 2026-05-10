@@ -76,7 +76,7 @@ func (s *VerificationService) GenerateToken(ctx context.Context, email string) (
 	tokenString := token.V4Encrypt(s.symmetricKey, nil)
 
 	// Store JTI in Dragonfly with TTL matching token TTL
-	jtiKey := fmt.Sprintf("verification_jti:%s", email)
+	jtiKey := fmt.Sprintf("{auth}:verification_jti:%s", email)
 	if err := s.rdb.Set(ctx, jtiKey, jti.String(), s.ttl).Err(); err != nil {
 		// If we can't store in Dragonfly, we should fail securely
 		return "", fmt.Errorf("error almacenando JTI en Dragonfly: %w", err)
@@ -111,7 +111,7 @@ func (s *VerificationService) VerifyToken(ctx context.Context, tokenString strin
 	jti, _ := uuid.Parse(jtiStr)
 
 	// Retrieve JTI from Dragonfly for validation
-	jtiKey := fmt.Sprintf("verification_jti:%s", email)
+	jtiKey := fmt.Sprintf("{auth}:verification_jti:%s", email)
 	storedJTIStr, err := s.rdb.Get(ctx, jtiKey).Result()
 	if err != nil {
 		if err == redis.Nil {

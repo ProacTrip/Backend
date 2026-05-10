@@ -13,12 +13,14 @@ import (
 type Handler struct {
 	usecase      *UseCase
 	isProduction bool
+	cookieDomain string
 }
 
-func NewHandler(usecase *UseCase, isProduction bool) *Handler {
+func NewHandler(usecase *UseCase, isProduction bool, cookieDomain string) *Handler {
 	return &Handler{
 		usecase:      usecase,
 		isProduction: isProduction,
+		cookieDomain: cookieDomain,
 	}
 }
 
@@ -30,6 +32,10 @@ func (h *Handler) Handle(c *echo.Context) error {
 		return httperr.MapError(c, err)
 	}
 
+	if err := cmd.Validate(); err != nil {
+		return httperr.MapError(c, err)
+	}
+
 	resp, err := h.usecase.Execute(c.Request().Context(), cmd)
 	if err != nil {
 		return httperr.MapError(c, err)
@@ -37,7 +43,7 @@ func (h *Handler) Handle(c *echo.Context) error {
 
 	if resp.AccessToken != "" && resp.RefreshToken != "" {
 		if h.isProduction {
-			httperr.SetAuthCookiesFromTokens(c, resp.AccessToken, resp.RefreshToken)
+			httperr.SetAuthCookiesFromTokens(c, resp.AccessToken, resp.RefreshToken, h.cookieDomain)
 		} else {
 			httperr.SetAuthCookiesDev(c, resp.AccessToken, resp.RefreshToken)
 		}

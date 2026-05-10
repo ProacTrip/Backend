@@ -7,6 +7,7 @@ package cache
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -218,4 +219,33 @@ func (d *Dragonfly) Close() error {
 	return nil
 }
 
+// =============================================================================
+// Cache-aside Pattern
+// =============================================================================
+
+// GetOrSet implementa el patrón cache-aside: retorna el valor del cache si existe;
+// si no, ejecuta fn() para obtenerlo, lo almacena en el cache y lo retorna.
+//
+// fn() solo se ejecuta en caso de cache miss (redis.Nil). Otros errores de Redis
+// se propagan sin llamar a fn().
+func (d *Dragonfly) GetOrSet(ctx context.Context, key string, ttl time.Duration, fn func() (string, error)) (string, error) {
+	val, err := d.client.Get(ctx, key).Result()
+	if err == nil {
+		return val, nil
+	}
+	if !errors.Is(err, redis.Nil) {
+		return "", err
+	}
+
+	// Cache miss: ejecutar la función y poblar el cache
+	data, err := fn()
+	if err != nil {
+		return "", err
+	}
+
+	// Best-effort write — no bloqueamos si falla el cache
+	d.client.Set(ctx, key, data, ttl)
+
+	return data, nil
+}
 

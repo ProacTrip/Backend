@@ -16,13 +16,15 @@ type Handler struct {
 	usecase      *UseCase
 	isProduction bool
 	frontendURL  string
+	cookieDomain string
 }
 
-func NewHandler(usecase *UseCase, isProduction bool, frontendURL string) *Handler {
+func NewHandler(usecase *UseCase, isProduction bool, frontendURL string, cookieDomain string) *Handler {
 	return &Handler{
 		usecase:      usecase,
 		isProduction: isProduction,
 		frontendURL:  frontendURL,
+		cookieDomain: cookieDomain,
 	}
 }
 
@@ -32,9 +34,15 @@ func NewHandler(usecase *UseCase, isProduction bool, frontendURL string) *Handle
 // En caso de error, redirige con status=error&code=XXX.
 func (h *Handler) Handle(c *echo.Context) error {
 	// Check for provider error first (user denied, etc.)
-	if errorParam := c.QueryParam("error"); errorParam != "" {
+	if errorParam, _ := echo.QueryParamOr[string](c, "error", ""); errorParam != "" {
 		redirectURL := fmt.Sprintf("%s/auth/callback?status=error&code=OAUTH_ACCESS_DENIED", h.frontendURL)
 		return c.Redirect(http.StatusFound, redirectURL)
+	}
+
+	// Extraer provider del path param
+	provider, err := echo.PathParam[string](c, "provider")
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid provider")
 	}
 
 	// Extraer code y state de los query params
@@ -49,8 +57,13 @@ func (h *Handler) Handle(c *echo.Context) error {
 	}
 
 	cmd := Command{
-		Code:  code,
-		State: state,
+		ProviderCode: code,
+		State:        state,
+		Provider:     provider,
+	}
+
+	if err := cmd.Validate(); err != nil {
+		return h.redirectError(c, h.errorCodeFrom(err))
 	}
 
 	resp, err := h.usecase.Execute(c.Request().Context(), cmd)
@@ -61,7 +74,7 @@ func (h *Handler) Handle(c *echo.Context) error {
 	// Setear cookies de autenticación
 	if resp.AccessToken != "" && resp.RefreshToken != "" {
 		if h.isProduction {
-			httperr.SetAuthCookiesFromTokens(c, resp.AccessToken, resp.RefreshToken)
+			httperr.SetAuthCookiesFromTokens(c, resp.AccessToken, resp.RefreshToken, h.cookieDomain)
 		} else {
 			httperr.SetAuthCookiesDev(c, resp.AccessToken, resp.RefreshToken)
 		}

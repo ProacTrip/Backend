@@ -32,6 +32,9 @@ func (h *Handler) Handle(c *echo.Context) error {
 	}
 
 	cmd := Command{Provider: provider}
+	if err := cmd.Validate(); err != nil {
+		return httperr.MapError(c, err)
+	}
 
 	resp, err := h.usecase.Execute(c.Request().Context(), cmd)
 	if err != nil {

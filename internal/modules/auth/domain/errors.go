@@ -14,6 +14,7 @@ var (
 	ErrAccountLocked       = errors.New("ACCOUNT_LOCKED: cuenta bloqueada por intentos fallidos")
 	ErrAccountSuspended    = errors.New("ACCOUNT_SUSPENDED: cuenta suspendida")
 	ErrAccountInactive     = errors.New("ACCOUNT_INACTIVE: cuenta inactiva")
+	// TODO: implementar feature que usa este error
 	ErrAccountDisabled     = errors.New("ACCOUNT_DISABLED: cuenta deshabilitada")
 	ErrEmailNotVerified    = errors.New("EMAIL_NOT_VERIFIED: email no verificado")
 	ErrAccountPending      = errors.New("ACCOUNT_PENDING: cuenta pendiente de verificación")
@@ -22,6 +23,7 @@ var (
 	ErrInvalidCredentials = errors.New("INVALID_CREDENTIALS: credenciales inválidas")
 	ErrWeakPassword       = errors.New("WEAK_PASSWORD: la contraseña es demasiado débil")
 	ErrPasswordMismatch   = errors.New("PASSWORD_MISMATCH: las contraseñas no coinciden")
+	// TODO: implementar feature que usa este error
 	ErrInvalidPassword    = errors.New("INVALID_PASSWORD: formato de contraseña inválido")
 	ErrPasswordTooShort   = errors.New("PASSWORD_TOO_SHORT: la contraseña debe tener al menos 8 caracteres")
 
@@ -32,6 +34,7 @@ var (
 	ErrTokenExpired             = errors.New("TOKEN_EXPIRED: token expirado")
 	ErrTokenInvalid             = errors.New("TOKEN_INVALID: token inválido")
 	ErrTokenRevoked             = errors.New("TOKEN_REVOKED: token revocado")
+	// TODO: implementar feature que usa este error
 	ErrTokenNotFound            = errors.New("TOKEN_NOT_FOUND: token no encontrado")
 	ErrInvalidVerificationToken = errors.New("INVALID_VERIFICATION_TOKEN: token de verificación inválido o expirado")
 	ErrSessionExpired           = errors.New("SESSION_EXPIRED: sesión expirada")
@@ -55,6 +58,7 @@ var (
 	ErrMFANotEnabled             = errors.New("MFA_NOT_ENABLED: MFA no habilitado para este usuario")
 	ErrMFAAlreadyEnabled         = errors.New("MFA_ALREADY_ENABLED: MFA ya está habilitado")
 	ErrMFAInvalidMethod          = errors.New("MFA_INVALID_METHOD: método MFA no configurado para este usuario")
+	// TODO: implementar feature que usa este error
 	ErrMFARequiredCode           = errors.New("MFA_REQUIRED_CODE: código es requerido para este método")
 	ErrMFACodeExpired            = errors.New("MFA_CODE_EXPIRED: código MFA expirado o inválido")
 	ErrInvalidBackupCode         = errors.New("INVALID_BACKUP_CODE: código de respaldo inválido")
@@ -70,8 +74,12 @@ var (
 	ErrRoleNotFound               = errors.New("ROLE_NOT_FOUND: rol no encontrado")
 	ErrPermissionNotFound         = errors.New("PERMISSION_NOT_FOUND: permiso no encontrado")
 	ErrPermissionDenied           = errors.New("PERMISSION_DENIED: permiso denegado")
+	// TODO: implementar feature que usa este error (admin/roles avanzados)
 	ErrFeatureLimitNotFound       = errors.New("FEATURE_LIMIT_NOT_FOUND: límite de feature no encontrado")
+	// TODO: implementar feature que usa este error (admin/roles avanzados)
 	ErrInvalidBlockDuration       = errors.New("INVALID_BLOCK_DURATION: duración del bloqueo inválida")
+	// TODO: implementar feature que usa este error (admin/roles avanzados)
 	ErrInvalidReason              = errors.New("INVALID_REASON: razón requerida para la acción")
+	// TODO: implementar feature que usa este error (admin/roles avanzados)
 	ErrPermissionOverrideNotFound = errors.New("PERMISSION_OVERRIDE_NOT_FOUND: override de permiso no encontrado")
 )

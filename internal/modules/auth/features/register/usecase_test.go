@@ -110,10 +110,10 @@ type mockEventPublisher struct {
 
 type publishedEvent struct {
 	stream  string
-	payload map[string]interface{}
+	payload map[string]any
 }
 
-func (m *mockEventPublisher) Publish(ctx context.Context, stream string, payload map[string]interface{}) (string, error) {
+func (m *mockEventPublisher) Publish(ctx context.Context, stream string, payload map[string]any) (string, error) {
 	m.published = append(m.published, publishedEvent{stream: stream, payload: payload})
 	return "msg-1", nil
 }
@@ -123,7 +123,6 @@ func (m *mockEventPublisher) Publish(ctx context.Context, stream string, payload
 // =============================================================================
 
 func TestUseCase_ResolvesEnvDefaultsAndIncludesInEvent(t *testing.T) {
-	ctx := context.Background()
 	repo := newMockUserRepo()
 	publisher := &mockEventPublisher{}
 
@@ -145,7 +144,7 @@ func TestUseCase_ResolvesEnvDefaultsAndIncludesInEvent(t *testing.T) {
 		EnvResolver:    resolver,
 	})
 
-	resp, err := uc.Execute(ctx, Command{Email: "test@example.com", Password: "password123"}, "203.0.113.42")
+	resp, err := uc.Execute(t.Context(), Command{Email: "test@example.com", Password: "password123"}, "203.0.113.42")
 	if err != nil {
 		t.Fatalf("Execute() unexpected error: %v", err)
 	}
@@ -185,7 +184,6 @@ func TestUseCase_ResolvesEnvDefaultsAndIncludesInEvent(t *testing.T) {
 // =============================================================================
 
 func TestUseCase_ResolverError_ContinuesWithoutEnvFields(t *testing.T) {
-	ctx := context.Background()
 	repo := newMockUserRepo()
 	publisher := &mockEventPublisher{}
 
@@ -204,7 +202,7 @@ func TestUseCase_ResolverError_ContinuesWithoutEnvFields(t *testing.T) {
 		EnvResolver:    resolver,
 	})
 
-	_, err := uc.Execute(ctx, Command{Email: "fail@example.com", Password: "password123"}, "127.0.0.1")
+	_, err := uc.Execute(t.Context(), Command{Email: "fail@example.com", Password: "password123"}, "127.0.0.1")
 	if err != nil {
 		t.Fatalf("Execute() should NOT fail on resolver error: %v", err)
 	}
@@ -243,7 +241,6 @@ func TestUseCase_ResolverError_ContinuesWithoutEnvFields(t *testing.T) {
 // =============================================================================
 
 func TestUseCase_NilResolver_NoPanic(t *testing.T) {
-	ctx := context.Background()
 	repo := newMockUserRepo()
 	publisher := &mockEventPublisher{}
 
@@ -258,7 +255,7 @@ func TestUseCase_NilResolver_NoPanic(t *testing.T) {
 		EnvResolver:    nil, // explicitly nil
 	})
 
-	_, err := uc.Execute(ctx, Command{Email: "nilres@example.com", Password: "password123"}, "127.0.0.1")
+	_, err := uc.Execute(t.Context(), Command{Email: "nilres@example.com", Password: "password123"}, "127.0.0.1")
 	if err != nil {
 		t.Fatalf("Execute() should NOT panic or fail with nil resolver: %v", err)
 	}
@@ -279,7 +276,6 @@ func TestUseCase_NilResolver_NoPanic(t *testing.T) {
 // =============================================================================
 
 func TestUseCase_EmptyEnvIP_ResolverNotCalled(t *testing.T) {
-	ctx := context.Background()
 	repo := newMockUserRepo()
 	publisher := &mockEventPublisher{}
 
@@ -300,7 +296,7 @@ func TestUseCase_EmptyEnvIP_ResolverNotCalled(t *testing.T) {
 	})
 
 	// Empty IP — resolver should NOT be called
-	_, err := uc.Execute(ctx, Command{Email: "emptyip@example.com", Password: "password123"}, "")
+	_, err := uc.Execute(t.Context(), Command{Email: "emptyip@example.com", Password: "password123"}, "")
 	if err != nil {
 		t.Fatalf("Execute() with empty IP should succeed: %v", err)
 	}

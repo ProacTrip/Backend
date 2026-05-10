@@ -62,6 +62,7 @@ type Config struct {
 	AI                 AIConfig               // Configuración del intérprete AI
 	Medical            MedicalConfig          // Configuración del módulo médico
 	Documents          DocumentLimitsConfig   // Límites de documentos
+	CookieDomain       string                 // Dominio para cookies de auth (.proactrip.com en prod, vacío en dev)
 }
 
 // Configuración de la base de datos PostgreSQL
@@ -150,6 +151,88 @@ type DocumentLimitsConfig struct {
 	MaxPerUser  int // Máximo de documentos por usuario
 	RateLimit   int // Subidas por minuto por usuario
 	RateWindow  int // Ventana del rate limit (segundos)
+}
+
+// ValidateAll valida todas las configuraciones sensibles al arrancar.
+// Bloquea el startup (error) en claves críticas faltantes/inválidas.
+// Advierte (warning) en claves opcionales pero importantes.
+func ValidateAll(cfg *Config) error {
+	if err := ValidateSecureConfig(cfg); err != nil {
+		return err
+	}
+	if err := ValidateDatabaseConfig(cfg); err != nil {
+		return err
+	}
+	if err := validateAIConfig(cfg); err != nil {
+		return err
+	}
+	if err := validateRateLimitConfig(cfg); err != nil {
+		return err
+	}
+	ValidateOptionalSecrets(cfg)
+	return nil
+}
+
+// validateAIConfig checks AI provider config sanity.
+func validateAIConfig(cfg *Config) error {
+	if cfg.AI.Provider == "" {
+		return nil // AI not configured — optional feature
+	}
+	if cfg.AI.Timeout <= 0 {
+		return errors.New("AI_TIMEOUT must be > 0 when AI provider is configured")
+	}
+	return nil
+}
+
+// validateRateLimitConfig checks rate limit tier ranges are sane.
+func validateRateLimitConfig(cfg *Config) error {
+	if cfg.RateLimit == nil {
+		return nil
+	}
+	if cfg.RateLimit.GlobalPerMinute <= 0 {
+		return errors.New("RATELIMIT_GLOBAL_PER_MINUTE must be > 0")
+	}
+	if cfg.RateLimit.AuthenticatedPerMinute <= 0 {
+		return errors.New("RATELIMIT_AUTH_PER_MINUTE must be > 0")
+	}
+	if cfg.RateLimit.AnonymousPerMinute <= 0 {
+		return errors.New("RATELIMIT_ANON_PER_MINUTE must be > 0")
+	}
+	if cfg.RateLimit.AuthenticatedPerMinute > cfg.RateLimit.GlobalPerMinute {
+		return errors.New("RATELIMIT_AUTH_PER_MINUTE must be <= RATELIMIT_GLOBAL_PER_MINUTE")
+	}
+	if cfg.RateLimit.AnonymousPerMinute > cfg.RateLimit.AuthenticatedPerMinute {
+		return errors.New("RATELIMIT_ANON_PER_MINUTE must be <= RATELIMIT_AUTH_PER_MINUTE")
+	}
+	return nil
+}
+
+// ValidateDatabaseConfig valida que las credenciales de base de datos estén configuradas.
+func ValidateDatabaseConfig(cfg *Config) error {
+	if cfg.DB.Password == "" {
+		return errors.New("DB_PASSWORD es requerida para producción")
+	}
+	if cfg.Dragonfly.Password == "" {
+		return errors.New("DRAGONFLY_PASSWORD es requerida para producción")
+	}
+	return nil
+}
+
+// ValidateOptionalSecrets advierte sobre claves opcionales no configuradas.
+// No bloquea el startup — son funcionalidades que pueden estar deshabilitadas.
+func ValidateOptionalSecrets(cfg *Config) {
+	if cfg.Email.ResendAPIKey == "" {
+		fmt.Println("⚠️  WARNING: RESEND_API_KEY no configurada. Los emails no se enviarán.")
+	}
+	if cfg.OAuth.GoogleClientSecret == "" {
+		fmt.Println("⚠️  WARNING: GOOGLE_CLIENT_SECRET no configurada. OAuth de Google deshabilitado.")
+	}
+	if cfg.OAuth.GoogleClientID == "" {
+		fmt.Println("⚠️  WARNING: GOOGLE_CLIENT_ID no configurada. OAuth de Google deshabilitado.")
+	}
+	if cfg.SerpAPIKey == "" {
+		fmt.Println("⚠️  WARNING: SERPAPI_KEY no configurada. Las búsquedas de vuelos no funcionarán.")
+	}
 }
 
 // ValidateSecureConfig valida las claves criptográficas al arrancar
@@ -250,6 +333,12 @@ func Load() *Config {
 			RateLimit:  getEnvInt("DOCUMENT_UPLOAD_RATE_LIMIT", 10),
 			RateWindow: getEnvInt("DOCUMENT_UPLOAD_RATE_WINDOW", 60),
 		},
+		CookieDomain: getEnv("COOKIE_DOMAIN", func() string {
+			if getEnv("SERVER_ENV", "dev") == "prod" {
+				return ".proactrip.com"
+			}
+			return ""
+		}()),
 	}
 }
 

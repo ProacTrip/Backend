@@ -26,6 +26,7 @@ type Handler struct {
 	usecase           *UseCase
 	idempotencyConfig *IdempotencyConfig
 	isProduction      bool
+	cookieDomain      string
 }
 
 func NewHandler(usecase *UseCase) *Handler {
@@ -33,7 +34,7 @@ func NewHandler(usecase *UseCase) *Handler {
 }
 
 // NewHandlerWithIdempotency crea handler con soporte de idempotencia
-func NewHandlerWithIdempotency(usecase *UseCase, rdb *redis.Client, isProduction bool) *Handler {
+func NewHandlerWithIdempotency(usecase *UseCase, rdb *redis.Client, isProduction bool, cookieDomain string) *Handler {
 	return &Handler{
 		usecase: usecase,
 		idempotencyConfig: &IdempotencyConfig{
@@ -41,6 +42,7 @@ func NewHandlerWithIdempotency(usecase *UseCase, rdb *redis.Client, isProduction
 			TTL:         24 * time.Hour,
 		},
 		isProduction: isProduction,
+		cookieDomain: cookieDomain,
 	}
 }
 
@@ -68,8 +70,8 @@ func (h *Handler) Handle(c *echo.Context) error {
 		return httperr.MapError(c, err)
 	}
 
-	if cmd.Email == "" || cmd.Password == "" {
-		return httperr.MapError(c, echo.NewHTTPError(http.StatusBadRequest, "email and password are required"))
+	if err := cmd.Validate(); err != nil {
+		return httperr.MapError(c, err)
 	}
 
 	resp, err := h.usecase.Execute(c.Request().Context(), cmd, envIP)
@@ -79,7 +81,7 @@ func (h *Handler) Handle(c *echo.Context) error {
 
 	if resp.AccessToken != "" && resp.RefreshToken != "" {
 		if h.isProduction {
-			httperr.SetAuthCookiesFromTokens(c, resp.AccessToken, resp.RefreshToken)
+			httperr.SetAuthCookiesFromTokens(c, resp.AccessToken, resp.RefreshToken, h.cookieDomain)
 		} else {
 			httperr.SetAuthCookiesDev(c, resp.AccessToken, resp.RefreshToken)
 		}
@@ -90,7 +92,7 @@ func (h *Handler) Handle(c *echo.Context) error {
 	}
 
 	if h.idempotencyConfig != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request().Context()), 5*time.Second)
 		go func() {
 			defer cancel()
 			h.cacheResponse(ctx, idempotencyKey, resp)
@@ -101,7 +103,7 @@ func (h *Handler) Handle(c *echo.Context) error {
 }
 
 // getCachedResponse retrieves cached response from Dragonfly
-func (h *Handler) getCachedResponse(ctx context.Context, key string) (map[string]interface{}, error) {
+func (h *Handler) getCachedResponse(ctx context.Context, key string) (map[string]any, error) {
 	if h.idempotencyConfig == nil || h.idempotencyConfig.RedisClient == nil {
 		return nil, errors.New("idempotency not configured")
 	}
@@ -115,7 +117,7 @@ func (h *Handler) getCachedResponse(ctx context.Context, key string) (map[string
 	}
 
 	// Parse JSON string back to map
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(val), &result); err != nil {
 		return nil, err
 	}

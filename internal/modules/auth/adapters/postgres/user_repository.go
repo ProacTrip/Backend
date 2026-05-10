@@ -15,6 +15,9 @@ import (
 // Implementación PostgreSQL del UserRepository.
 // Alineado con el schema de la migración SQL.
 
+// Compile-time check para asegurar que satisface la interfaz.
+var _ domain.UserRepository = (*UserRepository)(nil)
+
 type UserRepository struct {
 	pool PgxPool
 }

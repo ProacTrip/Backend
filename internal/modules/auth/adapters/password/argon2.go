@@ -16,7 +16,7 @@ func generateSalt(length uint32) ([]byte, error) {
 	salt := make([]byte, length)
 	_, err := rand.Read(salt)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("generar salt: %w", err)
 	}
 	return salt, nil
 }

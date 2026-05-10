@@ -8,7 +8,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"time"
 )
 
 type contextKey string
@@ -106,16 +105,4 @@ func EnsureTraceID(ctx context.Context) context.Context {
 	return WithTraceID(ctx, traceID.TraceID)
 }
 
-// =============================================================================
-// Timeout Helpers
-// =============================================================================
 
-// WithTimeout crea un contexto con timeout usando Go 1.21+ pattern
-func WithTimeout(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(parent, timeout)
-}
-
-// WithDeadline crea un contexto con deadline usando Go 1.21+ pattern
-func WithDeadline(parent context.Context, deadline time.Time) (context.Context, context.CancelFunc) {
-	return context.WithDeadline(parent, deadline)
-}

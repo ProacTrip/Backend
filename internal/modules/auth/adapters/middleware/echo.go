@@ -63,34 +63,34 @@ func (m *AuthMiddleware) Handle(next echo.HandlerFunc) echo.HandlerFunc {
 		if refreshCookie != nil && refreshCookie.Value != "" {
 			claims, newAccess, newRefresh, err := m.config.TokenSvc.ValidateAndRotateRefresh(c.Request().Context(), refreshCookie.Value)
 			if err == nil {
-				if m.config.IsProduction {
-					sharedhttp.SetAuthCookiesFromTokens(c, newAccess, newRefresh)
-				} else {
-					sharedhttp.SetAuthCookiesDev(c, newAccess, newRefresh)
-				}
-				c.Set("user_claims", claims)
-				return next(c)
+			if m.config.IsProduction {
+				sharedhttp.SetAuthCookiesFromTokens(c, newAccess, newRefresh, m.config.CookieDomain)
+			} else {
+				sharedhttp.SetAuthCookiesDev(c, newAccess, newRefresh)
 			}
-			if errors.Is(err, domain.ErrTokenRevoked) || errors.Is(err, domain.ErrTokenExpired) {
-				if m.config.IsProduction {
-					sharedhttp.ClearAuthCookies(c)
-				} else {
-					sharedhttp.ClearAuthCookiesDev(c)
-				}
+			c.Set("user_claims", claims)
+			return next(c)
+		}
+		if errors.Is(err, domain.ErrTokenRevoked) || errors.Is(err, domain.ErrTokenExpired) {
+			if m.config.IsProduction {
+				sharedhttp.ClearAuthCookies(c, m.config.CookieDomain)
+			} else {
+				sharedhttp.ClearAuthCookiesDev(c)
+			}
 				return c.JSON(http.StatusUnauthorized, serrors.ErrUnauthorized(
 					"Sesión expirada. Inicia sesión nuevamente.", err,
 				).WithInstance(c.Request().URL.Path))
 			}
 		}
 
-		if m.config.IsProduction {
-			sharedhttp.ClearAuthCookies(c)
-		} else {
-			sharedhttp.ClearAuthCookiesDev(c)
-		}
-		return c.JSON(http.StatusUnauthorized, serrors.ErrUnauthorized(
-			"Autenticación requerida", nil,
-		).WithInstance(c.Request().URL.Path))
+	if m.config.IsProduction {
+		sharedhttp.ClearAuthCookies(c, m.config.CookieDomain)
+	} else {
+		sharedhttp.ClearAuthCookiesDev(c)
+	}
+	return c.JSON(http.StatusUnauthorized, serrors.ErrUnauthorized(
+		"Autenticación requerida", nil,
+	).WithInstance(c.Request().URL.Path))
 	}
 }
 
@@ -127,17 +127,17 @@ func (m *AuthMiddleware) Optional() echo.MiddlewareFunc {
 			if refreshCookie != nil && refreshCookie.Value != "" {
 				claims, newAccess, newRefresh, err := m.config.TokenSvc.ValidateAndRotateRefresh(c.Request().Context(), refreshCookie.Value)
 				if err == nil {
-					if m.config.IsProduction {
-						sharedhttp.SetAuthCookiesFromTokens(c, newAccess, newRefresh)
-					} else {
-						sharedhttp.SetAuthCookiesDev(c, newAccess, newRefresh)
-					}
-					c.Set("user_claims", claims)
-					return next(c)
-				}
+			if m.config.IsProduction {
+				sharedhttp.SetAuthCookiesFromTokens(c, newAccess, newRefresh, m.config.CookieDomain)
+			} else {
+				sharedhttp.SetAuthCookiesDev(c, newAccess, newRefresh)
 			}
+			c.Set("user_claims", claims)
+			return next(c)
+		}
+	}
 
-			// Token validation failed — proceed as anonymous.
+	// Token validation failed — proceed as anonymous.
 			// Do NOT clear cookies (they belong to other routes).
 			// Do NOT return 401 (this is a public endpoint).
 			return next(c)
