@@ -243,7 +243,14 @@ type resendNotificationAdapter struct {
 
 // SendVerificationEmail implementa resend_verification.NotificationPort.
 func (a *resendNotificationAdapter) SendVerificationEmail(ctx context.Context, userID uuid.UUID, email, token string) error {
-	return a.uc.Execute(ctx, userID, email, token)
+	cmd := sendverification.Command{
+		UserID:            userID,
+		Email:             email,
+		VerificationToken: token,
+		FirstName:         "", // El adapter de resend no tiene acceso al first_name
+	}
+	_, err := a.uc.Execute(ctx, cmd)
+	return err
 }
 
 // WireResendVerification crea el usecase y handler del feature resend-verification

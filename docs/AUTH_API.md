@@ -232,6 +232,18 @@ Set-Cookie: __Secure-refresh_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=L
 | `RATE_LIMIT_EXCEEDED` | 429 | Demasiadas peticiones (RFC 9457 Problem JSON). Ver [Rate Limiting](#rate-limiting) |
 | `INTERNAL_ERROR` | 500 | Error inesperado |
 
+### Comportamiento del campo `first_name` en el email de verificación
+
+El template de verificación de Resend usa la variable `{{first_name}}` para personalizar el saludo. El comportamiento es:
+
+| Origen del registro | `first_name` | Resultado en el email |
+|---------------------|-------------|----------------------|
+| **OAuth (Google)** | `given_name` del perfil de Google | "Hola, **Juan**" (nombre real) |
+| **OAuth (Google) sin given_name** | string vacío | "Hola, **Usuario**" (fallback del template) |
+| **Email + contraseña** | no se envía en el evento | "Hola, **Usuario**" (fallback del template) |
+
+> El template de Resend está configurado para mostrar "Usuario" cuando `first_name` no está definido o es una cadena vacía. El módulo de notificación pasa el valor tal cual lo recibe del evento `auth.user.registered`, sin transformarlo.
+
 ---
 
 ## Resend Verification Email

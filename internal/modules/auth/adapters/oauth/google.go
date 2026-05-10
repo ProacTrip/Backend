@@ -148,6 +148,7 @@ func (g *GoogleOAuth) GetUserInfo(ctx context.Context, accessToken string) (*dom
 		Email         string `json:"email"`
 		EmailVerified bool   `json:"email_verified"`
 		Name          string `json:"name"`
+		GivenName     string `json:"given_name"`
 		Picture       string `json:"picture"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&userInfo); err != nil {
@@ -159,6 +160,7 @@ func (g *GoogleOAuth) GetUserInfo(ctx context.Context, accessToken string) (*dom
 		Email:          userInfo.Email,
 		EmailVerified:  userInfo.EmailVerified,
 		Name:           userInfo.Name,
+		GivenName:      userInfo.GivenName,
 		Picture:        userInfo.Picture,
 	}, nil
 }

@@ -30,9 +30,12 @@ func NewEventBus(rdb *redis.Client) *EventBus {
 func (e *EventBus) Publish(ctx context.Context, stream string, payload map[string]interface{}) (string, error) {
 	// Copiar payload para evitar mutar el mapa del caller (C5).
 	// Agregamos el timestamp a la copia, no al original.
+	// Si el caller ya seteó "timestamp", lo respetamos — no lo sobrescribimos.
 	copied := make(map[string]any, len(payload)+1)
 	maps.Copy(copied, payload)
-	copied["timestamp"] = fmt.Sprintf("%d", time.Now().UnixMilli())
+	if _, hasTs := copied["timestamp"]; !hasTs {
+		copied["timestamp"] = fmt.Sprintf("%d", time.Now().UnixMilli())
+	}
 
 	// IMPORTANTE: No agregar hashtag aquí - el caller debe pasar el stream name completo
 	// con hashtag incluido. Esto evita el doble hashtag: {events}:{events}:stream

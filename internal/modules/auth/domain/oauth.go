@@ -43,7 +43,8 @@ type OAuthUserInfo struct {
 	ProviderUserID string // sub en Google, id en otros proveedores
 	Email          string
 	EmailVerified  bool
-	Name           string
+	Name           string // nombre completo (campo "name" de Google)
+	GivenName      string // nombre de pila (campo "given_name" de Google), puede estar vacío
 	Picture        string
 }
 

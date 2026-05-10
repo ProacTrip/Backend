@@ -280,7 +280,6 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	notifMod, err := notifModule.NewModule(notifModule.Config{
 		PostgresPool:   notifPool,
 		RedisClient:    rdb,
-		EventBus:       eventBus,
 		ResendAPIKey:   cfg.Email.ResendAPIKey,
 		FrontendConfig: cfg.Frontend,
 		RateLimiter:    rateLimiter,

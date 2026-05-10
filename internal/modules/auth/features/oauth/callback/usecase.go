@@ -222,14 +222,22 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 	// 8. Publicar evento auth.user.registered si es usuario nuevo
 	if isNewUser && uc.eventPublisher != nil {
 		streamName := eventbus.StreamName("auth.user.registered")
+
+		// Generar token de verificación para el notification consumer.
+		// Para usuarios OAuth el email ya está verificado por el proveedor,
+		// pero se incluye el token para que el consumer pueda armar el enlace del email.
+		verificationToken := uuid.Must(uuid.NewV7()).String()
+
 		flatPayload := map[string]any{
-			"event_type":   "user_registered",
-			"event_version": int64(1),
-			"aggregate_id": user.ID.String(),
-			"timestamp":    time.Now().UnixMilli(),
-			"user_id":      user.ID.String(),
-			"email":        user.Email,
-			"provider":     cmd.Provider,
+			"event_type":         "user_registered",
+			"event_version":      int64(1),
+			"aggregate_id":       user.ID.String(),
+			"timestamp":          time.Now().UnixMilli(),
+			"user_id":            user.ID.String(),
+			"email":              user.Email,
+			"provider":           cmd.Provider,
+			"verification_token": verificationToken,
+			"first_name":         userInfo.GivenName, // nombre de pila de Google, vacío si no está disponible
 		}
 		if _, err := uc.eventPublisher.Publish(ctx, streamName, flatPayload); err != nil {
 			slog.ErrorContext(ctx, "failed to publish auth user event",
