@@ -9,13 +9,13 @@ package shared
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 	"github.com/redis/go-redis/v9"
 
+	sharedEnv "github.com/ProacTrip/Backend/internal/shared/environment"
 	userprefs "github.com/ProacTrip/Backend/internal/modules/user/features/shared"
 )
 
@@ -111,22 +111,11 @@ func ResolveSearchDefaults(
 }
 
 // =============================================================================
-// Env cache parsing (uncoupled from environment module)
+// Env cache parsing — uses shared/environment DTO contract
 // =============================================================================
 
-// envCacheEntry is the subset of environment.EnvironmentResponse that we care about.
-// We decode only the fields needed for search defaults to avoid a hard
-// dependency on the environment module.
-type envCacheEntry struct {
-	Location struct {
-		CountryCode string `json:"country_code"`
-		Currency    string `json:"currency"`
-		Language    string `json:"language"`
-	} `json:"location"`
-}
-
 func resolveFromEnvCache(ctx context.Context, rdb *redis.Client, ip string) (gl, hl, currency string, ok bool) {
-	key := fmt.Sprintf("env:%s", ip)
+	key := sharedEnv.CacheKey(ip)
 
 	raw, err := rdb.Get(ctx, key).Result()
 	if err != nil {
@@ -142,7 +131,7 @@ func resolveFromEnvCache(ctx context.Context, rdb *redis.Client, ip string) (gl,
 		return "", "", "", false
 	}
 
-	var entry envCacheEntry
+	var entry sharedEnv.CacheEntry
 	if err := json.Unmarshal([]byte(raw), &entry); err != nil {
 		slog.WarnContext(ctx, "resolve defaults: env cache unmarshal failed",
 			slog.String("error", err.Error()),

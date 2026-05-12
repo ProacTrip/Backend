@@ -1,29 +1,17 @@
+// Metadatos de países: nombre, moneda e idioma oficial.
+// Incluye 257 países y territorios con sus códigos ISO 3166-1 alpha-2,
+// monedas ISO 4217 e idiomas ISO 639-1.
 package domain
 
-import (
-	"context"
-	"os"
-)
-
-type LocationData struct {
-	Country     string  `json:"country"`
-	CountryCode string  `json:"country_code"`
-	City        string  `json:"city"`
-	State       string  `json:"state"`
-	Zipcode     string  `json:"zipcode"`
-	Timezone    string  `json:"timezone"`
-	Currency    string  `json:"currency"`
-	Language    string  `json:"language"`
-	Latitude    float64 `json:"latitude"`
-	Longitude   float64 `json:"longitude"`
-}
-
+// CountryInfo contiene la información de un país: nombre, moneda e idioma.
 type CountryInfo struct {
 	Country  string `json:"country"`
 	Currency string `json:"currency"`
 	Language string `json:"language"`
 }
 
+// CountryMetadata es el mapa canónico de códigos de país a CountryInfo.
+// Cubre 257 países y territorios dependientes.
 var CountryMetadata = map[string]CountryInfo{
 	"AD": {Country: "Andorra", Currency: "EUR", Language: "ca"},
 	"AL": {Country: "Albania", Currency: "ALL", Language: "sq"},
@@ -256,66 +244,28 @@ var CountryMetadata = map[string]CountryInfo{
 	"WF": {Country: "Wallis and Futuna", Currency: "XPF", Language: "fr"},
 }
 
+// GetCountryInfo retorna la información de un país dado su código ISO 3166-1 alpha-2.
 func GetCountryInfo(countryCode string) (CountryInfo, bool) {
 	info, ok := CountryMetadata[countryCode]
 	return info, ok
 }
 
-func CurrencyForCountry(countryCode string) string {
+// CurrencyForCountry retorna la moneda ISO 4217 para un país.
+// defaultCurrency es el valor a usar si el país no está en CountryMetadata.
+func CurrencyForCountry(countryCode string, defaultCurrency string) string {
 	if info, ok := CountryMetadata[countryCode]; ok {
 		return info.Currency
+	}
+	if defaultCurrency != "" {
+		return defaultCurrency
 	}
 	return "USD"
 }
 
+// LanguageForCountry retorna el idioma ISO 639-1 para un país, o "en" por defecto.
 func LanguageForCountry(countryCode string) string {
 	if info, ok := CountryMetadata[countryCode]; ok {
 		return info.Language
 	}
 	return "en"
-}
-
-type WeatherData struct {
-	Temp        float64 `json:"temp"`
-	FeelsLike   float64 `json:"feels_like"`
-	Description string  `json:"description"`
-	Icon        string  `json:"icon"`
-	IconURL     string  `json:"icon_url"`
-	Humidity    int     `json:"humidity"`
-	WindSpeed   float64 `json:"wind_speed"`
-}
-
-type EnvironmentResponse struct {
-	Location LocationData  `json:"location"`
-	Weather  *WeatherData  `json:"weather,omitzero"`
-}
-
-type LocationProvider interface {
-	ResolveIP(ctx context.Context, ip string) (*LocationData, error)
-}
-
-type WeatherProvider interface {
-	GetCurrentWeather(ctx context.Context, lat, lon float64, lang string) (*WeatherData, error)
-}
-
-func DefaultLocation() *LocationData {
-	if cc := os.Getenv("DEFAULT_COUNTRY_CODE"); cc != "" {
-		if info, ok := CountryMetadata[cc]; ok {
-			return &LocationData{
-				Country:     info.Country,
-				CountryCode: cc,
-				Currency:    info.Currency,
-				Language:    info.Language,
-			}
-		}
-	}
-	return &LocationData{
-		Country:     "Argentina",
-		CountryCode: "AR",
-		City:        "Buenos Aires",
-		Currency:    "ARS",
-		Language:    "es",
-		Latitude:    -34.6037,
-		Longitude:   -58.3816,
-	}
 }

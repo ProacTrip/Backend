@@ -32,6 +32,7 @@ import (
 	searchshared "github.com/ProacTrip/Backend/internal/modules/search/features/shared"
 	"github.com/ProacTrip/Backend/internal/modules/search/shared/airports"
 	envdomain "github.com/ProacTrip/Backend/internal/modules/environment/domain"
+	sharedEnv "github.com/ProacTrip/Backend/internal/shared/environment"
 	userprefs "github.com/ProacTrip/Backend/internal/modules/user/features/shared"
 	"golang.org/x/sync/errgroup"
 )
@@ -503,15 +504,8 @@ func (uc *UseCase) maxTurnsForUser(userID string) int {
 // Location hint — injects detected user location as AI context
 // =============================================================================
 
-// envLocationEntry is the subset of environment.EnvironmentResponse needed to
-// extract city, country, and country_code from the env:{ip} Dragonfly cache.
-type envLocationEntry struct {
-	Location struct {
-		City        string `json:"city"`
-		Country     string `json:"country"`
-		CountryCode string `json:"country_code"`
-	} `json:"location"`
-}
+// The env:{ip} cache contract is defined in shared/environment/dto.go.
+// We use sharedEnv.LocationDTO to decode location data from the cache.
 
 // resolveLocationHint determines the user's location for AI context injection.
 //
@@ -564,7 +558,7 @@ func (uc *UseCase) resolveLocationHint(ctx context.Context, userID, clientIP str
 		}
 	} else if clientIP != "" {
 		// Anonymous user: parse env:{ip} Dragonfly cache.
-		key := fmt.Sprintf("env:%s", clientIP)
+		key := sharedEnv.CacheKey(clientIP)
 		raw, err := uc.rdb.Get(ctx, key).Result()
 		if err != nil {
 			if err != redis.Nil {
@@ -580,15 +574,15 @@ func (uc *UseCase) resolveLocationHint(ctx context.Context, userID, clientIP str
 			// Fall through to default fallback below
 		}
 		if raw != "" {
-			var entry envLocationEntry
-			if err := json.Unmarshal([]byte(raw), &entry); err != nil {
+			var cacheEntry sharedEnv.CacheEntry
+			if err := json.Unmarshal([]byte(raw), &cacheEntry); err != nil {
 				slog.WarnContext(ctx, "resolveLocationHint: env cache unmarshal failed",
 					slog.String("error", err.Error()),
 				)
 			} else {
-				city = entry.Location.City
-				country = entry.Location.Country
-				countryCode = entry.Location.CountryCode
+				city = cacheEntry.Location.City
+				country = cacheEntry.Location.Country
+				countryCode = cacheEntry.Location.CountryCode
 			}
 		}
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	sharedEnv "github.com/ProacTrip/Backend/internal/shared/environment"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 )
@@ -148,7 +149,7 @@ func TestResolveSearchDefaults_Tier3_EnvCache(t *testing.T) {
 	ip := "8.8.8.8"
 
 	// Populate env:{ip} cache (same format as environment usecase stores)
-	envData := envCacheEntry{}
+	envData := sharedEnv.CacheEntry{}
 	envData.Location.CountryCode = "JP"
 	envData.Location.Language = "ja"
 	envData.Location.Currency = "JPY"
@@ -241,7 +242,7 @@ func TestResolveSearchDefaults_Tier2BeatsTier3(t *testing.T) {
 	})
 
 	// Set up Tier 3 (env cache — should be ignored because Tier 2 is found)
-	envData := envCacheEntry{}
+	envData := sharedEnv.CacheEntry{}
 	envData.Location.CountryCode = "US"
 	envData.Location.Language = "en"
 	envData.Location.Currency = "USD"
@@ -319,7 +320,7 @@ func TestResolveSearchDefaults_Tier1BeatsAll(t *testing.T) {
 	})
 
 	// Populate Tier 3
-	envData := envCacheEntry{}
+	envData := sharedEnv.CacheEntry{}
 	envData.Location.CountryCode = "US"
 	envData.Location.Language = "en"
 	envData.Location.Currency = "USD"

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/ProacTrip/Backend/internal/modules/environment/domain"
 	httperr "github.com/ProacTrip/Backend/internal/shared/http"
 	"github.com/labstack/echo/v5"
 )
@@ -18,27 +19,33 @@ func NewHandler(useCase *UseCase) *Handler {
 }
 
 func (h *Handler) Handle(c *echo.Context) error {
-	slog.Debug("get_environment handler: request received")
+	slog.DebugContext(c.Request().Context(), "get_environment handler: request received")
 
-	if h.useCase == nil {
-		slog.Error("get_environment handler: FATAL — useCase is nil")
-		return httperr.MapError(c, echo.NewHTTPError(http.StatusInternalServerError, "environment service unavailable"))
+	// Resolver IP: X-Real-IP tiene precedencia sobre c.RealIP()
+	ip := c.Request().Header.Get("X-Real-IP")
+	if ip == "" {
+		ip = c.RealIP()
+	}
+	slog.DebugContext(c.Request().Context(), "get_environment handler: resolved IP", "ip", ip)
+
+	// Validar IP: rechazar IPs privadas, loopback y malformadas
+	if domain.IsPrivateOrLocalIP(ip) {
+		slog.WarnContext(c.Request().Context(), "get_environment handler: IP inválida o privada", "ip", ip)
+		return httperr.MapError(c, domain.ErrInvalidIP)
 	}
 
-	ip := c.RealIP()
-	slog.Debug("get_environment handler: extracted IP", "ip", ip)
-
 	lang := extractLanguage(c)
-	slog.Debug("get_environment handler: extracted language", "lang", lang)
+	slog.DebugContext(c.Request().Context(), "get_environment handler: extracted language", "lang", lang)
 
-	slog.Debug("get_environment handler: calling useCase.Execute", "ip", ip, "lang", lang)
+	slog.DebugContext(c.Request().Context(), "get_environment handler: calling useCase.Execute", "ip", ip, "lang", lang)
 	result, err := h.useCase.Execute(c.Request().Context(), ip, lang)
 	if err != nil {
-		slog.Error("get_environment handler: useCase.Execute failed", "error", err)
+		slog.ErrorContext(c.Request().Context(), "get_environment handler: useCase.Execute failed", "error", err)
 		return httperr.MapError(c, err)
 	}
 
-	slog.Debug("get_environment handler: returning 200 OK")
+	c.Response().Header().Set("Cache-Control", "public, max-age=600")
+	slog.DebugContext(c.Request().Context(), "get_environment handler: returning 200 OK")
 	return c.JSON(http.StatusOK, result)
 }
 
@@ -47,13 +54,21 @@ func extractLanguage(c *echo.Context) string {
 	if header == "" {
 		return "en"
 	}
-	parts := strings.SplitN(header, ",", 2)
-	first := strings.TrimSpace(parts[0])
 
+	// Extraer el primer idioma (antes de coma)
+	first, _, found := strings.Cut(header, ",")
+	if found {
+		first = strings.TrimSpace(first)
+	} else {
+		first = strings.TrimSpace(header)
+	}
+
+	// Remover parámetro de calidad (;q=...)
 	if idx := strings.IndexByte(first, ';'); idx != -1 {
 		first = strings.TrimSpace(first[:idx])
 	}
 
+	// Extraer el código de idioma primario antes del guion regional
 	if idx := strings.IndexByte(first, '-'); idx != -1 {
 		first = first[:idx]
 	}

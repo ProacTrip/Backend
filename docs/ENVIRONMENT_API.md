@@ -62,7 +62,7 @@
 
 | Capa | Quién | Qué cachea | TTL |
 |------|-------|-----------|-----|
-| **Backend** | Redis/DragonflyDB | `ip:{client_ip}` + `weather:{lat}:{lon}:{lang}` | 10 min |
+| **Backend** | Redis/DragonflyDB | `env:{client_ip}` | `EnvironmentResponse` completo (location + weather) | 10 min (configurable via `ENVIRONMENT_CACHE_TTL`) |
 | **Frontend** | localStorage/React state | Environment response completo | 10 min |
 
 > Auth y environment son módulos **zero-knowledge** — no se importan entre sí. La conexión es vía el frontend que orquesta ambas llamadas.
@@ -77,7 +77,7 @@ Se cachea la respuesta completa `EnvironmentResponse` por IP para evitar llamada
 
 | Key pattern | Datos almacenados | TTL |
 |-------------|-------------------|-----|
-| `env:{client_ip}` | `EnvironmentResponse` completo (location + weather) | 10 min |
+| `env:{client_ip}` | `EnvironmentResponse` completo (location + weather) | 10 min (configurable via `ENVIRONMENT_CACHE_TTL`) |
 
 Si el cache HIT, se devuelve inmediatamente sin llamar a ningún provider externo.  
 Si el cache MISS, se resuelve IP → GeoIP → Weather, se ensambla y cachea la respuesta completa.
@@ -285,9 +285,11 @@ El backend maneja cada caso con logs claros para diagnosticar el problema real:
 | Condición | Log nivel | `weather` en respuesta | Acción backend |
 |-----------|-----------|------------------------|----------------|
 | `OPENWEATHER_API_KEY` no configurada | `WARN` — "weather provider returned nil (no API key?)" | `null` | No llama a OpenWeather |
-| Rate limit de OpenWeather excedido | `WARN` — "openweather rate limit exceeded: X/Y" | `null` | Devuelve error 429 al frontend |
+| Rate limit de OpenWeather excedido | `WARN` | — | Devuelve error 429 al frontend |
 | OpenWeather devuelve error | `ERROR` — "weather provider failed: ..." | `null` | Loguea el error exacto |
 | OpenWeather OK | `DEBUG` — "weather provider OK" con temp/desc | Datos completos | Cachea y devuelve |
+
+> **Nota:** El rate limit de OpenWeather ahora devuelve HTTP 429 al frontend (en lugar de `weather: null`), para que el frontend pueda distinguir entre "sin API key" y "límite excedido" y mostrar mensajes de error apropiados.
 
 El frontend debe handlejar `weather: null` mostrando la ubicación sin clima. El backend **siempre** loguea la causa raíz para que el equipo pueda diagnosticar sin adivinar.
 

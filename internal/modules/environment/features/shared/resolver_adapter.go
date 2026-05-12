@@ -1,9 +1,9 @@
-// Package shared provides cross-cutting adapters for the environment module.
+// Package shared provee adaptadores transversales para el módulo environment.
 //
-// EnvironmentResolverAdapter bridges the environment module's geo-IP
-// capabilities to the auth module's register.EnvironmentResolver interface.
-// It implements register.EnvironmentResolver structurally — no import of the
-// auth module is needed (Go's structural typing handles it).
+// EnvironmentResolverAdapter tiende un puente entre las capacidades de geo-IP
+// del módulo environment y la interfaz register.EnvironmentResolver del módulo auth.
+// Implementa register.EnvironmentResolver de forma estructural — no necesita
+// importar el módulo auth (el tipado estructural de Go lo resuelve).
 package shared
 
 import (
@@ -13,28 +13,28 @@ import (
 )
 
 // =============================================================================
-// EnvironmentResolverAdapter — adapts LocationProvider → register.EnvironmentResolver
+// EnvironmentResolverAdapter — adapta LocationProvider → register.EnvironmentResolver
 // =============================================================================
 
-// EnvironmentResolverAdapter resolves currency, language, country code, and
-// timezone from an IP address using the geo-IP LocationProvider and the
-// static CountryMetadata map.
+// EnvironmentResolverAdapter resuelve moneda, idioma, código de país y
+// timezone desde una IP usando el LocationProvider de geo-IP y el mapa
+// estático CountryMetadata.
 type EnvironmentResolverAdapter struct {
 	locationProvider domain.LocationProvider
 }
 
-// NewEnvironmentResolverAdapter creates an adapter backed by the given LocationProvider.
+// NewEnvironmentResolverAdapter crea un adaptador respaldado por el LocationProvider dado.
 func NewEnvironmentResolverAdapter(lp domain.LocationProvider) *EnvironmentResolverAdapter {
 	return &EnvironmentResolverAdapter{locationProvider: lp}
 }
 
-// ResolveDefaults performs an IP geo-lookup and enriches the result with
-// currency and language from the CountryMetadata map.
+// ResolveDefaults realiza una geo-búsqueda IP y enriquece el resultado con
+// moneda e idioma desde el mapa CountryMetadata.
 //
-// Returns (currency, language, countryCode, timezone, error).
-// When the country code is not found in CountryMetadata, currency and language
-// are returned as empty strings — the caller (registration use case) treats
-// them as "not resolved" and continues without env defaults.
+// Retorna (moneda, idioma, countryCode, timezone, error).
+// Cuando el código de país no está en CountryMetadata, moneda e idioma se
+// retornan como strings vacíos — el llamador (caso de uso de registro) los
+// trata como "no resuelto" y continúa sin defaults de entorno.
 func (a *EnvironmentResolverAdapter) ResolveDefaults(ctx context.Context, ip string) (currency, language, countryCode, timezone string, err error) {
 	loc, err := a.locationProvider.ResolveIP(ctx, ip)
 	if err != nil {
@@ -48,8 +48,8 @@ func (a *EnvironmentResolverAdapter) ResolveDefaults(ctx context.Context, ip str
 		currency = info.Currency
 		language = info.Language
 	}
-	// If country code is not in CountryMetadata, currency and language remain ""
-	// which signals "not resolved" to the auth use case.
+	// Si el código de país no está en CountryMetadata, moneda e idioma quedan ""
+	// lo cual indica "no resuelto" al caso de uso de auth.
 
 	return currency, language, countryCode, timezone, nil
 }

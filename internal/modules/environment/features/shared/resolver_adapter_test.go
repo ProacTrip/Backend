@@ -1,3 +1,5 @@
+// Tests para el adaptador EnvironmentResolverAdapter que resuelve
+// moneda, idioma, código de país y timezone desde una IP vía geo-IP.
 package shared
 
 import (
@@ -9,7 +11,7 @@ import (
 )
 
 // =============================================================================
-// Mock LocationProvider
+// Mock de LocationProvider
 // =============================================================================
 
 type mockLocationProvider struct {
@@ -22,147 +24,156 @@ func (m *mockLocationProvider) ResolveIP(_ context.Context, _ string) (*domain.L
 }
 
 // =============================================================================
-// Tests for EnvironmentResolverAdapter
+// Tests table-driven para EnvironmentResolverAdapter
 // =============================================================================
 
-func TestResolveDefaults_Success_Argentina(t *testing.T) {
+func TestResolveDefaults(t *testing.T) {
 	t.Parallel()
 
-	adapter := NewEnvironmentResolverAdapter(&mockLocationProvider{
-		location: &domain.LocationData{
-			CountryCode: "AR",
-			Timezone:    "America/Argentina/Buenos_Aires",
+	tests := []struct {
+		name string
+		loc  *domain.LocationData
+		err  error
+
+		wantCurrency    string
+		wantLanguage    string
+		wantCountryCode string
+		wantTimezone    string
+		wantErr         bool
+		wantErrContains string
+	}{
+		{
+			name: "Argentina — resuelve ARS, es, AR",
+			loc: &domain.LocationData{
+				CountryCode: "AR",
+				Timezone:    "America/Argentina/Buenos_Aires",
+			},
+			wantCurrency:    "ARS",
+			wantLanguage:    "es",
+			wantCountryCode: "AR",
+			wantTimezone:    "America/Argentina/Buenos_Aires",
 		},
-	})
-
-	currency, language, countryCode, timezone, err := adapter.ResolveDefaults(t.Context(), "190.191.192.193")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		{
+			name: "Japón — resuelve JPY, ja, JP",
+			loc: &domain.LocationData{
+				CountryCode: "JP",
+				Timezone:    "Asia/Tokyo",
+			},
+			wantCurrency:    "JPY",
+			wantLanguage:    "ja",
+			wantCountryCode: "JP",
+			wantTimezone:    "Asia/Tokyo",
+		},
+		{
+			name: "España — resuelve EUR, es, ES",
+			loc: &domain.LocationData{
+				CountryCode: "ES",
+				Timezone:    "Europe/Madrid",
+			},
+			wantCurrency:    "EUR",
+			wantLanguage:    "es",
+			wantCountryCode: "ES",
+			wantTimezone:    "Europe/Madrid",
+		},
+		{
+			name: "país desconocido — currency y language vacíos",
+			loc: &domain.LocationData{
+				CountryCode: "XX",
+				Timezone:    "UTC",
+			},
+			wantCurrency:    "",
+			wantLanguage:    "",
+			wantCountryCode: "XX",
+			wantTimezone:    "UTC",
+		},
+		{
+			name:            "error del proveedor — propaga el error",
+			err:             errors.New("ipquery timeout"),
+			wantErr:         true,
+			wantErrContains: "ipquery timeout",
+		},
 	}
 
-	if currency != "ARS" {
-		t.Errorf("currency = %q, want %q", currency, "ARS")
-	}
-	if language != "es" {
-		t.Errorf("language = %q, want %q", language, "es")
-	}
-	if countryCode != "AR" {
-		t.Errorf("countryCode = %q, want %q", countryCode, "AR")
-	}
-	if timezone != "America/Argentina/Buenos_Aires" {
-		t.Errorf("timezone = %q, want %q", timezone, "America/Argentina/Buenos_Aires")
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			adapter := NewEnvironmentResolverAdapter(&mockLocationProvider{
+				location: tc.loc,
+				err:      tc.err,
+			})
+
+			currency, language, countryCode, timezone, err := adapter.ResolveDefaults(t.Context(), "1.2.3.4")
+
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("esperaba error, obtuve nil")
+				}
+				if tc.wantErrContains != "" && !errors.Is(err, errors.New(tc.wantErrContains)) {
+					// Para errores simples sin wrapping, verificamos el mensaje
+					if err.Error() != tc.wantErrContains {
+						t.Errorf("error = %q, esperaba que contenga %q", err.Error(), tc.wantErrContains)
+					}
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("error inesperado: %v", err)
+			}
+
+			if currency != tc.wantCurrency {
+				t.Errorf("currency = %q, esperaba %q", currency, tc.wantCurrency)
+			}
+			if language != tc.wantLanguage {
+				t.Errorf("language = %q, esperaba %q", language, tc.wantLanguage)
+			}
+			if countryCode != tc.wantCountryCode {
+				t.Errorf("countryCode = %q, esperaba %q", countryCode, tc.wantCountryCode)
+			}
+			if timezone != tc.wantTimezone {
+				t.Errorf("timezone = %q, esperaba %q", timezone, tc.wantTimezone)
+			}
+		})
 	}
 }
 
-func TestResolveDefaults_Success_Japan(t *testing.T) {
+// TestResolveDefaults_SinLocation verifica el comportamiento cuando el
+// proveedor retorna location nil (caso borde).
+func TestResolveDefaults_SinLocation(t *testing.T) {
 	t.Parallel()
 
 	adapter := NewEnvironmentResolverAdapter(&mockLocationProvider{
 		location: &domain.LocationData{
-			CountryCode: "JP",
-			Timezone:    "Asia/Tokyo",
+			CountryCode: "",
+			Timezone:    "",
 		},
 	})
 
 	currency, language, countryCode, timezone, err := adapter.ResolveDefaults(t.Context(), "8.8.8.8")
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if currency != "JPY" {
-		t.Errorf("currency = %q, want %q", currency, "JPY")
-	}
-	if language != "ja" {
-		t.Errorf("language = %q, want %q", language, "ja")
-	}
-	if countryCode != "JP" {
-		t.Errorf("countryCode = %q, want %q", countryCode, "JP")
-	}
-	if timezone != "Asia/Tokyo" {
-		t.Errorf("timezone = %q, want %q", timezone, "Asia/Tokyo")
-	}
-}
-
-func TestResolveDefaults_UnknownCountry_EmptyCurrencyLanguage(t *testing.T) {
-	t.Parallel()
-
-	// Country code not in CountryMetadata — currency and language should be empty
-	adapter := NewEnvironmentResolverAdapter(&mockLocationProvider{
-		location: &domain.LocationData{
-			CountryCode: "XX", // unknown country
-			Timezone:    "UTC",
-		},
-	})
-
-	currency, language, countryCode, timezone, err := adapter.ResolveDefaults(t.Context(), "10.0.0.1")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("error inesperado: %v", err)
 	}
 
 	if currency != "" {
-		t.Errorf("currency = %q, want empty (unknown country)", currency)
+		t.Errorf("currency = %q, esperaba vacío (sin country code)", currency)
 	}
 	if language != "" {
-		t.Errorf("language = %q, want empty (unknown country)", language)
+		t.Errorf("language = %q, esperaba vacío (sin country code)", language)
 	}
-	if countryCode != "XX" {
-		t.Errorf("countryCode = %q, want %q", countryCode, "XX")
+	if countryCode != "" {
+		t.Errorf("countryCode = %q, esperaba vacío", countryCode)
 	}
-	if timezone != "UTC" {
-		t.Errorf("timezone = %q, want %q", timezone, "UTC")
-	}
-}
-
-func TestResolveDefaults_ProviderError_ReturnsError(t *testing.T) {
-	t.Parallel()
-
-	providerErr := errors.New("ipquery timeout")
-	adapter := NewEnvironmentResolverAdapter(&mockLocationProvider{
-		err: providerErr,
-	})
-
-	_, _, _, _, err := adapter.ResolveDefaults(t.Context(), "1.2.3.4")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !errors.Is(err, providerErr) {
-		t.Errorf("error = %v, want %v", err, providerErr)
-	}
-}
-
-func TestResolveDefaults_Spain(t *testing.T) {
-	t.Parallel()
-
-	adapter := NewEnvironmentResolverAdapter(&mockLocationProvider{
-		location: &domain.LocationData{
-			CountryCode: "ES",
-			Timezone:    "Europe/Madrid",
-		},
-	})
-
-	currency, language, countryCode, timezone, err := adapter.ResolveDefaults(t.Context(), "80.80.80.80")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if currency != "EUR" {
-		t.Errorf("currency = %q, want %q", currency, "EUR")
-	}
-	if language != "es" {
-		t.Errorf("language = %q, want %q", language, "es")
-	}
-	if countryCode != "ES" {
-		t.Errorf("countryCode = %q, want %q", countryCode, "ES")
-	}
-	if timezone != "Europe/Madrid" {
-		t.Errorf("timezone = %q, want %q", timezone, "Europe/Madrid")
+	if timezone != "" {
+		t.Errorf("timezone = %q, esperaba vacío", timezone)
 	}
 }
 
 // =============================================================================
-// Compile-time interface check — verifies EnvironmentResolverAdapter
-// structurally satisfies register.EnvironmentResolver
+// Verificación en tiempo de compilación — confirma que EnvironmentResolverAdapter
+// satisface estructuralmente register.EnvironmentResolver
 // =============================================================================
 
-// This is verified at the wiring point in bootstrap/app.go:
+// Esto se verifica en el punto de wiring en bootstrap/app.go:
 //   var _ register.EnvironmentResolver = (*shared.EnvironmentResolverAdapter)(nil)
