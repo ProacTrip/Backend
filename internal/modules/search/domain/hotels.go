@@ -2,11 +2,13 @@
 // Define request, response, y todos los tipos relacionados con hoteles y vacation rentals.
 package domain
 
+import "time"
+
 // =============================================================================
 // HotelSearchRequest
 // =============================================================================
 
-// HotelSearchRequest is the domain representation of a hotel search request.
+// HotelSearchRequest es la representación de dominio de una solicitud de búsqueda de hoteles.
 type HotelSearchRequest struct {
 	Query            string   `json:"query"`
 	CheckInDate      string   `json:"check_in_date"`
@@ -38,18 +40,18 @@ type HotelSearchRequest struct {
 // HotelSearchResponse
 // =============================================================================
 
-// HotelSearchResponse is the domain hotel search response.
+// HotelSearchResponse es la respuesta de dominio para búsqueda de hoteles.
 type HotelSearchResponse struct {
 	Type         string          `json:"type"`
 	ResultsState string          `json:"results_state"`
 	Properties   []HotelProperty `json:"properties"`
 	Brands       []HotelBrand    `json:"brands"`
 	Pagination   HotelPagination `json:"pagination"`
-	FromCache    bool            `json:"from_cache"`
-	CachedAt     *string         `json:"cached_at,omitzero"`
+	FromCache    bool             `json:"from_cache"`
+	CachedAt     *time.Time       `json:"cached_at"`
 }
 
-// HotelProperty represents a single hotel or vacation rental in search results.
+// HotelProperty representa un hotel o vacation rental individual en resultados de búsqueda.
 type HotelProperty struct {
 	ID                string                        `json:"id"`
 	Type              string                        `json:"type"`
@@ -76,39 +78,39 @@ type HotelProperty struct {
 	Prices            []HotelPriceSource            `json:"prices,omitzero"`
 }
 
-// HotelPropertyRating holds overall and location ratings for a property.
+// HotelPropertyRating contiene ratings generales y de ubicación para una propiedad.
 type HotelPropertyRating struct {
 	Overall  *float64 `json:"overall,omitzero"`
 	Location *float64 `json:"location,omitzero"`
 }
 
-// HotelPrice holds per-night and total price details.
+// HotelPrice contiene detalles de precio por noche y total.
 type HotelPrice struct {
 	Currency string      `json:"currency"`
 	PerNight PriceDetail `json:"per_night"`
 	Total    PriceDetail `json:"total"`
 }
 
-// HotelBrand represents a hotel brand.
+// HotelBrand representa una marca de hotel.
 type HotelBrand struct {
 	ID     int               `json:"id"`
 	Name   string            `json:"name"`
 	Chains []HotelBrandChain `json:"chains"`
 }
 
-// HotelBrandChain represents a brand chain.
+// HotelBrandChain representa una cadena de marca.
 type HotelBrandChain struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
 }
 
-// HotelPagination holds the next page token and whether there are more results.
+// HotelPagination contiene el token de página siguiente y si hay más resultados.
 type HotelPagination struct {
 	NextToken string `json:"next_token"`
 	HasMore   bool   `json:"has_more"`
 }
 
-// HotelPriceSource represents pricing from a specific OTA in VR results.
+// HotelPriceSource representa precios de una OTA específica en resultados VR.
 type HotelPriceSource struct {
 	Source       string       `json:"source"`
 	Logo         string       `json:"logo,omitzero"`
@@ -120,7 +122,7 @@ type HotelPriceSource struct {
 // HotelDetailsRequest
 // =============================================================================
 
-// HotelDetailsRequest is the domain representation of a hotel details request.
+// HotelDetailsRequest es la representación de dominio de una solicitud de detalles de hotel.
 type HotelDetailsRequest struct {
 	ID              string  `json:"id"`
 	CheckInDate     string  `json:"check_in_date"`
@@ -138,8 +140,8 @@ type HotelDetailsRequest struct {
 // HotelDetailsResponse
 // =============================================================================
 
-// HotelDetailsResponse is the domain hotel details response.
-// Contains both hotel-specific and VR-specific fields.
+// HotelDetailsResponse es la respuesta de dominio para detalles de hotel.
+// Contiene tanto campos específicos de hotel como de VR.
 type HotelDetailsResponse struct {
 	ID                 string                              `json:"id"`
 	Type               string                              `json:"type"`
@@ -152,7 +154,7 @@ type HotelDetailsResponse struct {
 	CheckOut           string                              `json:"check_out,omitzero"`
 	Rating             HotelPropertyRating                 `json:"rating"`
 	TotalReviews       *int                                `json:"total_reviews,omitzero"`
-	Price              HotelPrice                          `json:"price"`
+	Price              HotelPrice                          `json:"price,omitzero"`
 	Images             []Image                             `json:"images"`
 	Amenities          []string                            `json:"amenities"`
 	NearbyPlaces       []NearbyPlace                       `json:"nearby_places"`
@@ -169,18 +171,18 @@ type HotelDetailsResponse struct {
 	EcoCertified       *bool                               `json:"eco_certified,omitzero"`
 	ExcludedAmenities  []string                            `json:"excluded_amenities,omitzero"`
 	Capacity           *Capacity                           `json:"capacity,omitzero"`
-	FromCache          bool                                `json:"from_cache"`
-	CachedAt           *string                             `json:"cached_at,omitzero"`
+	FromCache          bool                                 `json:"from_cache"`
+	CachedAt           *time.Time                           `json:"cached_at"`
 }
 
-// HotelPriceRange represents the typical price range for a hotel.
+// HotelPriceRange representa el rango de precios típico para un hotel.
 type HotelPriceRange struct {
 	Currency string  `json:"currency"`
 	Min      float64 `json:"min"`
 	Max      float64 `json:"max"`
 }
 
-// HotelExternalReview holds a review from an external source.
+// HotelExternalReview contiene una reseña de una fuente externa.
 type HotelExternalReview struct {
 	Source         string                  `json:"source"`
 	LogoURL        string                  `json:"logo_url,omitzero"`
@@ -190,7 +192,7 @@ type HotelExternalReview struct {
 	FeaturedReview *HotelFeaturedReview    `json:"featured_review,omitzero"`
 }
 
-// HotelFeaturedReview is a featured user review within an external review.
+// HotelFeaturedReview es una reseña de usuario destacada dentro de una reseña externa.
 type HotelFeaturedReview struct {
 	Author  string  `json:"author"`
 	Date    string  `json:"date"`
@@ -199,25 +201,25 @@ type HotelFeaturedReview struct {
 	URL     *string `json:"url,omitzero"`
 }
 
-// HotelHealthSafetyCategory is a category group within health_and_safety.
+// HotelHealthSafetyCategory es un grupo de categoría dentro de health_and_safety.
 type HotelHealthSafetyCategory struct {
 	Category string                   `json:"category"`
 	Items    []HotelHealthSafetyItem  `json:"items"`
 }
 
-// HotelHealthSafetyItem is a single health/safety measure.
+// HotelHealthSafetyItem es una medida individual de salud/seguridad.
 type HotelHealthSafetyItem struct {
 	Name      string `json:"name"`
 	Available bool   `json:"available"`
 }
 
-// HotelSustainabilityCategory is a category group within sustainability.
+// HotelSustainabilityCategory es un grupo de categoría dentro de sustainability.
 type HotelSustainabilityCategory struct {
 	Category string                     `json:"category"`
 	Items    []HotelSustainabilityItem  `json:"items"`
 }
 
-// HotelSustainabilityItem is a single sustainability measure.
+// HotelSustainabilityItem es una medida individual de sostenibilidad.
 type HotelSustainabilityItem struct {
 	Name      string `json:"name"`
 	Available bool   `json:"available"`

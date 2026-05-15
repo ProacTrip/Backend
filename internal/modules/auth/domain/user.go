@@ -18,6 +18,9 @@ const (
 	StatusInactive            UserStatus = "inactive"
 	StatusSuspended           UserStatus = "suspended"
 	StatusLocked              UserStatus = "locked"
+	// StatusDisabled es desactivación manual desde el dashboard.
+	// No tiene auto-expiración; requiere intervención explícita para revertir.
+	StatusDisabled UserStatus = "disabled"
 )
 
 // User representa un usuario del sistema (alineado con migration schema)
@@ -35,8 +38,12 @@ type User struct {
 	LastLoginAt         *time.Time `json:"last_login_at,omitzero"`
 	LockedUntil         *time.Time `json:"locked_until,omitzero"`
 	MFAEnabled          bool
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
+	// TokenVersion se incrementa al deshabilitar la cuenta o cambiar el rol.
+	// Sirve para invalidar todas las sesiones activas del usuario.
+	// Los tokens emitidos con una versión anterior son rechazados.
+	TokenVersion int
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // Métodos de dominio para manipulación del estado del usuario.

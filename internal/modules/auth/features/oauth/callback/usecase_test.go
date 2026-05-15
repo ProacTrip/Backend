@@ -356,7 +356,7 @@ func TestExecute_EstadoValido_UsuarioExistente_RetornaTokens(t *testing.T) {
 }
 
 // =============================================================================
-// Escenario 2: state_invalido — state no encontrado en Dragonfly → error.
+// Escenario 8: stateTokenSvc falla → error inmediato sin tocar Dragonfly.
 // =============================================================================
 
 func TestExecute_EstadoInvalido_StateNoEnCache_DevuelveErrOAuthStateInvalid(t *testing.T) {
@@ -546,8 +546,58 @@ func TestExecute_UsuarioExistente_NoCreaUsuario_RegistraLogin_ActualizaIdentidad
 }
 
 // =============================================================================
-// Escenario extra: stateTokenSvc falla → error inmediato sin tocar Dragonfly.
+// Escenario 6: usuario_deshabilitado — usuario existe pero está disabled → error.
+// AS-SPEC-007: OAuth callback rechaza cuentas deshabilitadas.
 // =============================================================================
+
+func TestExecute_UsuarioDeshabilitado_DevuelveErrAccountDisabled(t *testing.T) {
+	uc, mr, repo, _, _, _ := newTestUseCase(t)
+	ctx := t.Context()
+
+	// Pre-poblar Dragonfly con el estado OAuth
+	populateOAuthState(mr, "state-abc-123", "code-verifier-xyz")
+
+	// Pre-poblar usuario existente con status disabled
+	disabledUser := seedExistingUser(repo, "test@proactrip.com")
+	disabledUser.Status = domain.StatusDisabled
+
+	cmd := validCommand()
+	_, err := uc.Execute(ctx, cmd)
+	if err == nil {
+		t.Fatal("Execute: se esperaba error para usuario deshabilitado, pero fue nil")
+	}
+	if !errors.Is(err, domain.ErrAccountDisabled) {
+		t.Errorf("error = %v, want %v", err, domain.ErrAccountDisabled)
+	}
+
+	// Verificar que NO se generaron tokens (no se llegó a tokenSvc)
+	// (implícito: si llegamos a tokenSvc, tendríamos respuesta con tokens)
+}
+
+// =============================================================================
+// Escenario 7: usuario_suspendido — usuario existe pero está suspended → error.
+// =============================================================================
+
+func TestExecute_UsuarioSuspendido_DevuelveErrAccountSuspended(t *testing.T) {
+	uc, mr, repo, _, _, _ := newTestUseCase(t)
+	ctx := t.Context()
+
+	// Pre-poblar Dragonfly con el estado OAuth
+	populateOAuthState(mr, "state-abc-123", "code-verifier-xyz")
+
+	// Pre-poblar usuario existente con status suspended
+	suspendedUser := seedExistingUser(repo, "test@proactrip.com")
+	suspendedUser.Status = domain.StatusSuspended
+
+	cmd := validCommand()
+	_, err := uc.Execute(ctx, cmd)
+	if err == nil {
+		t.Fatal("Execute: se esperaba error para usuario suspendido, pero fue nil")
+	}
+	if !errors.Is(err, domain.ErrAccountSuspended) {
+		t.Errorf("error = %v, want %v", err, domain.ErrAccountSuspended)
+	}
+}
 
 func TestExecute_StateTokenInvalido_DevuelveErrOAuthStateInvalid_SinConsultarDragonfly(t *testing.T) {
 	uc, mr, _, _, _, _ := newTestUseCase(t)

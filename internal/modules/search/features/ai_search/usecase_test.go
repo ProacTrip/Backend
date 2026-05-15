@@ -570,7 +570,7 @@ func TestUseCase_BothIntent_PartialHotelFailure(t *testing.T) {
 }
 
 // TestUseCase_BothIntent_BothFailures verifies that when BOTH searchers fail,
-// the use case returns ErrSearchFailed (502 Bad Gateway) instead of 500.
+// the use case returns ErrProviderUnavailable (502 Bad Gateway) instead of 500.
 func TestUseCase_BothIntent_BothFailures(t *testing.T) {
 	ctx := t.Context()
 
@@ -594,8 +594,8 @@ func TestUseCase_BothIntent_BothFailures(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected fatal error when both searchers fail, got nil")
 	}
-	if !errors.Is(err, domain.ErrSearchFailed) {
-		t.Errorf("expected ErrSearchFailed (502), got: %v", err)
+	if !errors.Is(err, domain.ErrProviderUnavailable) {
+		t.Errorf("expected ErrProviderUnavailable (502), got: %v", err)
 	}
 }
 

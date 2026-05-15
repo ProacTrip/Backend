@@ -29,6 +29,7 @@ type testUDDocRepo struct {
 	createFn      func(ctx context.Context, doc *domain.UserDocument) error
 	getByIDFn     func(ctx context.Context, id uuid.UUID) (*domain.UserDocument, error)
 	countByUserIDFn func(ctx context.Context, userID uuid.UUID) (int, error)
+	deleteFn      func(ctx context.Context, id uuid.UUID) error
 }
 
 func (m *testUDDocRepo) Create(ctx context.Context, doc *domain.UserDocument) error {
@@ -48,6 +49,12 @@ func (m *testUDDocRepo) CountByUserID(ctx context.Context, userID uuid.UUID) (in
 		return m.countByUserIDFn(ctx, userID)
 	}
 	return 0, nil
+}
+func (m *testUDDocRepo) Delete(ctx context.Context, id uuid.UUID) error {
+	if m.deleteFn != nil {
+		return m.deleteFn(ctx, id)
+	}
+	return nil
 }
 
 type testUDStorage struct {

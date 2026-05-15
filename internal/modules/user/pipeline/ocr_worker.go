@@ -76,6 +76,7 @@ type OCRWorker struct {
 	consumer          string
 	dlqStream         string
 	running           atomic.Bool
+	orphanDone        chan struct{} // cerrado cuando rescueOrphans termina
 }
 
 // NewOCRWorker crea un nuevo OCR worker.
@@ -102,11 +103,16 @@ func NewOCRWorker(
 	}
 }
 
-// IsRunning indica si la goroutine principal de consumo está activa.
-func (w *OCRWorker) IsRunning() bool { return w.running.Load() }
+// IsRunning indica si la goroutine principal de consumo O rescueOrphans está activa.
+func (w *OCRWorker) IsRunning() bool {
+	return w.running.Load() || !isClosed(w.orphanDone)
+}
 
 // Name devuelve un identificador legible.
 func (w *OCRWorker) Name() string { return "doc-ocr" }
+
+// OrphanDone expone el canal que se cierra cuando rescueOrphans termina.
+func (w *OCRWorker) OrphanDone() <-chan struct{} { return w.orphanDone }
 
 // Run inicia el consumer en background.
 func (w *OCRWorker) Run(ctx context.Context) error {
@@ -115,12 +121,15 @@ func (w *OCRWorker) Run(ctx context.Context) error {
 	}
 
 	w.running.Store(true)
+	w.orphanDone = make(chan struct{})
 	go func() {
 		defer w.running.Store(false)
 		w.consume(ctx)
 	}()
-
-	go w.rescueOrphans(ctx)
+	go func() {
+		defer close(w.orphanDone)
+		w.rescueOrphans(ctx)
+	}()
 
 	slog.Info("doc OCR worker started", "group", w.group, "consumer", w.consumer)
 	return nil

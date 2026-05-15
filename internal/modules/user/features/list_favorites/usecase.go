@@ -20,23 +20,6 @@ type FavoriteRepo interface {
 }
 
 // =============================================================================
-// Response
-// =============================================================================
-
-type FavoriteItem struct {
-	ID         string  `json:"id"`
-	EntityID   string  `json:"entity_id"`
-	EntityType string  `json:"entity_type"`
-	Title      string  `json:"title"`
-	Notes      *string `json:"notes,omitzero"`
-	CreatedAt  string  `json:"created_at"`
-}
-
-type Response struct {
-	Favorites []FavoriteItem `json:"favorites"`
-}
-
-// =============================================================================
 // UseCase
 // =============================================================================
 

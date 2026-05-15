@@ -144,7 +144,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 
 		if flightErr != nil && hotelErr != nil {
 			return nil, fmt.Errorf("%w: flights: %w | hotels: %w",
-				domain.ErrSearchFailed, flightErr, hotelErr)
+				domain.ErrProviderUnavailable, flightErr, hotelErr)
 		}
 	}
 

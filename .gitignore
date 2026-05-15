@@ -33,3 +33,4 @@ docker-compose.override.yml
 # Docs (optional - uncomment if needed)
 # docs/
 # *.md
+openspec/

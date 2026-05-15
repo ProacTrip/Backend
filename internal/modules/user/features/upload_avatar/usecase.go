@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/ProacTrip/Backend/internal/modules/user/domain"
+	"github.com/ProacTrip/Backend/internal/shared/ratelimit"
 	"github.com/google/uuid"
 )
 
@@ -25,17 +27,38 @@ type StorageService interface {
 
 // UseCaseDeps contiene las dependencias del caso de uso.
 type UseCaseDeps struct {
-	Storage StorageService
+	Storage     StorageService
+	RateLimiter *ratelimit.RateLimiter // opcional
 }
 
 // UseCase implementa la generación de URL prefirmada para subir avatar.
 type UseCase struct {
-	storage StorageService
+	storage     StorageService
+	rateLimiter *ratelimit.RateLimiter
 }
 
 // NewUseCase crea una nueva instancia del caso de uso.
 func NewUseCase(deps UseCaseDeps) *UseCase {
-	return &UseCase{storage: deps.Storage}
+	return &UseCase{
+		storage:     deps.Storage,
+		rateLimiter: deps.RateLimiter,
+	}
+}
+
+// CheckRateLimit verifica el rate limit para el usuario dado.
+// Sigue el patrón de upload_document: cheapest check, bloquea spam antes de CPU/IO.
+func (uc *UseCase) CheckRateLimit(ctx context.Context, userIDStr string) error {
+	if uc.rateLimiter == nil {
+		return nil
+	}
+	result, err := uc.rateLimiter.AuthenticatedAllow(ctx, userIDStr)
+	if err != nil {
+		return nil // degradar gracefully — permitir si falla la verificación
+	}
+	if !result.Allowed {
+		return domain.ErrRateLimitExceeded
+	}
+	return nil
 }
 
 // Execute genera una URL prefirmada de R2 para subir el avatar.

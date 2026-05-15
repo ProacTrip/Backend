@@ -65,7 +65,7 @@ func TestHandler_PassesRealIPToUseCase(t *testing.T) {
 
 	handler := NewHandler(uc)
 
-	body := `{"email":"realip@test.com","password":"password123"}`
+	body := `{"email":"realip@test.com","password":"Password123!"}`
 	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	req.RemoteAddr = "203.0.113.42:54321"
@@ -180,7 +180,7 @@ func TestHandler_IPv6Address_PassedCorrectly(t *testing.T) {
 
 	handler := NewHandler(uc)
 
-	body := `{"email":"ipv6@test.com","password":"password123"}`
+	body := `{"email":"ipv6@test.com","password":"Password123!"}`
 	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	req.RemoteAddr = "[2001:db8::1]:54321"

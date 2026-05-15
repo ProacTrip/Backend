@@ -52,8 +52,8 @@ func (r *UserRepository) UpsertProfile(ctx context.Context, profile *domain.User
 		INSERT INTO user_profiles (
 			user_id, email, first_name, last_name, phone, phone_verified,
 			avatar_url, current_location, bio, timezone_name,
-			language_code, currency_code, role, is_public, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+			language_code, currency_code, role, status, is_public, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 		ON CONFLICT (user_id) DO UPDATE SET
 			email = COALESCE(EXCLUDED.email, user_profiles.email),
 			first_name = COALESCE(EXCLUDED.first_name, user_profiles.first_name),
@@ -67,6 +67,7 @@ func (r *UserRepository) UpsertProfile(ctx context.Context, profile *domain.User
 			language_code = COALESCE(EXCLUDED.language_code, user_profiles.language_code),
 			currency_code = COALESCE(EXCLUDED.currency_code, user_profiles.currency_code),
 			role = EXCLUDED.role,
+			status = EXCLUDED.status,
 			is_public = EXCLUDED.is_public,
 			updated_at = EXCLUDED.updated_at
 	`
@@ -85,6 +86,7 @@ func (r *UserRepository) UpsertProfile(ctx context.Context, profile *domain.User
 		profile.LanguageCode,
 		profile.CurrencyCode,
 		profile.Role,
+		profile.Status,
 		profile.IsPublic,
 		profile.CreatedAt,
 		profile.UpdatedAt,
@@ -103,7 +105,7 @@ func (r *UserRepository) GetByUserID(ctx context.Context, userID uuid.UUID) (*do
 		SELECT up.id, up.user_id, up.email,
 		       up.first_name, up.last_name, up.date_of_birth, up.gender, up.nationality,
 		       up.phone, up.phone_verified, up.avatar_url, up.current_location, up.bio,
-		       up.timezone_name, up.language_code, up.currency_code, up.role, up.is_public,
+		       up.timezone_name, up.language_code, up.currency_code, up.role, up.status, up.is_public,
 		       up.created_at, up.updated_at
 		FROM user_profiles up
 		WHERE up.user_id = $1
@@ -131,6 +133,7 @@ func (r *UserRepository) GetByUserID(ctx context.Context, userID uuid.UUID) (*do
 		&p.LanguageCode,
 		&p.CurrencyCode,
 		&p.Role,
+		&p.Status,
 		&p.IsPublic,
 		&p.CreatedAt,
 		&p.UpdatedAt,
@@ -155,7 +158,7 @@ func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Use
 		SELECT up.id, up.user_id, up.email,
 		       up.first_name, up.last_name, up.date_of_birth, up.gender, up.nationality,
 		       up.phone, up.phone_verified, up.avatar_url, up.current_location, up.bio,
-		       up.timezone_name, up.language_code, up.currency_code, up.role, up.is_public,
+		       up.timezone_name, up.language_code, up.currency_code, up.role, up.status, up.is_public,
 		       up.created_at, up.updated_at
 		FROM user_profiles up
 		WHERE up.id = $1
@@ -183,6 +186,7 @@ func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Use
 		&p.LanguageCode,
 		&p.CurrencyCode,
 		&p.Role,
+		&p.Status,
 		&p.IsPublic,
 		&p.CreatedAt,
 		&p.UpdatedAt,
@@ -272,30 +276,6 @@ func (r *UserRepository) UpdateLocale(ctx context.Context, userID uuid.UUID, tim
 // =============================================================================
 // Actualizaciones (original UserRepository methods)
 // =============================================================================
-
-// UpdateStatus actualiza el estado del perfil
-// Ahora usa user_id en vez de id
-// TODO: Implement when user_profiles gets a status column.
-// Currently dead code — user_profiles has no 'status' column
-// and no callers exist in the codebase.
-func (r *UserRepository) UpdateStatus(ctx context.Context, userID uuid.UUID, status domain.UserProfileStatus) error {
-	query := `
-		UPDATE user_profiles
-		SET updated_at = NOW()
-		WHERE user_id = $1
-	`
-
-	result, err := r.db.Exec(ctx, query, userID)
-	if err != nil {
-		return fmt.Errorf("update profile status: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return domain.ErrProfileNotFound
-	}
-
-	return nil
-}
 
 // UpdateAvatar actualiza el avatar
 func (r *UserRepository) UpdateAvatar(ctx context.Context, userID uuid.UUID, avatarURL string) error {

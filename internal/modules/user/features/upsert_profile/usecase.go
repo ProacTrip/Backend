@@ -12,7 +12,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/ProacTrip/Backend/internal/modules/user/domain"
-	"github.com/ProacTrip/Backend/internal/modules/user/features/shared"
+	sharedUser "github.com/ProacTrip/Backend/internal/shared/user"
 )
 
 // =============================================================================
@@ -145,13 +145,12 @@ func (uc *UseCase) populatePrefsCache(ctx context.Context, userID uuid.UUID, pro
 	// Usar WithoutCancel para que la escritura de cache sobreviva la cancelación del contexto del handler
 	bgCtx := context.WithoutCancel(ctx)
 
-	if err := shared.SetProfilePrefs(bgCtx, uc.rdb,
-		userID.String(),
-		profile.CurrencyCode,
-		profile.LanguageCode,
-		"", // country_code not stored in profile
-		profile.TimezoneName,
-	); err != nil {
+	if err := sharedUser.SetProfilePrefs(bgCtx, uc.rdb, userID.String(), &sharedUser.Prefs{
+		Currency: profile.CurrencyCode,
+		Language: profile.LanguageCode,
+		// country_code not stored in profile — cache reads it from registration event
+		Timezone: profile.TimezoneName,
+	}); err != nil {
 		slog.WarnContext(bgCtx, "populate profile prefs cache failed",
 			slog.String("user_id", userID.String()),
 			slog.String("error", err.Error()),

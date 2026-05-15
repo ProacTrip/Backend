@@ -101,8 +101,8 @@ func TestHandler_EmptyMessage(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for empty message, got nil")
 	}
-	var he *echo.HTTPError
-	if !errors.As(err, &he) {
+	he, ok := errors.AsType[*echo.HTTPError](err)
+	if !ok {
 		t.Fatalf("expected *echo.HTTPError, got %T: %v", err, err)
 	}
 	if he.Code != http.StatusBadRequest {
@@ -188,8 +188,8 @@ func TestHandler_InvalidJSON(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid JSON, got nil")
 	}
-	var he *echo.HTTPError
-	if !errors.As(err, &he) {
+	he, ok := errors.AsType[*echo.HTTPError](err)
+	if !ok {
 		t.Fatalf("expected *echo.HTTPError, got %T: %v", err, err)
 	}
 	if he.Code != http.StatusBadRequest {

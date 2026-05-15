@@ -27,6 +27,17 @@ type AIInterpreter interface {
 	Parse(ctx context.Context, message string, history []ConversationMessage, language string) (*TravelIntent, error)
 }
 
+// AIFormatter is the port for formatting discovery recommendations into
+// natural language Spanish. It takes discovery candidates and returns
+// a human-readable explanation. Used by the discovery pipeline to turn
+// ranked candidates into the response message.
+type AIFormatter interface {
+	// Format formatea una lista de candidatos rankeados en lenguaje natural.
+	// candidates es la lista completa de candidatos provistos por el pipeline.
+	// Retorna un texto en español con las recomendaciones formateadas.
+	Format(ctx context.Context, candidates []any) (string, error)
+}
+
 // =============================================================================
 // TravelIntent — structured result of AI interpretation
 // =============================================================================

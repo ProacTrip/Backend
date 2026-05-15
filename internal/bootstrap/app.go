@@ -36,6 +36,7 @@ import (
 	sharederrors "github.com/ProacTrip/Backend/internal/shared/errors"
 	"github.com/ProacTrip/Backend/internal/shared/eventbus"
 	sharedhttp "github.com/ProacTrip/Backend/internal/shared/http"
+	sharedauth "github.com/ProacTrip/Backend/internal/shared/auth"
 	sharedmiddleware "github.com/ProacTrip/Backend/internal/shared/middleware"
 	"github.com/ProacTrip/Backend/internal/shared/ratelimit"
 
@@ -244,6 +245,11 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		RateLimiter:         rateLimiter,
 	})
 
+	// Auth DB migrations — idempotentes, usan IF NOT EXISTS / ADD COLUMN IF NOT EXISTS
+	if err := authModule.RunMigrations(appCtx, authPool); err != nil {
+		return nil, fmt.Errorf("auth migrations: %w", err)
+	}
+
 	// Auth Module (incluye DragonflyClient para idempotency)
 	authMod, err := authModule.NewModule(authModule.Config{
 		EnvResolver: environmentMod.EnvironmentResolver,
@@ -271,6 +277,7 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		RedisClient:   rdb,
 		EventBus:      eventBus,
 		EncryptionKey: encKeyBytes,
+		RateLimiter:   rateLimiter,
 	})
 	if err != nil {
 		return nil, err
@@ -298,7 +305,7 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	authMod.WireResendVerification(notifMod.SendVerificationEmailUseCase)
 
 	// Start user consumer (BACKGROUND - consume eventos de Dragonfly Streams)
-	if err := userMod.EventConsumer.Start(appCtx); err != nil {
+	if err := userMod.EventConsumer().Start(appCtx); err != nil {
 		slog.Warn("user event consumer failed to start", "error", err)
 		// No es fatal - el servidor puede iniciar sin el consumer
 	}
@@ -339,16 +346,16 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	convPgStore := searchConv.NewPgConversationStore(searchPool)
 
 	// SavedSearchResolver bridges user module's SavedSearchRepo to search module's SavedSearchProvider.
-	savedSearchResolver := userAdapters.NewSearchResolver(userMod.SavedSearchRepo)
+	savedSearchResolver := userAdapters.NewSearchResolver(userMod.SavedSearchRepo())
 
 	searchMod, err := searchModule.NewModule(searchModule.Config{
 		Provider:          nil, // created from SerpAPIKey/SerpAPITimeout
 		SerpAPIKey:        cfg.SerpAPIKey,
 		SerpAPITimeout:    30 * time.Second,
-		SearchCache:       df,
-		DetailsCache:      df,
-		HotelSearchCache:  df,
-		HotelDetailsCache: df,
+		SearchCache:       cache.NewMetricsDecorator(df),
+		DetailsCache:      cache.NewMetricsDecorator(df),
+		HotelSearchCache:  cache.NewMetricsDecorator(df),
+		HotelDetailsCache: cache.NewMetricsDecorator(df),
 		Repo:              nil, // created from PgxPool
 		PgxPool:           searchPool,
 		SearchTTL:         15 * time.Minute,
@@ -373,10 +380,12 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 
 	// Auth Middleware (silent refresh token rotation)
 	authMiddleware := authmiddleware.NewAuthMiddleware(authmiddleware.AuthConfig{
-		IsProduction: cfg.Server.Env == "production",
-		TokenSvc:     authMod.TokenService,
-		UserRepo:     authMod.Repository,
-		CookieDomain: cfg.CookieDomain,
+		IsProduction:       cfg.Server.Env == "production",
+		TokenSvc:           authMod.TokenService,
+		UserRepo:           authMod.Repository,
+		CookieDomain:       cfg.CookieDomain,
+		RedisClient:        rdb,
+		PermissionResolver: authMod.PermissionResolver,
 	})
 
 	// Rutas
@@ -462,6 +471,56 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	// User routes: /v1/user/profile/* (autenticado via cookie)
 	userGroup := e.Group("/v1/user", authMiddleware.Handle, authRateLimitMW)
 	userMod.RegisterRoutes(userGroup, authMiddleware.Handle)
+
+	// ========== DASHBOARD ROUTES ==========
+	// Todas las rutas del dashboard requieren PASETO válido + permiso users:read base.
+	// Endpoints de mutación añaden permisos más restrictivos (RequirePermission adicional).
+	dashboard := e.Group("/v1/dashboard",
+		authMiddleware.Handle,
+		authRateLimitMW,
+		sharedmiddleware.RequirePermission(sharedauth.PermUsersRead),
+	)
+
+	// Query endpoints — solo lectura, el permiso base del grupo es suficiente.
+	dashboard.GET("/users", authMod.ListUsersHandler.Handle)
+	dashboard.GET("/users/:id", authMod.UserDetailHandler.Handle)
+
+	// Account status — requiere users:write adicional.
+	dashboard.PUT("/users/:id/status",
+		authMod.AccountStatusHandler.Handle,
+		sharedmiddleware.RequirePermission(sharedauth.PermUsersWrite),
+	)
+
+	// Feature limits — lectura usa permiso del grupo, escritura requiere feature_limits:write.
+	dashboard.GET("/users/:id/feature-limits", authMod.FeatureLimitsHandler.HandleGetUserLimits)
+	dashboard.POST("/users/:id/feature-limits",
+		authMod.FeatureLimitsHandler.HandleSetUserLimit,
+		sharedmiddleware.RequirePermission(sharedauth.PermFeatureLimitsWrite),
+	)
+	dashboard.DELETE("/users/:id/feature-limits/:key",
+		authMod.FeatureLimitsHandler.HandleDeleteUserLimit,
+		sharedmiddleware.RequirePermission(sharedauth.PermFeatureLimitsWrite),
+	)
+	dashboard.GET("/roles/:id/feature-limits", authMod.FeatureLimitsHandler.HandleGetRoleDefaults)
+	dashboard.POST("/roles/:id/feature-limits",
+		authMod.FeatureLimitsHandler.HandleSetRoleDefault,
+		sharedmiddleware.RequirePermission(sharedauth.PermFeatureLimitsWrite),
+	)
+	dashboard.DELETE("/roles/:id/feature-limits/:key",
+		authMod.FeatureLimitsHandler.HandleDeleteRoleDefault,
+		sharedmiddleware.RequirePermission(sharedauth.PermFeatureLimitsWrite),
+	)
+
+	// Permission overrides — lectura usa permiso del grupo, escritura requiere permissions:write.
+	dashboard.GET("/users/:id/permission-overrides", authMod.PermissionOverridesHandler.HandleListOverrides)
+	dashboard.POST("/users/:id/permission-overrides",
+		authMod.PermissionOverridesHandler.HandleCreateOverride,
+		sharedmiddleware.RequirePermission(sharedauth.PermPermsWrite),
+	)
+	dashboard.DELETE("/users/:id/permission-overrides/:overrideId",
+		authMod.PermissionOverridesHandler.HandleDeleteOverride,
+		sharedmiddleware.RequirePermission(sharedauth.PermPermsWrite),
+	)
 
 	// Start conversation consumer (BACKGROUND - persiste conversaciones en PG via streams)
 	if searchMod.ConvConsumer != nil {
@@ -551,8 +610,8 @@ func (app *App) readyCheckHandler(rdb *redis.Client, poolMgr *database.PoolManag
 			}
 		}
 
-		if app.UserModule != nil && app.UserModule.EventConsumer != nil {
-			uc := app.UserModule.EventConsumer
+		if app.UserModule != nil && app.UserModule.EventConsumer() != nil {
+			uc := app.UserModule.EventConsumer()
 			if uc.IsRunning() {
 				checks[uc.Name()] = "ok"
 			} else {

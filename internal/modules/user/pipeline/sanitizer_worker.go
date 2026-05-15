@@ -50,13 +50,14 @@ type SanitizerR2Client interface {
 // SanitizerWorker consume el stream {events}:doc:sanitize, descarga archivos raw
 // de R2, elimina metadatos/EXIF, y produce al stream doc:ocr.
 type SanitizerWorker struct {
-	rdb       *redis.Client
-	r2        SanitizerR2Client
-	docRepo   DocumentUpdater
-	group     string
-	consumer  string
-	dlqStream string
-	running   atomic.Bool
+	rdb        *redis.Client
+	r2         SanitizerR2Client
+	docRepo    DocumentUpdater
+	group      string
+	consumer   string
+	dlqStream  string
+	running    atomic.Bool
+	orphanDone chan struct{} // cerrado cuando rescueOrphans termina
 }
 
 // NewSanitizerWorker crea un nuevo sanitizer de documentos.
@@ -71,11 +72,16 @@ func NewSanitizerWorker(rdb *redis.Client, r2 SanitizerR2Client, docRepo Documen
 	}
 }
 
-// IsRunning indica si la goroutine principal de consumo está activa.
-func (s *SanitizerWorker) IsRunning() bool { return s.running.Load() }
+// IsRunning indica si la goroutine principal de consumo O rescueOrphans está activa.
+func (s *SanitizerWorker) IsRunning() bool {
+	return s.running.Load() || !isClosed(s.orphanDone)
+}
 
 // Name devuelve un identificador legible.
 func (s *SanitizerWorker) Name() string { return "doc-sanitizer" }
+
+// OrphanDone expone el canal que se cierra cuando rescueOrphans termina.
+func (s *SanitizerWorker) OrphanDone() <-chan struct{} { return s.orphanDone }
 
 // Run inicia el consumer en background.
 func (s *SanitizerWorker) Run(ctx context.Context) error {
@@ -87,12 +93,15 @@ func (s *SanitizerWorker) Run(ctx context.Context) error {
 	_ = eventbus.EnsureConsumerGroup(ctx, s.rdb, docOCRStream, docOCRGroup)
 
 	s.running.Store(true)
+	s.orphanDone = make(chan struct{})
 	go func() {
 		defer s.running.Store(false)
 		s.consume(ctx)
 	}()
-
-	go s.rescueOrphans(ctx)
+	go func() {
+		defer close(s.orphanDone)
+		s.rescueOrphans(ctx)
+	}()
 
 	slog.Info("doc sanitizer worker started", "group", s.group, "consumer", s.consumer)
 	return nil

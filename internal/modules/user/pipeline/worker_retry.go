@@ -138,3 +138,18 @@ func MoveToDLQ(ctx context.Context, rdb *redis.Client, sourceStream, sourceGroup
 
 	return nil
 }
+
+// isClosed verifica si un canal está cerrado sin bloquear.
+// Usado por IsRunning() para reflejar el estado de las goroutines orphans.
+// Un canal nil (no inicializado) retorna true — Run() aún no fue llamado.
+func isClosed(ch chan struct{}) bool {
+	if ch == nil {
+		return true
+	}
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
+}

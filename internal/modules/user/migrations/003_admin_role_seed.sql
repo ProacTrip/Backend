@@ -4,9 +4,6 @@
 -- Soporta distinción client/admin para verificación de documentos.
 -- =============================================================================
 
--- +migrate Up
--- =============================================================================
-
 -- 1. Agregar columna role con CHECK constraint
 ALTER TABLE user_profiles
     ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'client';
@@ -28,6 +25,3 @@ ALTER TABLE user_profiles
 
 ALTER TABLE user_profiles
     DROP COLUMN IF EXISTS role;
-
--- +migrate Down
-ALTER TABLE user_profiles DROP COLUMN IF EXISTS role CASCADE;

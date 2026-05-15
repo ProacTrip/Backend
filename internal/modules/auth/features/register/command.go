@@ -16,7 +16,8 @@ type Command struct {
 }
 
 // Validate valida los campos del comando de registro.
-// Email requerido + formato RFC 5322. Password requerido + mínimo 8 caracteres.
+// Email requerido + formato RFC 5322. Password requerido + mínimo 8 caracteres
+// y formato seguro (mayúscula, minúscula, dígito, carácter especial).
 func (c *Command) Validate() error {
 	if c.Email == "" {
 		return fmt.Errorf("%w: email is required", domain.ErrInvalidEmail)
@@ -29,6 +30,38 @@ func (c *Command) Validate() error {
 	}
 	if len(c.Password) < 8 {
 		return fmt.Errorf("%w: password must be at least 8 characters", domain.ErrPasswordTooShort)
+	}
+	if err := validatePasswordFormat(c.Password); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validatePasswordFormat verifica que la contraseña cumpla con los requisitos
+// de complejidad: al menos una mayúscula, una minúscula, un dígito y un
+// carácter especial.
+func validatePasswordFormat(password string) error {
+	var (
+		hasUpper   bool
+		hasLower   bool
+		hasDigit   bool
+		hasSpecial bool
+	)
+	for _, r := range password {
+		switch {
+		case r >= 'A' && r <= 'Z':
+			hasUpper = true
+		case r >= 'a' && r <= 'z':
+			hasLower = true
+		case r >= '0' && r <= '9':
+			hasDigit = true
+		default:
+			hasSpecial = true
+		}
+	}
+	if !hasUpper || !hasLower || !hasDigit || !hasSpecial {
+		return fmt.Errorf("%w: la contraseña debe contener al menos una mayúscula, una minúscula, un dígito y un carácter especial",
+			domain.ErrInvalidPassword)
 	}
 	return nil
 }

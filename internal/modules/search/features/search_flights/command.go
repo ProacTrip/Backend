@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
+	searchshared "github.com/ProacTrip/Backend/internal/modules/search/shared"
 )
 
 // =============================================================================
@@ -282,9 +283,9 @@ func (cmd *Command) ToDomain() domain.FlightSearchRequest {
 		InfantsInSeat:          cmd.InfantsInSeat,
 		InfantsOnLap:           cmd.InfantsOnLap,
 		TravelClass:            cmd.TravelClass,
-		GL:                     ptrStr(cmd.GL),
-		HL:                     ptrStr(cmd.HL),
-		Currency:               ptrStr(cmd.Currency),
+		GL:                     searchshared.PtrOrEmpty(cmd.GL),
+		HL:                     searchshared.PtrOrEmpty(cmd.HL),
+		Currency:               searchshared.PtrOrEmpty(cmd.Currency),
 		Bags:                   cmd.Bags,
 		MaxPrice:               cmd.MaxPrice,
 		SortBy:                 cmd.SortBy,
@@ -325,11 +326,4 @@ func (cmd *Command) ToDomain() domain.FlightSearchRequest {
 	return req
 }
 
-// ptrStr returns the dereferenced string, or "" if nil.
-// Used to convert *string command fields to plain string domain fields.
-func ptrStr(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
+

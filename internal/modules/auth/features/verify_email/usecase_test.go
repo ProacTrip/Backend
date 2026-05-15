@@ -213,10 +213,9 @@ func TestExecute_UsuarioNoEncontrado_RetornaErrUserNotFound(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Escenario 4: ya_verificado — el email ya está verificado. El usecase actual
-// no tiene early-return para este caso (TODO: optimizar), así que
-// VerifyEmail() y Update() se ejecutan de forma idempotente y los tokens
-// se generan correctamente.
+// Escenario 4: ya_verificado — el email ya está verificado. El usecase tiene
+// early-return: saltea VerifyEmail() y Update() cuando EmailVerified ya es true,
+// generando directamente los tokens de sesión.
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestExecute_YaVerificado_FlujoIdempotenteExitoso(t *testing.T) {
@@ -241,7 +240,7 @@ func TestExecute_YaVerificado_FlujoIdempotenteExitoso(t *testing.T) {
 		t.Fatal("Execute() devolvió respuesta nil")
 	}
 
-	// VerifyEmail es idempotente: EmailVerified sigue siendo true
+	// EmailVerified sigue siendo true
 	if !user.EmailVerified {
 		t.Error("EmailVerified = false, debería seguir siendo true")
 	}
@@ -249,13 +248,12 @@ func TestExecute_YaVerificado_FlujoIdempotenteExitoso(t *testing.T) {
 		t.Errorf("Status = %q, se esperaba %q", user.Status, domain.StatusActive)
 	}
 
-	// Update fue llamado (comportamiento actual; TODO: early-return para
-	// evitar escritura innecesaria cuando EmailVerified ya es true)
-	if !repo.updateCalled {
-		t.Error("Update() debería haber sido llamado (comportamiento actual)")
+	// Update NO fue llamado: el early-return evita la escritura innecesaria
+	if repo.updateCalled {
+		t.Error("Update() NO debería haberse llamado (early-return para email ya verificado)")
 	}
 
-	// Tokens generados
+	// Tokens generados correctamente
 	if resp.AccessToken == "" || resp.RefreshToken == "" {
 		t.Error("tokens deberían haberse generado incluso para usuario ya verificado")
 	}

@@ -16,7 +16,8 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	sharedEnv "github.com/ProacTrip/Backend/internal/shared/environment"
-	userprefs "github.com/ProacTrip/Backend/internal/modules/user/features/shared"
+	sharedUser "github.com/ProacTrip/Backend/internal/shared/user"
+	searchshared "github.com/ProacTrip/Backend/internal/modules/search/shared"
 )
 
 // =============================================================================
@@ -76,7 +77,7 @@ func ResolveSearchDefaults(
 	// Tier 1: If ANY explicit param is set, the client wins completely.
 	// This prevents mixed-mode where some defaults bleed through.
 	if explicitGL != nil || explicitHL != nil || explicitCurrency != nil {
-		return ptrOrEmpty(explicitGL), ptrOrEmpty(explicitHL), ptrOrEmpty(explicitCurrency)
+		return searchshared.PtrOrEmpty(explicitGL), searchshared.PtrOrEmpty(explicitHL), searchshared.PtrOrEmpty(explicitCurrency)
 	}
 
 	// Guard: if Redis is nil (tests, AI not configured), skip to Tier 4 config fallback.
@@ -86,16 +87,16 @@ func ResolveSearchDefaults(
 
 	// Tier 2: Authenticated user → profile prefs cache
 	if userID != "" {
-		cur, lang, country, _, found, err := userprefs.GetProfilePrefs(ctx, rdb, userID)
+		prefs, err := sharedUser.GetProfilePrefs(ctx, rdb, userID)
 		if err != nil {
 			slog.WarnContext(ctx, "resolve defaults: profile prefs lookup failed, falling through",
 				slog.String("user_id", userID),
 				slog.String("error", err.Error()),
 			)
 		}
-		if found {
+		if prefs != nil {
 			// GL = country code, HL = language, Currency = currency
-			return country, lang, cur
+			return prefs.CountryCode, prefs.Language, prefs.Currency
 		}
 	}
 
@@ -145,12 +146,4 @@ func resolveFromEnvCache(ctx context.Context, rdb *redis.Client, ip string) (gl,
 	}
 
 	return loc.CountryCode, loc.Language, loc.Currency, true
-}
-
-// ptrOrEmpty returns the dereferenced value or "" if nil.
-func ptrOrEmpty(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }

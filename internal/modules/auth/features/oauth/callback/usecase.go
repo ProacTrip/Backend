@@ -139,6 +139,9 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 				return nil, domain.ErrAccountLocked
 			case domain.StatusSuspended:
 				return nil, domain.ErrAccountSuspended
+			case domain.StatusDisabled:
+				// AS-SPEC-007: OAuth callback rechaza cuentas deshabilitadas.
+				return nil, domain.ErrAccountDisabled
 			case domain.StatusPendingVerification:
 				// Usuario se registró con email+password pero nunca verificó.
 				// Google ya verificó el email → activamos la cuenta automáticamente.

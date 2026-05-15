@@ -90,16 +90,11 @@ func TestHotelSearchResponseJSONRoundtrip(t *testing.T) {
 		t.Fatalf("json.Unmarshal failed: %v", err)
 	}
 
-	// Top-level keys
-	for _, key := range []string{"type", "results_state", "properties", "brands", "pagination", "from_cache"} {
+	// Top-level keys — from_cache/cached_at deben estar presentes con false/null
+	for _, key := range []string{"type", "results_state", "properties", "brands", "pagination", "from_cache", "cached_at"} {
 		if _, ok := generic[key]; !ok {
 			t.Errorf("missing top-level key %q in JSON output", key)
 		}
-	}
-
-	// CachedAt should be omitted when nil
-	if _, ok := generic["cached_at"]; ok {
-		t.Error("cached_at should be omitted when nil")
 	}
 
 	// Property fields
@@ -282,8 +277,14 @@ func TestHotelDetailsResponseJSONRoundtrip(t *testing.T) {
 	if _, ok := generic["capacity"]; ok {
 		t.Error("capacity should be omitted when nil")
 	}
-	if _, ok := generic["cached_at"]; ok {
-		t.Error("cached_at should be omitted when nil")
+	// from_cache/cached_at deben estar presentes con false/null
+	if v, ok := generic["from_cache"]; !ok {
+		t.Error("from_cache should be present in JSON output")
+	} else if v != false {
+		t.Errorf("from_cache should be false, got %v", v)
+	}
+	if _, ok := generic["cached_at"]; !ok {
+		t.Error("cached_at should be present in JSON output (as null)")
 	}
 
 	// Roundtrip

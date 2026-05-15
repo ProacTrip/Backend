@@ -1,4 +1,4 @@
-// Adapter que implementa search.SavedSearchProvider usando el repositorio
+// Adapter que implementa shared/search.SavedSearchProvider usando el repositorio
 // de búsquedas guardadas del módulo user. Resuelve búsquedas guardadas
 // para el módulo search sin crear un acoplamiento circular.
 package adapters
@@ -8,12 +8,12 @@ import (
 
 	"github.com/google/uuid"
 
-	searchDomain "github.com/ProacTrip/Backend/internal/modules/search/domain"
+	sharedSearch "github.com/ProacTrip/Backend/internal/shared/search"
 	"github.com/ProacTrip/Backend/internal/modules/user/domain"
 )
 
 // Compile-time interface check
-var _ searchDomain.SavedSearchProvider = (*SearchResolver)(nil)
+var _ sharedSearch.SavedSearchProvider = (*SearchResolver)(nil)
 
 // SearchResolver adapts the user module's SavedSearchRepository to
 // the search module's SavedSearchProvider interface.
@@ -27,7 +27,7 @@ func NewSearchResolver(repo domain.SavedSearchRepository) *SearchResolver {
 }
 
 // GetByID retrieves a saved search by ID and converts it to the search module's format.
-func (r *SearchResolver) GetByID(ctx context.Context, searchID uuid.UUID) (*searchDomain.SavedSearchData, error) {
+func (r *SearchResolver) GetByID(ctx context.Context, searchID uuid.UUID) (*sharedSearch.SavedSearchData, error) {
 	ss, err := r.repo.GetByID(ctx, searchID)
 	if err != nil {
 		return nil, err
@@ -43,7 +43,7 @@ func (r *SearchResolver) GetByID(ctx context.Context, searchID uuid.UUID) (*sear
 		name = *ss.Name
 	}
 
-	return &searchDomain.SavedSearchData{
+	return &sharedSearch.SavedSearchData{
 		ID:                ss.ID,
 		UserID:            ss.UserID,
 		Name:              name,

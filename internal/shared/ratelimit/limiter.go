@@ -108,6 +108,66 @@ func (rl *RateLimiter) ProviderAllow(ctx context.Context, provider string) (Rate
 		return RateLimitResult{Allowed: false}, fmt.Errorf("unknown provider: %s", provider)
 	}
 
+	windowKey := providerWindowKey(pl)
+	key := fmt.Sprintf("provider:%s:%s", provider, windowKey)
+	return rl.AllowWindow(ctx, key, pl.MaxRequests, pl.Window)
+}
+
+// ProviderStatus devuelve el estado actual del rate limit de un provider
+// SIN consumir un token. Usa Redis GET para leer el contador actual sin INCR.
+// El resultado contiene la misma estructura que ProviderAllow pero Allowed
+// se determina comparando Current < Limit (en lugar de Current <= Limit,
+// porque este es un peek, no un intento de consumo).
+func (rl *RateLimiter) ProviderStatus(ctx context.Context, provider string) (RateLimitResult, error) {
+	pl, ok := rl.cfg.Providers[provider]
+	if !ok {
+		return RateLimitResult{Allowed: false}, fmt.Errorf("unknown provider: %s", provider)
+	}
+
+	windowKey := providerWindowKey(pl)
+	key := fmt.Sprintf("%s:provider:%s:%s", HashtagRateLimit, provider, windowKey)
+
+	// Leer el contador actual sin incrementar (GET, no INCR)
+	current, err := rl.rdb.Get(ctx, key).Int64()
+	if err == redis.Nil {
+		// No hay requests previos — límite completo disponible
+		return RateLimitResult{
+			Allowed:   true,
+			Current:   0,
+			Limit:     int64(pl.MaxRequests),
+			Remaining: int64(pl.MaxRequests),
+			ResetTTL:  pl.Window,
+		}, nil
+	}
+	if err != nil {
+		return RateLimitResult{}, fmt.Errorf("provider status: %w", err)
+	}
+
+	limit := int64(pl.MaxRequests)
+	remaining := limit - current
+	if remaining < 0 {
+		remaining = 0
+	}
+
+	// Obtener TTL para ResetTTL
+	ttl, err := rl.rdb.TTL(ctx, key).Result()
+	if err != nil {
+		ttl = pl.Window // fallback al window completo
+	}
+	if ttl < 0 {
+		ttl = pl.Window // key existe pero sin TTL — usar window
+	}
+
+	return RateLimitResult{
+		Allowed:   current < limit,
+		Current:   current,
+		Limit:     limit,
+		Remaining: remaining,
+		ResetTTL:  ttl,
+	}, nil
+}
+
+func providerWindowKey(pl ProviderLimit) string {
 	var windowKey string
 	switch pl.Window {
 	case 24 * time.Hour:
@@ -117,7 +177,5 @@ func (rl *RateLimiter) ProviderAllow(ctx context.Context, provider string) (Rate
 	default:
 		windowKey = fmt.Sprintf("%d", time.Now().UTC().Unix()/int64(pl.Window.Seconds()))
 	}
-
-	key := fmt.Sprintf("provider:%s:%s", provider, windowKey)
-	return rl.AllowWindow(ctx, key, pl.MaxRequests, pl.Window)
+	return windowKey
 }

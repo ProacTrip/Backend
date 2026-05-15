@@ -4,9 +4,6 @@
 -- búsquedas guardadas para compatibilidad con search_ai.
 -- =============================================================================
 
--- +migrate Up
--- =============================================================================
-
 -- 1. Expandir CHECK constraint de user_favorites para los 8 tipos de entidad
 ALTER TABLE user_favorites
     DROP CONSTRAINT IF EXISTS chk_favorite_entity_type;
@@ -50,7 +47,3 @@ ALTER TABLE user_favorites
     ADD CONSTRAINT chk_favorite_entity_type CHECK (
         entity_type IN ('hotel', 'flight', 'destination')
     );
-
--- +migrate Down
-ALTER TABLE saved_searches DROP COLUMN IF EXISTS search_type CASCADE;
-ALTER TABLE saved_searches DROP COLUMN IF EXISTS parameters_version CASCADE;

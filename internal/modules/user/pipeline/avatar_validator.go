@@ -51,12 +51,13 @@ type R2Client interface {
 // AvatarValidator consume el stream {events}:avatar:validate, valida
 // archivos en R2 y actualiza el avatar del usuario.
 type AvatarValidator struct {
-	rdb       *redis.Client
-	repo      domain.ProfileRepository
-	group     string
-	consumer  string
-	dlqStream string
-	running   atomic.Bool
+	rdb        *redis.Client
+	repo       domain.ProfileRepository
+	group      string
+	consumer   string
+	dlqStream  string
+	running    atomic.Bool
+	orphanDone chan struct{} // cerrado cuando rescueOrphans termina
 }
 
 // NewAvatarValidator crea un nuevo validador de avatares.
@@ -70,11 +71,16 @@ func NewAvatarValidator(rdb *redis.Client, repo domain.ProfileRepository) *Avata
 	}
 }
 
-// IsRunning indica si la goroutine principal de consumo está activa.
-func (v *AvatarValidator) IsRunning() bool { return v.running.Load() }
+// IsRunning indica si la goroutine principal de consumo O rescueOrphans está activa.
+func (v *AvatarValidator) IsRunning() bool {
+	return v.running.Load() || !isClosed(v.orphanDone)
+}
 
 // Name devuelve un identificador legible para reportes de health check.
 func (v *AvatarValidator) Name() string { return "avatar-validator" }
+
+// OrphanDone expone el canal que se cierra cuando rescueOrphans termina.
+func (v *AvatarValidator) OrphanDone() <-chan struct{} { return v.orphanDone }
 
 // Run inicia el consumer en background. Retorna inmediatamente.
 // Se detiene cuando ctx es cancelado.
@@ -85,13 +91,17 @@ func (v *AvatarValidator) Run(ctx context.Context) error {
 	}
 
 	v.running.Store(true)
+	v.orphanDone = make(chan struct{})
 	go func() {
 		defer v.running.Store(false)
 		v.consume(ctx)
 	}()
 
 	// Start orphan rescue worker (XAUTOCLAIM)
-	go v.rescueOrphans(ctx)
+	go func() {
+		defer close(v.orphanDone)
+		v.rescueOrphans(ctx)
+	}()
 
 	slog.Info("avatar validator started", "group", v.group, "consumer", v.consumer)
 	return nil

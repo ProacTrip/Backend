@@ -167,7 +167,7 @@ Formato **RFC 9457 Problem Details**:
 
 ```json
 {
-  "type": "validation_error",
+  "type": "https://api.proactrip.com/errors/validation-error",
   "title": "Validation Error",
   "status": 400,
   "detail": "El campo 'message' es requerido",
@@ -182,6 +182,7 @@ Formato **RFC 9457 Problem Details**:
 |--------|-------------|
 | `X-Trace-Id` | UUID v7 para trazabilidad. Asignado globalmente por middleware, nunca por handlers individuales |
 | `traceparent` | W3C Trace Context |
+| `X-Request-Id` | ID de request no-W3C. Para correlación de logs a nivel de aplicación |
 
 ---
 
@@ -662,6 +663,79 @@ Cuando el intent es `"both"` y uno de los dos buscadores falla pero el otro tien
 | `"hotels"` | Búsqueda de hoteles completa | `flights: null`, `hotels: {...}` | Renderizar resultados de hoteles con los mismos componentes de `POST /v1/search/hotels` |
 | `"both"` | Búsqueda combinada de vuelos y hoteles | `flights: {...}`, `hotels: {...}` | Renderizar ambos resultados. Si hay `flights_error` o `hotels_error`, mostrar mensaje de partial failure |
 
+### Discovery Mode
+
+Cuando el sistema detecta que el usuario quiere descubrir destinos sin criterios específicos (frases como "recomiéndame playa", "a dónde viajar", "barato en verano"), se activa el modo discovery. Este modo **no llama a SerpAPI** — en su lugar, genera recomendaciones de destinos basadas en datos del usuario (favoritos, búsquedas guardadas) y restricciones extraídas del lenguaje natural.
+
+#### Request con Discovery Mode
+
+```bash
+curl -X POST {base_url}/ai \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "recomiéndame playa barato en verano"
+  }'
+```
+
+#### Response con Discovery Mode
+
+```json
+{
+  "mode": "discovery",
+  "intent": "discovery",
+  "confidence": 0.65,
+  "message": "Para tu búsqueda \"recomiéndame playa barato en verano\", podrías considerar Punta Cana (República Dominicana), Cancún (México), o Bali (Indonesia) — todos destinos con playa, presupuesto accesible.",
+  "candidates": [
+    {
+      "destination": "Punta Cana",
+      "country": "República Dominicana",
+      "region": "caribbean",
+      "tags": ["beach", "all-inclusive"],
+      "budget_tier": "medium",
+      "best_months": [12, 1, 2, 3, 4],
+      "score": 0.92,
+      "reasons": ["playa caribeña", "presupuesto medio", "temporada seca en verano"],
+      "source": "user_favorite"
+    }
+  ],
+  "total_candidates": 3,
+  "needs_clarification": false,
+  "clarification_question": ""
+}
+```
+
+#### Discovery Response Fields
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `mode` | string | `"discovery"` cuando el pipeline de discovery está activo. `"exact"` para búsquedas concretas (vuelos, hoteles). Omitido en respuestas de búsqueda exacta (`omitzero`) |
+| `candidates[]` | array | Lista de destinos candidatos (top 3-5). Cada candidato incluye `destination`, `country`, `region`, `tags`, `budget_tier`, `best_months`, `score`, `reasons`, y `source` |
+| `needs_clarification` | boolean | `true` cuando el sistema necesita más información del usuario antes de recomendar. En este caso, `candidates` estará vacío |
+| `clarification_question` | string | Pregunta de seguimiento generada por el sistema cuando `needs_clarification` es `true`. Ej: "¿Qué presupuesto tenés en mente?" |
+| `total_candidates` | integer | Número total de candidatos encontrados antes del truncado (máx 5) |
+| `confidence` | float | Confianza del detector de intención (0.0 a 1.0) en que la consulta es de tipo discovery |
+
+> **Nota:** Discovery mode devuelve recomendaciones de destinos **sin llamar a SerpAPI**. Los candidatos se generan a partir de datos del usuario (favoritos, búsquedas guardadas) o fuentes curadas. Para búsquedas concretas de vuelos y hoteles, el sistema usa el modo exact search estándar que sí llama a SerpAPI.
+
+#### Discovery + Clarification
+
+Cuando el sistema no tiene suficiente información para recomendar (consulta muy ambigua, sin restricciones), pide aclaración:
+
+```json
+{
+  "mode": "discovery",
+  "intent": "discovery",
+  "confidence": 0.45,
+  "message": "¿Qué presupuesto tenés en mente? ¿Algo económico, medio o te das un gusto?",
+  "candidates": [],
+  "total_candidates": 0,
+  "needs_clarification": true,
+  "clarification_question": "¿Qué presupuesto tenés en mente? ¿Algo económico, medio o te das un gusto?"
+}
+```
+
+> **Importante para el frontend:** Cuando `needs_clarification` es `true`, mostrar `message` o `clarification_question` como pregunta de seguimiento. Los campos `candidates` estarán vacíos. Cuando el usuario responda, enviar un nuevo request con `conversation_id` para continuar el flujo.
+
 ### Resolución IATA
 
 Cuando la AI interpreta un mensaje, puede devolver nombres de ciudad en lugar de códigos IATA. El backend resuelve estos nombres a códigos de aeropuerto usando un sistema de 3 niveles:
@@ -791,7 +865,7 @@ Formato **RFC 9457 Problem Details**:
 
 ```json
 {
-  "type": "rate_limit_exceeded",
+  "type": "https://api.proactrip.com/errors/rate-limit-exceeded",
   "title": "Too Many Requests",
   "status": 429,
   "detail": "Demasiadas peticiones. Esperá 60 segundos antes de reintentar.",
@@ -810,6 +884,7 @@ Todas las respuestas incluyen estos headers (independientemente del status code)
 | `RateLimit-Remaining` | Peticiones restantes en la ventana actual |
 | `RateLimit-Reset` | Segundos hasta que se reinicia la ventana |
 | `Retry-After` | Segundos a esperar antes de reintentar (solo en respuestas 429) |
+| `X-Request-Id` | ID de request no-W3C para correlación de logs |
 
 ---
 
@@ -896,7 +971,7 @@ POST /v1/search/ai
   → 503 Service Unavailable
 
 {
-  "type": "service_unavailable",
+  "type": "https://api.proactrip.com/errors/service-unavailable",
   "title": "Service Unavailable",
   "status": 503,
   "detail": "AI search no disponible — el servicio de IA no está configurado en este entorno",

@@ -88,11 +88,12 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 	cacheKey := generateCacheKey(domainReq)
 
 	// 4. Try cache
-	if cached, err := uc.cache.Get(ctx, cacheKey); err == nil && cached != "" {
+		if cached, err := uc.cache.Get(ctx, cacheKey); err == nil && cached != "" {
 		var resp Response
 		if err := json.Unmarshal([]byte(cached), &resp); err == nil {
 			resp.FromCache = true
-			resp.CachedAt = new(time.Now())
+			// CachedAt se preserva del valor cacheado — no se recalcula time.Now()
+			// (el unmarshal ya pobló resp.CachedAt desde el JSON cacheado)
 
 			// Capture full lengths before slicing (for history + pagination gating)
 			resultCount := len(resp.BestFlights) + len(resp.OtherFlights)
@@ -101,10 +102,10 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 			// Fire-and-forget: save to search history async (full count)
 			// Use WithoutCancel so the goroutine survives handler return.
 			saveCtx := context.WithoutCancel(ctx)
-			elapsedMs := int(time.Since(start).Milliseconds())
 			uc.wg.Go(func() {
+				e := int(time.Since(start).Milliseconds())
 				uc.saveSearchHistory(saveCtx, domainReq, resultCount, true,
-					new(elapsedMs), cmd.IPAddress, cmd.UserAgent)
+					&e, cmd.IPAddress, cmd.UserAgent)
 			})
 
 			// Slice response to return only the requested page
@@ -139,13 +140,14 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 	}
 
 	// 7. Cache the full (uncut) response — marshal before slicing to avoid data race
+	resp.CachedAt = new(time.Now()) // timestamp del fetch original
 	fullData, marshalErr := json.Marshal(resp)
 	if marshalErr != nil {
 		slog.ErrorContext(ctx, "cache marshal failed",
 			slog.String("key", cacheKey),
 			slog.Any("err", marshalErr),
 		)
-	} else {
+	} else if cacheKey != "" {
 		bgCtx := context.WithoutCancel(ctx)
 		uc.wg.Go(func() {
 			if err := uc.cache.Set(bgCtx, cacheKey, string(fullData), uc.searchTTL); err != nil {
@@ -159,11 +161,11 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 
 	// 8. Save to search history async — fire-and-forget (full count before slicing)
 	resultCount := len(resp.BestFlights) + len(resp.OtherFlights)
-	elapsedMs := int(time.Since(start).Milliseconds())
 	saveCtx := context.WithoutCancel(ctx)
 	uc.wg.Go(func() {
+		e := int(time.Since(start).Milliseconds())
 		uc.saveSearchHistory(saveCtx, domainReq, resultCount, false,
-			new(elapsedMs), cmd.IPAddress, cmd.UserAgent)
+			&e, cmd.IPAddress, cmd.UserAgent)
 	})
 
 	// 9. Slice response and build pagination meta
@@ -194,7 +196,7 @@ func generateCacheKey(req domain.FlightSearchRequest) string {
 			req.TripType, req.Departure, req.Arrival,
 			req.OutboundDate, req.ReturnDate)
 	}
-	return "flights:" + domain.HashKey(raw)
+	return "{search}:flights:" + domain.HashKey(raw)
 }
 
 // =============================================================================

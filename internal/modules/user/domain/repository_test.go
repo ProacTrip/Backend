@@ -13,12 +13,12 @@ import (
 
 // profileRepoStub satisface ProfileRepository (compile-time)
 type profileRepoStub struct {
-	createFn      func(context.Context, *UserProfile) error
-	getByUserIDFn func(context.Context, uuid.UUID) (*UserProfile, error)
-	getByIDFn     func(context.Context, uuid.UUID) (*UserProfile, error)
-	updateFn      func(context.Context, *UserProfile) error
-	updateLocaleFn  func(context.Context, uuid.UUID, string, string, string, string) error
-	updateAvatarFn  func(context.Context, uuid.UUID, string) error
+	createFn       func(context.Context, *UserProfile) error
+	getByUserIDFn  func(context.Context, uuid.UUID) (*UserProfile, error)
+	getByIDFn      func(context.Context, uuid.UUID) (*UserProfile, error)
+	updateFn       func(context.Context, *UserProfile) error
+	updateLocaleFn func(context.Context, uuid.UUID, string, string, string, string) error
+	updateAvatarFn func(context.Context, uuid.UUID, string) error
 }
 
 func (s *profileRepoStub) Create(ctx context.Context, p *UserProfile) error {

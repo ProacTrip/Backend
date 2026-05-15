@@ -4,6 +4,7 @@ package consumer
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync/atomic"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/ProacTrip/Backend/internal/modules/user/domain"
 	"github.com/ProacTrip/Backend/internal/modules/user/features/upsert_profile"
+	sharedEnvironment "github.com/ProacTrip/Backend/internal/shared/environment"
 	"github.com/ProacTrip/Backend/internal/shared/eventbus"
 )
 
@@ -173,6 +175,14 @@ func (c *UserEventConsumer) handleUserRegistered(ctx context.Context, event *eve
 	// Extract optional environment fields from the event (may be absent in legacy events)
 	envPrefs := extractEnvPrefs(payload)
 
+	// Fallback: si el evento no incluye environment preferences, intentar leer
+	// del caché env:{ip} en DragonflyDB (escrito por el módulo environment).
+	if !envPrefs.HasAny() {
+		if clientIP, ok := payload["client_ip"].(string); ok && clientIP != "" {
+			envPrefs = c.resolveEnvPrefsFromCache(ctx, clientIP)
+		}
+	}
+
 	// Create profile using Upsert use case (inyectado en constructor, no crear en cada mensaje)
 	if err := c.uc.Execute(ctx, userID, email, envPrefs); err != nil {
 		slog.Error("upsert profile failed", "error", err, "user_id", userID)
@@ -202,6 +212,43 @@ func extractEnvPrefs(payload map[string]interface{}) domain.EnvPrefs {
 	}
 
 	return prefs
+}
+
+// resolveEnvPrefsFromCache intenta leer las preferencias de entorno desde el
+// caché env:{ip} en DragonflyDB cuando el evento de registro no las incluye.
+// Retorna EnvPrefs con los campos poblados si el caché existe y es válido;
+// EnvPrefs zero-value en caso de cache miss o error de deserialización.
+func (c *UserEventConsumer) resolveEnvPrefsFromCache(ctx context.Context, clientIP string) domain.EnvPrefs {
+	key := sharedEnvironment.CacheKey(clientIP)
+	raw, err := c.rdb.Get(ctx, key).Result()
+	if err != nil {
+		if err != redis.Nil {
+			slog.Warn("env cache lookup failed for user consumer fallback",
+				slog.String("ip", clientIP),
+				slog.String("error", err.Error()),
+			)
+		}
+		return domain.EnvPrefs{}
+	}
+	if raw == "" {
+		return domain.EnvPrefs{}
+	}
+
+	var entry sharedEnvironment.CacheEntry
+	if err := json.Unmarshal([]byte(raw), &entry); err != nil {
+		slog.Warn("env cache unmarshal failed for user consumer fallback",
+			slog.String("ip", clientIP),
+			slog.String("error", err.Error()),
+		)
+		return domain.EnvPrefs{}
+	}
+
+	return domain.EnvPrefs{
+		LanguageCode: entry.Location.Language,
+		CurrencyCode: entry.Location.Currency,
+		CountryCode:  entry.Location.CountryCode,
+		TimezoneName: entry.Location.Timezone,
+	}
 }
 
 // rescueOrphans runs XAUTOCLAIM periodically to reclaim messages from dead workers

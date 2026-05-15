@@ -15,7 +15,7 @@ import (
 
 	"github.com/ProacTrip/Backend/internal/modules/user/consumer"
 	"github.com/ProacTrip/Backend/internal/modules/user/domain"
-	"github.com/ProacTrip/Backend/internal/modules/user/features/shared"
+	sharedUser "github.com/ProacTrip/Backend/internal/shared/user"
 	"github.com/ProacTrip/Backend/internal/modules/user/features/upsert_profile"
 	"github.com/ProacTrip/Backend/internal/shared/eventbus"
 )
@@ -93,10 +93,6 @@ func (m *integrationMockRepo) GetByID(ctx context.Context, id uuid.UUID) (*domai
 	return nil, fmt.Errorf("profile not found")
 }
 
-func (m *integrationMockRepo) UpdateStatus(ctx context.Context, userID uuid.UUID, status domain.UserProfileStatus) error {
-	return nil
-}
-
 func (m *integrationMockRepo) UpdateAvatar(ctx context.Context, userID uuid.UUID, avatarURL string) error {
 	return nil
 }
@@ -164,25 +160,25 @@ func TestIntegration_RegistrationEventToProfileCache(t *testing.T) {
 	}
 
 	// 5. Verify Dragonfly cache has the correct profile prefs
-	currency, language, countryCode, timezone, found, err := shared.GetProfilePrefs(ctx, rdb, userID.String())
+	prefs, err := sharedUser.GetProfilePrefs(ctx, rdb, userID.String())
 	if err != nil {
 		t.Fatalf("GetProfilePrefs error: %v", err)
 	}
-	if !found {
+	if prefs == nil {
 		t.Fatal("profile prefs cache NOT populated by consumer — expected found=true")
 	}
-	if currency != "EUR" {
-		t.Errorf("cache currency = %q, want %q", currency, "EUR")
+	if prefs.Currency != "EUR" {
+		t.Errorf("cache currency = %q, want %q", prefs.Currency, "EUR")
 	}
-	if language != "es" {
-		t.Errorf("cache language = %q, want %q", language, "es")
+	if prefs.Language != "es" {
+		t.Errorf("cache language = %q, want %q", prefs.Language, "es")
 	}
-	if timezone != "Europe/Madrid" {
-		t.Errorf("cache timezone = %q, want %q", timezone, "Europe/Madrid")
+	if prefs.Timezone != "Europe/Madrid" {
+		t.Errorf("cache timezone = %q, want %q", prefs.Timezone, "Europe/Madrid")
 	}
 	// Country code is NOT stored in profile column (design decision), so cache
 	// field may be empty — that's expected behavior
-	_ = countryCode
+	_ = prefs.CountryCode
 }
 
 // TestIntegration_RegistrationEventWithoutEnvFields_ProfileDefaults verifies
@@ -221,15 +217,15 @@ func TestIntegration_RegistrationEventWithoutEnvFields_ProfileDefaults(t *testin
 	}
 
 	// Cache should exist (profile was created) but with default values
-	currency, _, _, timezone, found, _ := shared.GetProfilePrefs(ctx, rdb, userID.String())
-	if !found {
+	prefs, _ := sharedUser.GetProfilePrefs(ctx, rdb, userID.String())
+	if prefs == nil {
 		t.Fatal("cache should exist even for legacy events (profile was created)")
 	}
-	if currency != "EUR" {
-		t.Errorf("cache currency = %q, want %q", currency, "EUR")
+	if prefs.Currency != "EUR" {
+		t.Errorf("cache currency = %q, want %q", prefs.Currency, "EUR")
 	}
-	if timezone != "UTC" {
-		t.Errorf("cache timezone = %q, want %q", timezone, "UTC")
+	if prefs.Timezone != "UTC" {
+		t.Errorf("cache timezone = %q, want %q", prefs.Timezone, "UTC")
 	}
 }
 
@@ -324,29 +320,29 @@ func TestIntegration_RegistrationEventMixedStream(t *testing.T) {
 	}
 
 	// Both caches should be populated correctly
-	oldCur, _, _, oldTz, oldFound, _ := shared.GetProfilePrefs(ctx, rdb, userIDOld.String())
-	if !oldFound {
+	oldPrefs, _ := sharedUser.GetProfilePrefs(ctx, rdb, userIDOld.String())
+	if oldPrefs == nil {
 		t.Fatal("old event: cache not populated")
 	}
-	if oldCur != "EUR" {
-		t.Errorf("old event: cached currency = %q, want %q", oldCur, "EUR")
+	if oldPrefs.Currency != "EUR" {
+		t.Errorf("old event: cached currency = %q, want %q", oldPrefs.Currency, "EUR")
 	}
-	if oldTz != "UTC" {
-		t.Errorf("old event: cached timezone = %q, want %q", oldTz, "UTC")
+	if oldPrefs.Timezone != "UTC" {
+		t.Errorf("old event: cached timezone = %q, want %q", oldPrefs.Timezone, "UTC")
 	}
 
-	newCur, newLang, _, newTz, newFound, _ := shared.GetProfilePrefs(ctx, rdb, userIDNew.String())
-	if !newFound {
+	newPrefs, _ := sharedUser.GetProfilePrefs(ctx, rdb, userIDNew.String())
+	if newPrefs == nil {
 		t.Fatal("new event: cache not populated")
 	}
-	if newCur != "MXN" {
-		t.Errorf("new event: cached currency = %q, want %q", newCur, "MXN")
+	if newPrefs.Currency != "MXN" {
+		t.Errorf("new event: cached currency = %q, want %q", newPrefs.Currency, "MXN")
 	}
-	if newLang != "es" {
-		t.Errorf("new event: cached language = %q, want %q", newLang, "es")
+	if newPrefs.Language != "es" {
+		t.Errorf("new event: cached language = %q, want %q", newPrefs.Language, "es")
 	}
-	if newTz != "America/Mexico_City" {
-		t.Errorf("new event: cached timezone = %q, want %q", newTz, "America/Mexico_City")
+	if newPrefs.Timezone != "America/Mexico_City" {
+		t.Errorf("new event: cached timezone = %q, want %q", newPrefs.Timezone, "America/Mexico_City")
 	}
 }
 

@@ -53,9 +53,13 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		return nil, fmt.Errorf("verify email: %w", err)
 	}
 
-	user.VerifyEmail()
-	if err := uc.repo.Update(ctx, user); err != nil {
-		return nil, fmt.Errorf("verify email: update user: %w", err)
+	// Early-return: si el email ya está verificado, saltamos la actualización
+	// innecesaria en DB y vamos directo a generar tokens de sesión.
+	if !user.EmailVerified {
+		user.VerifyEmail()
+		if err := uc.repo.Update(ctx, user); err != nil {
+			return nil, fmt.Errorf("verify email: update user: %w", err)
+		}
 	}
 
 	sessionID := uuid.Must(uuid.NewV7())

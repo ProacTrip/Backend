@@ -13,7 +13,7 @@ const (
 // FlightDetailsRequest
 // =============================================================================
 
-// FlightDetailsRequest packs all params required to fetch flight booking details.
+// FlightDetailsRequest agrupa todos los parámetros necesarios para obtener detalles de reserva de un vuelo.
 type FlightDetailsRequest struct {
 	BookingToken string `json:"booking_token"`
 	Adults       int    `json:"adults"`
@@ -30,8 +30,8 @@ type FlightDetailsRequest struct {
 // Request de Búsqueda
 // =============================================================================
 
-// FlightSearchRequest is the domain representation of a search request
-// after mapping from the API command.
+// FlightSearchRequest es la representación de dominio de una solicitud de búsqueda
+// después del mapeo desde el comando de la API.
 type FlightSearchRequest struct {
 	TripType                string         `json:"trip_type,omitzero"`
 	Departure               string         `json:"departure,omitzero"`
@@ -68,7 +68,7 @@ type FlightSearchRequest struct {
 // Tipos Auxiliares
 // =============================================================================
 
-// TimeRange filters departure and arrival times.
+// TimeRange filtra horarios de salida y llegada.
 type TimeRange struct {
 	DepartureFrom int  `json:"departure_from"`
 	DepartureTo   int  `json:"departure_to"`
@@ -76,13 +76,13 @@ type TimeRange struct {
 	ArrivalTo     *int `json:"arrival_to,omitzero"`
 }
 
-// LayoverRange filters layover duration between connections.
+// LayoverRange filtra la duración de escalas entre conexiones.
 type LayoverRange struct {
 	MinMinutes int `json:"min_minutes"`
 	MaxMinutes int `json:"max_minutes"`
 }
 
-// MultiCityLeg represents one leg in a multi-city search.
+// MultiCityLeg representa un tramo en una búsqueda multi-ciudad.
 type MultiCityLeg struct {
 	Departure string     `json:"departure"`
 	Arrival   string     `json:"arrival"`
@@ -94,8 +94,8 @@ type MultiCityLeg struct {
 // Response de Búsqueda
 // =============================================================================
 
-// PaginationMeta contains cursor-based pagination metadata included in every
-// search response.
+// PaginationMeta contiene metadatos de paginación basada en cursor incluidos en cada
+// respuesta de búsqueda.
 type PaginationMeta struct {
 	NextCursor *string `json:"next_cursor,omitzero"`
 	PrevCursor *string `json:"prev_cursor,omitzero"`
@@ -103,7 +103,7 @@ type PaginationMeta struct {
 	Limit      int     `json:"limit"`
 }
 
-// FlightSearchResponse is the domain search response.
+// FlightSearchResponse es la respuesta de dominio para búsqueda de vuelos.
 type FlightSearchResponse struct {
 	TripType      string         `json:"trip_type"`
 	Phase         string         `json:"phase"`
@@ -112,27 +112,27 @@ type FlightSearchResponse struct {
 	OtherFlights  []Flight       `json:"other_flights"`
 	Airports      []Airport      `json:"airports,omitzero"`
 	PriceInsights *PriceInsights `json:"price_insights,omitzero"`
-	FromCache     bool           `json:"from_cache"`
-	CachedAt      *time.Time     `json:"cached_at,omitzero"`
+	FromCache     bool            `json:"from_cache"`
+	CachedAt      *time.Time      `json:"cached_at"`
 	Meta          *PaginationMeta `json:"meta,omitzero"`
 }
 
-// FlightDetailsResponse is the domain response for booking details.
+// FlightDetailsResponse es la respuesta de dominio para detalles de reserva.
 type FlightDetailsResponse struct {
 	Itinerary      FlightItinerary  `json:"itinerary"`
 	BookingOptions []BookingOption  `json:"booking_options"`
-	FromCache      bool             `json:"from_cache"`
-	CachedAt       *time.Time       `json:"cached_at,omitzero"`
+	FromCache      bool              `json:"from_cache"`
+	CachedAt       *time.Time        `json:"cached_at"`
 }
 
-// FlightItinerary holds the outbound and optional return flight details.
+// FlightItinerary contiene los detalles de vuelo de ida y vuelta opcional.
 type FlightItinerary struct {
 	TripType string        `json:"trip_type"`
 	Outbound FlightDetail  `json:"outbound"`
 	Return   *FlightDetail `json:"return,omitzero"`
 }
 
-// FlightDetail contains legs, layovers, duration, and emissions for one direction.
+// FlightDetail contiene patas, escalas, duración y emisiones para una dirección.
 type FlightDetail struct {
 	Legs                 []Leg            `json:"legs"`
 	Layovers             []Layover        `json:"layovers,omitzero"`
@@ -144,7 +144,7 @@ type FlightDetail struct {
 // Vuelo
 // =============================================================================
 
-// Flight represents a flight result group (can contain multiple legs + layovers).
+// Flight representa un grupo de resultados de vuelo (puede contener múltiples patas + escalas).
 type Flight struct {
 	DepartureToken      string          `json:"departure_token,omitzero"`
 	BookingToken        string          `json:"booking_token,omitzero"`
@@ -157,7 +157,7 @@ type Flight struct {
 	AirlineLogoURL      string          `json:"airline_logo_url"`
 }
 
-// Leg represents a single flight segment.
+// Leg representa un segmento individual de vuelo.
 type Leg struct {
 	Departure      AirportTime     `json:"departure"`
 	Arrival        AirportTime     `json:"arrival"`
@@ -177,7 +177,7 @@ type Leg struct {
 	OperatedBy     string          `json:"operated_by,omitzero"`
 }
 
-// FlightFeatures contains parsed in-flight amenities.
+// FlightFeatures contiene amenities a bordo parseados.
 type FlightFeatures struct {
 	WiFi          string   `json:"wifi"`
 	PowerOutlets  bool     `json:"power_outlets"`
@@ -186,7 +186,7 @@ type FlightFeatures struct {
 	Raw           []string `json:"raw,omitzero"`
 }
 
-// AirportTime represents departure or arrival at an airport.
+// AirportTime representa salida o llegada a un aeropuerto.
 type AirportTime struct {
 	AirportCode string `json:"airport_code"`
 	AirportName string `json:"airport_name"`
@@ -196,7 +196,7 @@ type AirportTime struct {
 	Datetime    string `json:"datetime"`
 }
 
-// Layover represents a connection between flights.
+// Layover representa una conexión entre vuelos.
 type Layover struct {
 	AirportCode     string `json:"airport_code"`
 	AirportName     string `json:"airport_name"`
@@ -204,7 +204,7 @@ type Layover struct {
 	Overnight       bool   `json:"overnight"`
 }
 
-// Airport represents an airport in the airports section of the response.
+// Airport representa un aeropuerto en la sección de aeropuertos de la respuesta.
 type Airport struct {
 	Role         string `json:"role"`
 	AirportCode  string `json:"airport_code"`
@@ -216,13 +216,13 @@ type Airport struct {
 	ThumbnailURL string `json:"thumbnail_url"`
 }
 
-// PriceInfo represents a monetary price.
+// PriceInfo representa un precio monetario.
 type PriceInfo struct {
 	Amount   float64 `json:"amount"`
 	Currency string  `json:"currency"`
 }
 
-// CarbonEmissions represents carbon footprint data for a flight.
+// CarbonEmissions representa datos de huella de carbono para un vuelo.
 type CarbonEmissions struct {
 	ThisFlightGrams    int `json:"this_flight_grams"`
 	TypicalRouteGrams  int `json:"typical_route_grams"`
@@ -233,7 +233,7 @@ type CarbonEmissions struct {
 // Price Insights
 // =============================================================================
 
-// PriceInsights contains pricing meta-information.
+// PriceInsights contiene meta-información de precios.
 type PriceInsights struct {
 	LowestPrice  PriceInfo    `json:"lowest_price"`
 	PriceLevel   string       `json:"price_level"`
@@ -241,14 +241,14 @@ type PriceInsights struct {
 	PriceHistory []PricePoint `json:"price_history,omitzero"`
 }
 
-// PriceRange represents a min/max price range.
+// PriceRange representa un rango de precios min/max.
 type PriceRange struct {
 	Min      float64 `json:"min"`
 	Max      float64 `json:"max"`
 	Currency string  `json:"currency"`
 }
 
-// PricePoint is a timestamped price observation.
+// PricePoint es una observación de precio con timestamp.
 type PricePoint struct {
 	Timestamp int64   `json:"timestamp"`
 	Price     float64 `json:"price"`
@@ -258,7 +258,7 @@ type PricePoint struct {
 // Opciones de Reserva
 // =============================================================================
 
-// BookingOption represents a way to book a flight.
+// BookingOption representa una forma de reservar un vuelo.
 type BookingOption struct {
 	TripType        string         `json:"trip_type"`
 	SeparateTickets bool           `json:"separate_tickets"`
@@ -267,7 +267,7 @@ type BookingOption struct {
 	Returning       *BookingDetail `json:"returning,omitzero"`
 }
 
-// BookingDetail contains details about a specific booking path.
+// BookingDetail contiene detalles sobre una ruta de reserva específica.
 type BookingDetail struct {
 	BookWith             string          `json:"book_with"`
 	Airline              bool            `json:"airline"`
@@ -282,13 +282,13 @@ type BookingDetail struct {
 	EstimatedServiceFee  *float64        `json:"estimated_service_fee,omitzero"`
 }
 
-// LocalPrice represents a price in a local currency.
+// LocalPrice representa un precio en moneda local.
 type LocalPrice struct {
 	Currency string  `json:"currency"`
 	Price    float64 `json:"price"`
 }
 
-// BookingRequest contains the URL and POST data to complete a booking.
+// BookingRequest contiene la URL y datos POST para completar una reserva.
 type BookingRequest struct {
 	URL      string `json:"url"`
 	PostData string `json:"post_data"`

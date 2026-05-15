@@ -129,7 +129,7 @@ func TestHandlerIntegration_SearchHotels_AuthenticatedUser_UsesProfilePrefs(t *t
 	ctx := t.Context()
 
 	// Pre-populate profile prefs (Brazilian: BRL/pt/BR)
-	profileKey := "profile:" + userID.String() + ":prefs"
+	profileKey := "user:prefs:" + userID.String()
 	if err := rdb.HSet(ctx, profileKey, map[string]interface{}{
 		"currency":     "BRL",
 		"language":     "pt",
@@ -205,7 +205,7 @@ func TestHandlerIntegration_SearchHotels_ExplicitWinsOverProfilePrefs(t *testing
 	ctx := t.Context()
 
 	// Pre-populate profile prefs (should be ignored — Tier 1 wins)
-	rdb.HSet(ctx, "profile:"+userID.String()+":prefs", map[string]interface{}{
+	rdb.HSet(ctx, "user:prefs:"+userID.String(), map[string]interface{}{
 		"currency":     "BRL",
 		"language":     "pt",
 		"country_code": "BR",

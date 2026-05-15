@@ -1,3 +1,4 @@
+-- +migrate Up
 -- =============================================================================
 -- FUNCIONES Y UTILIDADES (sin lógica de negocio)
 -- =============================================================================
@@ -381,3 +382,5 @@ WHERE u.email = 'admin@proactrip.com'
   AND NOT EXISTS (
       SELECT 1 FROM user_mfa_methods m WHERE m.user_id = u.id
   );
+-- +migrate Down
+-- No hay rollback para migración inicial (schema base).

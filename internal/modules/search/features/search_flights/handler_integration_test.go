@@ -133,7 +133,7 @@ func TestHandlerIntegration_AuthenticatedUser_UsesProfilePrefs(t *testing.T) {
 	ctx := t.Context()
 
 	// Pre-populate the profile prefs cache (Brazilian user: BRL/pt/BR)
-	profileKey := "profile:" + userID.String() + ":prefs"
+	profileKey := "user:prefs:" + userID.String()
 	if err := rdb.HSet(ctx, profileKey, map[string]interface{}{
 		"currency":     "BRL",
 		"language":     "pt",
@@ -207,7 +207,7 @@ func TestHandlerIntegration_ProfilePrefsBeatEnvCache(t *testing.T) {
 	ctx := t.Context()
 
 	// Tier 2: profile prefs → Argentina (ARS/es/AR)
-	rdb.HSet(ctx, "profile:"+userID.String()+":prefs", map[string]interface{}{
+	rdb.HSet(ctx, "user:prefs:"+userID.String(), map[string]interface{}{
 		"currency":     "ARS",
 		"language":     "es",
 		"country_code": "AR",
@@ -359,7 +359,7 @@ func TestHandlerIntegration_ExplicitWinsOverProfilePrefs(t *testing.T) {
 	ctx := t.Context()
 
 	// Pre-populate profile prefs (should be ignored because Tier 1 wins)
-	rdb.HSet(ctx, "profile:"+userID.String()+":prefs", map[string]interface{}{
+	rdb.HSet(ctx, "user:prefs:"+userID.String(), map[string]interface{}{
 		"currency":     "BRL",
 		"language":     "pt",
 		"country_code": "BR",
@@ -405,7 +405,7 @@ func TestHandlerIntegration_SingleExplicitWins(t *testing.T) {
 	ctx := t.Context()
 
 	// Pre-populate profile prefs
-	rdb.HSet(ctx, "profile:"+userID.String()+":prefs", map[string]interface{}{
+	rdb.HSet(ctx, "user:prefs:"+userID.String(), map[string]interface{}{
 		"currency":     "BRL",
 		"language":     "pt",
 		"country_code": "BR",

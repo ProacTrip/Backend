@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
+	searchshared "github.com/ProacTrip/Backend/internal/modules/search/shared"
 )
 
 // =============================================================================
@@ -78,7 +79,7 @@ func (cmd Command) ToDomain() domain.HotelSearchRequest {
 // Validate checks required fields and parameter constraints.
 func (cmd *Command) Validate() error {
 	// Trim whitespace before checking empty — whitespace-only query is invalid
-	if trimSpaces(cmd.Query) == "" {
+	if searchshared.TrimSpaces(cmd.Query) == "" {
 		return fmt.Errorf("%w: query", domain.ErrMissingRequiredField)
 	}
 	if cmd.CheckInDate == "" {
@@ -115,16 +116,4 @@ func (cmd *Command) Validate() error {
 	}
 
 	return nil
-}
-
-// trimSpaces removes leading and trailing whitespace.
-func trimSpaces(s string) string {
-	start, end := 0, len(s)
-	for start < end && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r') {
-		start++
-	}
-	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\n' || s[end-1] == '\r') {
-		end--
-	}
-	return s[start:end]
 }

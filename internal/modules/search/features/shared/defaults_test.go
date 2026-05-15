@@ -86,7 +86,7 @@ func TestResolveSearchDefaults_Tier2_ProfilePrefs(t *testing.T) {
 	userID := "550e8400-e29b-41d4-a716-446655440000"
 
 	// Populate profile prefs cache
-	key := "profile:" + userID + ":prefs"
+	key := "user:prefs:" + userID
 	fields := map[string]interface{}{
 		"currency":     "BRL",
 		"language":     "pt",
@@ -233,7 +233,7 @@ func TestResolveSearchDefaults_Tier2BeatsTier3(t *testing.T) {
 	ip := "1.1.1.1"
 
 	// Set up Tier 2 (profile prefs)
-	profileKey := "profile:" + userID + ":prefs"
+	profileKey := "user:prefs:" + userID
 	rdb.HSet(ctx, profileKey, map[string]interface{}{
 		"currency":     "ARS",
 		"language":     "es",
@@ -313,7 +313,7 @@ func TestResolveSearchDefaults_Tier1BeatsAll(t *testing.T) {
 	ip := "2.2.2.2"
 
 	// Populate Tier 2
-	rdb.HSet(ctx, "profile:"+userID+":prefs", map[string]interface{}{
+	rdb.HSet(ctx, "user:prefs:"+userID, map[string]interface{}{
 		"currency":     "ARS",
 		"language":     "es",
 		"country_code": "AR",

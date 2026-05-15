@@ -1,0 +1,19 @@
+// Comando para GET /v1/user/saved-searches.
+package list_saved_searches
+
+import (
+	"github.com/google/uuid"
+)
+
+// Command contiene el user_id del token.
+type Command struct {
+	UserID string `json:"-"`
+}
+
+// Validate valida que el UserID sea un UUID válido.
+func (c *Command) Validate() error {
+	if _, err := uuid.Parse(c.UserID); err != nil {
+		return err
+	}
+	return nil
+}

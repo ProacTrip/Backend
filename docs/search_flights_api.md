@@ -133,7 +133,7 @@ Formato **RFC 9457 Problem Details**:
 
 ```json
 {
-  "type": "validation_error",
+  "type": "https://api.proactrip.com/errors/validation-error",
   "title": "Validation Error",
   "status": 400,
   "detail": "El campo 'trip_type' es requerido",

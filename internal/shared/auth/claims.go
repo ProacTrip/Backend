@@ -21,6 +21,15 @@ type AccessClaims struct {
 	Role      string
 	SessionID uuid.UUID
 	JTI       uuid.UUID
+
+	// Permissions es la lista de permisos efectivos resueltos para el usuario.
+	// Se popula desde el cache de sesión o el PermissionResolver en cache miss.
+	// Vacío hasta que el middleware de sesión los resuelva (Batch 3).
+	Permissions []string
+
+	// TokenVersion es la versión del token del usuario al momento de emisión.
+	// Se compara contra el cache de sesión para detectar tokens stale.
+	TokenVersion int
 }
 
 // GetUserID retorna el user ID como UUID. Satisface RoleClaims interface.
@@ -28,6 +37,14 @@ func (c AccessClaims) GetUserID() uuid.UUID { return c.UserID }
 
 // GetRole retorna el nombre del rol. Satisface RoleClaims interface.
 func (c AccessClaims) GetRole() string { return c.Role }
+
+// GetPermissions retorna los permisos efectivos del usuario.
+// Satisface PermissionClaims interface (shared/middleware/permission.go).
+func (c AccessClaims) GetPermissions() []string { return c.Permissions }
+
+// GetTokenVersion retorna la versión del token al momento de emisión.
+// Usado por el middleware de sesión para detectar tokens stale.
+func (c AccessClaims) GetTokenVersion() int { return c.TokenVersion }
 
 // =============================================================================
 // Helper de extracción del contexto

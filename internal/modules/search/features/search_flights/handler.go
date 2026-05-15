@@ -3,13 +3,16 @@
 package search_flights
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 
 	"github.com/redis/go-redis/v9"
 
+	"github.com/ProacTrip/Backend/internal/modules/search/domain"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/shared"
 	httperr "github.com/ProacTrip/Backend/internal/shared/http"
+	"github.com/ProacTrip/Backend/internal/shared/ratelimit"
 	"github.com/labstack/echo/v5"
 )
 
@@ -22,6 +25,7 @@ type Handler struct {
 	usecase     *UseCase
 	rdb         *redis.Client
 	defaultsCfg shared.SearchDefaultConfig
+	RateLimiter *ratelimit.RateLimiter
 }
 
 // NewHandler creates a new search flights handler.
@@ -67,9 +71,22 @@ func (h *Handler) Handle(c *echo.Context) error {
 			slog.String("trip_type", cmd.TripType),
 			slog.String("departure", cmd.Departure),
 		)
+		if errors.Is(err, domain.ErrRateLimitExceeded) {
+			shared.SetRateLimitExceededHeaders(c, h.RateLimiter, "serpapi")
+		}
 		return httperr.MapError(c, err)
 	}
 
-	c.Response().Header().Set("Cache-Control", "public, max-age=900, s-maxage=900, stale-while-revalidate=300")
+	resp.FromCache = false
+	resp.CachedAt = nil
+
+	// Rate limit provider headers (SerpAPI quota)
+	if h.RateLimiter != nil {
+		if rlResult, err := h.RateLimiter.ProviderStatus(c.Request().Context(), "serpapi"); err == nil {
+			shared.SetRateLimitHeaders(c, rlResult)
+		}
+	}
+
+	c.Response().Header().Set("Cache-Control", "public, max-age=300, s-maxage=300, stale-while-revalidate=300")
 	return c.JSON(http.StatusOK, resp)
 }

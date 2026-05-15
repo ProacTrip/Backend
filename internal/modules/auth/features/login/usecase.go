@@ -61,6 +61,18 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		return nil, domain.ErrEmailNotVerified
 	}
 
+	// Verificar estado de la cuenta ANTES de validar contraseña.
+	// AS-SPEC-006: login rechaza cuentas disabled, suspended, y pending_verification.
+	// Esto es siempre enforce (no depende de AUTHZ_ENFORCE_MODE) porque es un login nuevo.
+	switch user.Status {
+	case domain.StatusDisabled:
+		return nil, domain.ErrAccountDisabled
+	case domain.StatusSuspended:
+		return nil, domain.ErrAccountSuspended
+	case domain.StatusPendingVerification:
+		return nil, domain.ErrEmailNotVerified
+	}
+
 	user.MaybeUnlock()
 	if user.IsLocked() {
 		return nil, domain.ErrAccountLocked

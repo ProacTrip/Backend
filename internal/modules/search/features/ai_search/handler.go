@@ -4,6 +4,7 @@ package ai_search
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -12,9 +13,11 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/ProacTrip/Backend/internal/modules/search/domain"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/shared"
 	serrors "github.com/ProacTrip/Backend/internal/shared/errors"
 	httperr "github.com/ProacTrip/Backend/internal/shared/http"
+	"github.com/ProacTrip/Backend/internal/shared/ratelimit"
 )
 
 // =============================================================================
@@ -26,6 +29,7 @@ type Handler struct {
 	usecase     *UseCase
 	rdb         *redis.Client
 	defaultsCfg shared.SearchDefaultConfig
+	RateLimiter *ratelimit.RateLimiter
 }
 
 // NewHandler creates a new AI search handler.
@@ -93,8 +97,20 @@ func (h *Handler) Handle(c *echo.Context) error {
 				slog.String("error", err.Error()),
 				slog.String("message", cmd.Message),
 			)
+			if errors.Is(err, domain.ErrRateLimitExceeded) {
+				c.Response().Header().Set("Retry-After", "60")
+			}
 			sseError(c, err.Error())
 			return nil
+		}
+
+		resp.FromCache = false
+
+		// Rate limit provider headers
+		if h.RateLimiter != nil {
+			if rlResult, err := h.RateLimiter.ProviderStatus(c.Request().Context(), "serpapi"); err == nil {
+				shared.SetRateLimitHeaders(c, rlResult)
+			}
 		}
 
 		data, _ := json.Marshal(resp)
@@ -145,9 +161,22 @@ func (h *Handler) Handle(c *echo.Context) error {
 			slog.String("error", err.Error()),
 			slog.String("message", cmd.Message),
 		)
+		if errors.Is(err, domain.ErrRateLimitExceeded) {
+			shared.SetRateLimitExceededHeaders(c, h.RateLimiter, "serpapi")
+		}
 		return httperr.MapError(c, err)
 	}
 
+	resp.FromCache = false
+
+	// Rate limit provider headers (SerpAPI quota)
+	if h.RateLimiter != nil {
+		if rlResult, err := h.RateLimiter.ProviderStatus(c.Request().Context(), "serpapi"); err == nil {
+			shared.SetRateLimitHeaders(c, rlResult)
+		}
+	}
+
+	c.Response().Header().Set("Cache-Control", "no-store")
 	return c.JSON(http.StatusOK, resp)
 }
 

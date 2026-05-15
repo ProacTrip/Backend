@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
+
 	sharedEnv "github.com/ProacTrip/Backend/internal/shared/environment"
 )
 
@@ -157,5 +160,85 @@ func TestLocationDTO_AllFieldsSerialized(t *testing.T) {
 		if _, ok := result[field]; !ok {
 			t.Errorf("campo %q ausente en JSON serializado", field)
 		}
+	}
+}
+
+// ===================== CountryInfo type + GetCountryInfo =====================
+
+func TestCountryInfo_JSONRoundTrip(t *testing.T) {
+	ci := sharedEnv.CountryInfo{
+		Country:  "Argentina",
+		Currency: "ARS",
+		Language: "es",
+	}
+
+	data, err := json.Marshal(ci)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var got sharedEnv.CountryInfo
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if got.Country != "Argentina" {
+		t.Errorf("Country = %q, want %q", got.Country, "Argentina")
+	}
+	if got.Currency != "ARS" {
+		t.Errorf("Currency = %q, want %q", got.Currency, "ARS")
+	}
+	if got.Language != "es" {
+		t.Errorf("Language = %q, want %q", got.Language, "es")
+	}
+}
+
+func TestGetCountryInfo_CacheHit(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { rdb.Close() })
+	ctx := t.Context()
+	ip := "8.8.8.8"
+
+	// Pre-populate env:{ip} cache
+	entry := sharedEnv.CacheEntry{}
+	entry.Location.Country = "United States"
+	entry.Location.Currency = "USD"
+	entry.Location.Language = "en"
+	raw, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+	if err := rdb.Set(ctx, "env:"+ip, string(raw), 0).Err(); err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
+
+	ci, err := sharedEnv.GetCountryInfo(ctx, rdb, ip)
+	if err != nil {
+		t.Fatalf("GetCountryInfo error: %v", err)
+	}
+	if ci.Country != "United States" {
+		t.Errorf("Country = %q, want %q", ci.Country, "United States")
+	}
+	if ci.Currency != "USD" {
+		t.Errorf("Currency = %q, want %q", ci.Currency, "USD")
+	}
+	if ci.Language != "en" {
+		t.Errorf("Language = %q, want %q", ci.Language, "en")
+	}
+}
+
+func TestGetCountryInfo_CacheMiss(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { rdb.Close() })
+	ctx := t.Context()
+
+	ci, err := sharedEnv.GetCountryInfo(ctx, rdb, "1.2.3.4")
+	if err != nil {
+		t.Fatalf("GetCountryInfo error: %v", err)
+	}
+	if ci.Country != "" || ci.Currency != "" || ci.Language != "" {
+		t.Errorf("expected zero-value CountryInfo on cache miss, got %+v", ci)
 	}
 }

@@ -16,6 +16,12 @@ import (
 	"github.com/ProacTrip/Backend/internal/modules/auth/adapters/token"
 	"github.com/ProacTrip/Backend/internal/modules/auth/adapters/verification"
 	"github.com/ProacTrip/Backend/internal/modules/auth/domain"
+	"github.com/ProacTrip/Backend/internal/modules/auth/domain/services"
+	accountstatus "github.com/ProacTrip/Backend/internal/modules/auth/features/dashboard/account_status"
+	featurelimits "github.com/ProacTrip/Backend/internal/modules/auth/features/dashboard/feature_limits"
+	listusers "github.com/ProacTrip/Backend/internal/modules/auth/features/dashboard/list_users"
+	overrides "github.com/ProacTrip/Backend/internal/modules/auth/features/dashboard/permission_overrides"
+	userdetail "github.com/ProacTrip/Backend/internal/modules/auth/features/dashboard/user_detail"
 	"github.com/ProacTrip/Backend/internal/modules/auth/features/login"
 	"github.com/ProacTrip/Backend/internal/modules/auth/features/logout"
 	oauthorize "github.com/ProacTrip/Backend/internal/modules/auth/features/oauth/authorize"
@@ -61,13 +67,29 @@ type Module struct {
 	MeHandler          *me.Handler
 
 	// OAuth Features
-	OAuthAuthorize *oauthorize.UseCase
+	OAuthAuthorize        *oauthorize.UseCase
 	OAuthAuthorizeHandler *oauthorize.Handler
 	OAuthCallback         *oacallback.UseCase
 	OAuthCallbackHandler  *oacallback.Handler
 
 	// Resend Verification — wired after notification module is initialized
 	ResendVerificationHandler *resend_verification.Handler
+
+	// ========== DASHBOARD FEATURES ==========
+
+	// Servicios de dominio
+	PermissionResolver  services.PermissionResolver
+	FeatureLimitService featurelimits.FeatureLimitService
+
+	// Handlers de dashboard — expuestos para registro de rutas en app.go
+	ListUsersHandler           *listusers.Handler
+	UserDetailHandler          *userdetail.Handler
+	AccountStatusHandler       *accountstatus.Handler
+	FeatureLimitsHandler       *featurelimits.Handler
+	PermissionOverridesHandler *overrides.Handler
+
+	// Repositorios de dashboard (necesita DragonflyClient para invalidación de sesiones)
+	dragonflyClient *redis.Client
 }
 
 // Config contiene la configuración del módulo Auth
@@ -144,6 +166,9 @@ func NewModule(cfg Config) (*Module, error) {
 	// 6. Inicializar GoogleOAuth adapter
 	m.GoogleOAuth = oauth.NewGoogleOAuth(cfg.OAuthConfig)
 
+	// 7. Guardar referencia al cliente Dragonfly para invalidación de sesiones
+	m.dragonflyClient = cfg.DragonflyClient
+
 	// ========== FEATURES ==========
 
 	// Register - con event publisher para event-driven architecture
@@ -213,10 +238,65 @@ func NewModule(cfg Config) (*Module, error) {
 	})
 	m.OAuthCallbackHandler = oacallback.NewHandler(m.OAuthCallback, cfg.IsProduction, cfg.FrontendURL, cfg.CookieDomain)
 
-	// Register domain error mappings
+	// ========== DASHBOARD FEATURES ==========
+
+	// Repositorios de dashboard
+	featureLimitRepo := postgres.NewFeatureLimitRepository(cfg.PostgresPool)
+	overrideRepo := postgres.NewPermissionOverridesRepository(cfg.PostgresPool)
+	overrideResolverRepo := postgres.NewPermissionOverrideResolverRepository(cfg.PostgresPool)
+
+	// PermissionResolver (servicio de dominio)
+	m.PermissionResolver = services.NewPermissionResolver(
+		m.Repository.(interface { GetPermissionsByRoleID(context.Context, uuid.UUID) ([]string, error) }),
+		overrideResolverRepo,
+	)
+
+	// FeatureLimitService
+	m.FeatureLimitService = featurelimits.NewFeatureLimitService(featureLimitRepo)
+
+	// ========== DASHBOARD HANDLERS ==========
+
+	// List Users — DU-SPEC-001, DU-SPEC-002
+	listUsersUC := listusers.NewUseCase(m.Repository.(interface {
+		ListUsers(context.Context, listusers.ListUsersFilters) ([]listusers.UserRow, int, error)
+	}))
+	m.ListUsersHandler = listusers.NewHandler(listUsersUC)
+
+	// User Detail — DU-SPEC-003, DU-SPEC-004
+	userDetailUC := userdetail.NewUseCase(
+		m.Repository.(interface{ GetByID(context.Context, uuid.UUID) (*domain.User, error) }),
+		m.PermissionResolver.(interface{ ResolveEffectivePermissions(context.Context, uuid.UUID, uuid.UUID) ([]string, error) }),
+	)
+	m.UserDetailHandler = userdetail.NewHandler(userDetailUC)
+
+	// Account Status — AS-SPEC-003, AS-SPEC-005
+	accountStatusUC := accountstatus.NewUseCase(
+		m.Repository.(interface {
+			GetByID(context.Context, uuid.UUID) (*domain.User, error)
+			UpdateStatus(context.Context, uuid.UUID, string) (int, error)
+		}),
+		cfg.DragonflyClient,
+	)
+	m.AccountStatusHandler = accountstatus.NewHandler(accountStatusUC)
+
+	// Feature Limits — FL-SPEC-001 through FL-SPEC-005
+	featureLimitsUC := featurelimits.NewUseCase(featureLimitRepo)
+	m.FeatureLimitsHandler = featurelimits.NewHandler(featureLimitsUC)
+
+	// Permission Overrides — PO-SPEC-001 through PO-SPEC-007
+	overridesUC := overrides.NewUseCase(overrideRepo, cfg.DragonflyClient)
+	m.PermissionOverridesHandler = overrides.NewHandler(overridesUC)
+
+	// Register domain error mappings (incluye nuevos mapeos de dashboard)
 	registerAuthErrorMappings()
 
-	slog.Info("Auth module initialized", "features", []string{"register", "verify_email", "login", "logout", "resend_verification", "oauth_authorize", "oauth_callback"})
+	slog.Info("Auth module initialized",
+		"features", []string{
+			"register", "verify_email", "login", "logout",
+			"resend_verification", "oauth_authorize", "oauth_callback",
+			"dashboard:list_users", "dashboard:user_detail", "dashboard:account_status",
+			"dashboard:feature_limits", "dashboard:permission_overrides",
+		})
 
 	return m, nil
 }
@@ -372,6 +452,28 @@ func registerAuthErrorMappings() {
 			return serrors.ErrForbidden("Permiso denegado", err)
 		case errors.Is(err, domain.ErrRoleNotFound), errors.Is(err, domain.ErrPermissionNotFound):
 			return serrors.ErrNotFound("Recurso no encontrado", err)
+
+		// Dashboard — Account Status
+		case errors.Is(err, domain.ErrCannotDisableSelf):
+			return serrors.ErrBadRequest("No puedes deshabilitar tu propia cuenta", err)
+
+		// Dashboard — Feature Limits
+		case errors.Is(err, domain.ErrFeatureLimitNotFound):
+			return serrors.ErrNotFound("Límite de feature no encontrado", err)
+		case errors.Is(err, domain.ErrFeatureLimitAlreadyExists):
+			return serrors.ErrConflict("Ya existe un límite para este feature", err)
+		case errors.Is(err, domain.ErrNotImplemented):
+			return serrors.ErrInternalError("Funcionalidad aún no implementada", err)
+
+		// Dashboard — Permission Overrides
+		case errors.Is(err, domain.ErrPermissionOverrideNotFound):
+			return serrors.ErrNotFound("Override de permiso no encontrado", err)
+		case errors.Is(err, domain.ErrPermissionOverrideAlreadyExists):
+			return serrors.ErrConflict("Ya existe un override para este permiso", err)
+		case errors.Is(err, domain.ErrInvalidBlockDuration):
+			return serrors.ErrBadRequest("La duración del bloqueo no puede exceder 365 días", err)
+		case errors.Is(err, domain.ErrInvalidReason):
+			return serrors.ErrBadRequest("La razón es requerida (1–500 caracteres)", err)
 
 		default:
 			return nil

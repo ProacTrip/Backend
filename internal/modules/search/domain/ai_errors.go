@@ -1,21 +1,21 @@
-// AI Search Error Reference
+// Referencia de errores de AI Search
 //
-// This file documents all error types used in the ai_search flow.
-// Domain errors (defined in errors.go):
-//   - ErrAIUnavailable → 503 Service Unavailable (AI provider down)
-//   - ErrAIParseFailure → 502 Bad Gateway (AI returned invalid JSON)
+// Este archivo documenta todos los tipos de error usados en el flujo ai_search.
+// Errores de dominio (definidos en errors.go):
+//   - ErrAIUnavailable → 503 Service Unavailable (proveedor AI caído)
+//   - ErrAIParseFailure → 502 Bad Gateway (AI devolvió JSON inválido)
 //   - ErrConversationNotFound → 400 Bad Request
 //   - ErrTurnLimitExceeded → 400 Bad Request
-//   - ErrSearchFailed → 502 Bad Gateway (all providers failed)
-//   - ErrNoResults → handled as empty response, not error
+//   - ErrProviderUnavailable → 502 Bad Gateway (todos los proveedores fallaron)
+//   - ErrNoResults → manejado como respuesta vacía, no como error
 //
-// Provider errors (from search features):
-//   - ErrProviderUnavailable → 503 (SerpAPI 5xx or down, defined in errors.go)
-//   - ErrProviderBadRequest → 502 (SerpAPI 4xx, our bad params)
-//   - ErrRateLimitExceeded → 429 (defined in shared/ratelimit)
+// Errores de proveedor (desde features de búsqueda):
+//   - ErrProviderUnavailable → 503 (SerpAPI 5xx o caído, definido en errors.go)
+//   - ErrProviderBadRequest → 502 (SerpAPI 4xx, parámetros inválidos nuestros)
+//   - ErrRateLimitExceeded → 429 (definido en shared/ratelimit)
 //
-// Transport errors (from adapters):
-//   - Network errors → wrapped as ErrProviderUnavailable by client
-//   - JSON decode errors (SerpAPI 200 but bad body) → wrapped as ErrProviderUnavailable
-//   - SerpAPI error messages in response body → wrapped as ErrProviderUnavailable
+// Errores de transporte (desde adapters):
+//   - Errores de red → envueltos como ErrProviderUnavailable por el client
+//   - Errores de decodificación JSON (SerpAPI 200 pero body inválido) → envueltos como ErrProviderUnavailable
+//   - Mensajes de error de SerpAPI en el body de respuesta → envueltos como ErrProviderUnavailable
 package domain

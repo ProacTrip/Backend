@@ -50,13 +50,14 @@ type ValidatorR2Client interface {
 // ValidatorWorker consume el stream {events}:doc:validate, descarga archivos raw
 // de R2, cross-valida MIME y estructura, y produce al stream doc:sanitize.
 type ValidatorWorker struct {
-	rdb       *redis.Client
-	docRepo   DocumentUpdater
-	r2        ValidatorR2Client
-	group     string
-	consumer  string
-	dlqStream string
-	running   atomic.Bool
+	rdb        *redis.Client
+	docRepo    DocumentUpdater
+	r2         ValidatorR2Client
+	group      string
+	consumer   string
+	dlqStream  string
+	running    atomic.Bool
+	orphanDone chan struct{} // cerrado cuando rescueOrphans termina
 }
 
 // DocumentUpdater es el puerto para actualizar documentos en PostgreSQL.
@@ -77,11 +78,17 @@ func NewValidatorWorker(rdb *redis.Client, docRepo DocumentUpdater, r2 Validator
 	}
 }
 
-// IsRunning indica si la goroutine principal de consumo está activa.
-func (v *ValidatorWorker) IsRunning() bool { return v.running.Load() }
+// IsRunning indica si la goroutine principal de consumo O rescueOrphans está activa.
+func (v *ValidatorWorker) IsRunning() bool {
+	return v.running.Load() || !isClosed(v.orphanDone)
+}
 
 // Name devuelve un identificador legible para reportes de health check.
 func (v *ValidatorWorker) Name() string { return "doc-validator" }
+
+// OrphanDone expone el canal que se cierra cuando rescueOrphans termina.
+// Usado por Module.Shutdown() para esperar gracefulmente.
+func (v *ValidatorWorker) OrphanDone() <-chan struct{} { return v.orphanDone }
 
 // Run inicia el consumer en background. Retorna inmediatamente.
 func (v *ValidatorWorker) Run(ctx context.Context) error {
@@ -92,12 +99,15 @@ func (v *ValidatorWorker) Run(ctx context.Context) error {
 	_ = eventbus.EnsureConsumerGroup(ctx, v.rdb, docSanitizeStream, docSanitizeGroup)
 
 	v.running.Store(true)
+	v.orphanDone = make(chan struct{})
 	go func() {
 		defer v.running.Store(false)
 		v.consume(ctx)
 	}()
-
-	go v.rescueOrphans(ctx)
+	go func() {
+		defer close(v.orphanDone)
+		v.rescueOrphans(ctx)
+	}()
 
 	slog.Info("doc validator worker started", "group", v.group, "consumer", v.consumer)
 	return nil

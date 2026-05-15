@@ -31,9 +31,8 @@ import (
 	"github.com/ProacTrip/Backend/internal/modules/search/features/search_hotels"
 	searchshared "github.com/ProacTrip/Backend/internal/modules/search/features/shared"
 	"github.com/ProacTrip/Backend/internal/modules/search/shared/airports"
-	envdomain "github.com/ProacTrip/Backend/internal/modules/environment/domain"
 	sharedEnv "github.com/ProacTrip/Backend/internal/shared/environment"
-	userprefs "github.com/ProacTrip/Backend/internal/modules/user/features/shared"
+	sharedUser "github.com/ProacTrip/Backend/internal/shared/user"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -74,16 +73,25 @@ type InterpretationCache interface {
 
 // UseCase orchestrates AI-powered unified search.
 type UseCase struct {
-	interpreter    domain.AIInterpreter
-	flightSearcher FlightSearcher
-	hotelSearcher  HotelSearcher
-	convStore      ConversationStore
-	interpCache    InterpretationCache
-	iataResolver   func(ctx context.Context, query string) (string, error)
-	rdb            *redis.Client                   // Dragonfly for location hint resolution (env:{ip}, profile:{userID}:prefs)
-	defaultsCfg    searchshared.SearchDefaultConfig // Fallback defaults (DEFAULT_COUNTRY_CODE, etc.)
-	anonMaxTurns int
-	authMaxTurns int
+	interpreter      domain.AIInterpreter
+	flightSearcher   FlightSearcher
+	hotelSearcher    HotelSearcher
+	convStore        ConversationStore
+	interpCache      InterpretationCache
+	iataResolver     func(ctx context.Context, query string) (string, error)
+	rdb              *redis.Client                   // Dragonfly for location hint resolution (env:{ip}, profile:{userID}:prefs)
+	defaultsCfg      searchshared.SearchDefaultConfig // Fallback defaults (DEFAULT_COUNTRY_CODE, etc.)
+	anonMaxTurns  int
+	authMaxTurns  int
+
+	// Discovery pipeline fields
+	candidateSources []CandidateSource
+	discoveryEnabled bool
+	clarifyEnabled   bool
+
+	// interpCacheTTL es el TTL configurable para el caché de interpretación de IA.
+	// Default 10*time.Minute si no se configura vía UseCaseDeps.InterpretationCacheTTL.
+	interpCacheTTL time.Duration
 }
 
 // UseCaseDeps bundles dependencies for the AI search use case.
@@ -108,6 +116,19 @@ type UseCaseDeps struct {
 	// DefaultsCfg are the hardcoded fallback defaults (DEFAULT_COUNTRY_CODE, DEFAULT_LANGUAGE, DEFAULT_CURRENCY)
 	// from environment config. Used as fallback when Dragonfly env:{ip} cache doesn't exist (first request, local testing).
 	DefaultsCfg searchshared.SearchDefaultConfig
+
+	// Discovery feature flags — controlled via env vars (default false).
+	DiscoveryEnabled        bool // AI_DISCOVERY_ENABLED
+	DiscoveryClarifyEnabled bool // AI_DISCOVERY_CLARIFICATION_ENABLED
+
+	// CandidateSources para el pipeline de discovery.
+	// Si es nil, el pipeline no puede generar candidatos propios.
+	CandidateSources []CandidateSource
+
+	// InterpretationCacheTTL es el TTL para el caché de interpretación de IA.
+	// Leído de la variable de entorno AI_INTERPRETATION_CACHE_TTL, default 10m.
+	// Si es 0, se usa 10*time.Minute.
+	InterpretationCacheTTL time.Duration
 }
 
 // NewUseCase creates a new AI search use case.
@@ -118,17 +139,27 @@ func NewUseCase(deps UseCaseDeps) *UseCase {
 	if deps.AuthMaxTurns <= 0 {
 		deps.AuthMaxTurns = 10
 	}
+	// Default 10m si no se configuró explícitamente.
+	interpCacheTTL := deps.InterpretationCacheTTL
+	if interpCacheTTL <= 0 {
+		interpCacheTTL = 10 * time.Minute
+	}
+
 	return &UseCase{
-		interpreter:    deps.AIInterpreter,
-		flightSearcher: deps.FlightSearcher,
-		hotelSearcher:  deps.HotelSearcher,
-		convStore:      deps.ConvStore,
-		interpCache:    deps.InterpCache,
-		iataResolver:   deps.IATAResolver,
-		rdb:            deps.RDB,
-		defaultsCfg:    deps.DefaultsCfg,
-		anonMaxTurns:   deps.AnonMaxTurns,
-		authMaxTurns:   deps.AuthMaxTurns,
+		interpreter:       deps.AIInterpreter,
+		flightSearcher:    deps.FlightSearcher,
+		hotelSearcher:     deps.HotelSearcher,
+		convStore:         deps.ConvStore,
+		interpCache:       deps.InterpCache,
+		iataResolver:      deps.IATAResolver,
+		rdb:               deps.RDB,
+		defaultsCfg:       deps.DefaultsCfg,
+		anonMaxTurns:      deps.AnonMaxTurns,
+		authMaxTurns:      deps.AuthMaxTurns,
+		candidateSources:  deps.CandidateSources,
+		discoveryEnabled:  deps.DiscoveryEnabled,
+		clarifyEnabled:    deps.DiscoveryClarifyEnabled,
+		interpCacheTTL:    interpCacheTTL,
 	}
 }
 
@@ -138,6 +169,9 @@ func NewUseCase(deps UseCaseDeps) *UseCase {
 
 // Execute orchestrates the AI interpretation and search execution.
 // userID is empty for anonymous users.
+//
+// Dispatch: si DiscoveryEnabled y la consulta es de discovery (o el hint lo fuerza),
+// ejecuta el pipeline de discovery. Si no, ejecuta el flujo exact search existente.
 func (uc *UseCase) Execute(ctx context.Context, cmd Command, userID string) (*Response, error) {
 	slog.DebugContext(ctx, "ai_search.Execute: start",
 		slog.String("message", cmd.Message[:min(len(cmd.Message), 80)]),
@@ -151,6 +185,30 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command, userID string) (*Re
 			slog.String("error", err.Error()),
 		)
 		return nil, err
+	}
+
+	// 2. Discovery dispatch — if enabled, check intent
+	if uc.discoveryEnabled {
+		intent := ClassifyIntent(cmd.Message)
+		if intent.Mode == SearchModeDiscovery || cmd.SearchModeHint == "discovery" {
+			return uc.runDiscovery(ctx, cmd, userID, intent)
+		}
+	}
+
+	// 3. Default: exact search (existing behavior)
+	return uc.runExactSearch(ctx, cmd, userID)
+}
+
+// =============================================================================
+// runExactSearch — flujo de búsqueda exacta (existente)
+// =============================================================================
+
+// runExactSearch ejecuta el flujo de búsqueda exacta existente:
+// conversation management, AI interpretation, flight/hotel search execution.
+func (uc *UseCase) runExactSearch(ctx context.Context, cmd Command, userID string) (*Response, error) {
+	// Nil guard: si no hay interpreter, no se puede ejecutar exact search
+	if uc.interpreter == nil {
+		return nil, fmt.Errorf("ai interpreter: %w", domain.ErrAIUnavailable)
 	}
 
 	// 2. Get or create conversation
@@ -303,11 +361,11 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command, userID string) (*Re
 		g.Wait()
 
 		// Both failed → fatal, no partial results possible.
-		// Wrap with ErrSearchFailed so error mapper returns 502 Bad Gateway
+		// Wrap with ErrProviderUnavailable so error mapper returns 502 Bad Gateway
 		// instead of 500 Internal Server Error.
 		if flightErr != nil && hotelErr != nil {
 			return nil, fmt.Errorf("%w: flights: %w | hotels: %w",
-				domain.ErrSearchFailed, flightErr, hotelErr)
+				domain.ErrProviderUnavailable, flightErr, hotelErr)
 		}
 
 		// Build partial/mixed response message
@@ -431,6 +489,192 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command, userID string) (*Re
 }
 
 // =============================================================================
+// Discovery Pipeline — RunDiscoveryPipeline
+// =============================================================================
+
+// RunDiscoveryPipeline ejecuta el pipeline simplificado de discovery:
+// 1. Intent detection
+// 2. Constraint extraction
+// 3. Candidate generation via CandidateSources (user data only)
+// 4. Clarification check
+// 5. Resultados en rc.RankedCandidates
+func (uc *UseCase) RunDiscoveryPipeline(ctx context.Context, rc *RecommendationContext) error {
+	// 1. Intent detection (si no está ya seteado por el caller)
+	if rc.SearchMode == "" {
+		intent := ClassifyIntent(rc.Query)
+		rc.SearchMode = intent.Mode
+		rc.IntentConfidence = intent.Confidence
+		rc.RequiresClarification = intent.NeedsClarification
+	}
+	LogIntentDetected(ctx, rc)
+
+	// 2. Constraint extraction
+	rc.ParsedConstraints = ExtractConstraints(rc.Query)
+
+	// 3. Candidate generation via CandidateSources (user data only)
+	if len(rc.Candidates) == 0 && len(uc.candidateSources) > 0 {
+		var allCandidates []Candidate
+		for _, src := range uc.candidateSources {
+			cands, err := src.Generate(ctx, rc)
+			if err != nil {
+				// Log and skip failed sources — non-blocking
+				continue
+			}
+			allCandidates = append(allCandidates, cands...)
+		}
+		// Dedup by destination name
+		rc.Candidates = dedupCandidates(allCandidates)
+		LogCandidatesGenerated(ctx, rc, len(uc.candidateSources))
+	}
+
+	// Si no es Discovery mode, no ejecutar el resto del pipeline
+	if rc.SearchMode != SearchModeDiscovery {
+		return nil
+	}
+
+	// 4. Clarification check
+	if uc.clarifyEnabled {
+		if NeedsClarification(rc) {
+			rc.ClarificationQuestion = GenerateClarificationQuestion(rc)
+			rc.RequiresClarification = true
+			rc.ClarificationRounds++
+			LogDiscoveryClarification(ctx, rc, rc.ClarificationQuestion)
+			rc.Candidates = nil
+		}
+	}
+
+	// 5. Copy to RankedCandidates (no ranking needed — LLM formats from candidates)
+	rc.RankedCandidates = rc.Candidates
+
+	// 6. Cap at max 5 candidates
+	if len(rc.RankedCandidates) > 5 && !rc.RequiresClarification {
+		rc.RankedCandidates = rc.RankedCandidates[:5]
+	}
+
+	LogFormatComplete(ctx, rc)
+
+	return nil
+}
+
+// =============================================================================
+// runDiscovery — ejecuta el pipeline de discovery
+// =============================================================================
+
+// runDiscovery ejecuta el pipeline completo de discovery:
+// construye el RecommendationContext, corre el pipeline, y construye la respuesta.
+func (uc *UseCase) runDiscovery(ctx context.Context, cmd Command, userID string, intent IntentResult) (*Response, error) {
+	LogDiscoveryRequest(ctx, &RecommendationContext{
+		Query:            cmd.Message,
+		IntentConfidence: intent.Confidence,
+		UserID:           userID,
+	})
+
+	rc := &RecommendationContext{
+		Query:              cmd.Message,
+		SearchMode:         intent.Mode,
+		IntentConfidence:   intent.Confidence,
+		UserID:             userID,
+		ClientIP:           cmd.ClientIP,
+		GL:                 cmd.GL,
+		HL:                 cmd.HL,
+		Currency:           cmd.Currency,
+		RequiresClarification: intent.NeedsClarification,
+	}
+
+	// Resolve user country from environment cache for context-aware clarification.
+	// Used by GenerateClarificationQuestion to produce questions like
+	// "Estás en Argentina. ¿Buscás destinos dentro de Argentina o preferís viajar al exterior?"
+	if uc.rdb != nil && cmd.ClientIP != "" {
+		if ci, err := sharedEnv.GetCountryInfo(ctx, uc.rdb, cmd.ClientIP); err == nil && ci.Country != "" {
+			rc.DetectedCountry = ci.Country
+			// Get country_code from the cache entry directly for ISO code resolution.
+			// GetCountryInfo returns country name, currency, and language — we need the country code too.
+			// Fall back to reading the full cache entry.
+			if entry := uc.resolveEnvCacheEntry(ctx, cmd.ClientIP); entry != nil {
+				rc.DetectedCountryCode = entry.Location.CountryCode
+			}
+		}
+	}
+
+	// Si el hint fuerza discovery, asegurar que el modo es discovery
+	if cmd.SearchModeHint == "discovery" {
+		rc.SearchMode = SearchModeDiscovery
+	}
+
+	// Ejecutar el pipeline
+	if err := uc.RunDiscoveryPipeline(ctx, rc); err != nil {
+		LogDiscoveryFallback(ctx, rc, "pipeline_error")
+		return nil, err
+	}
+
+	// Log de métricas
+	if rc.RequiresClarification {
+		LogDiscoveryClarification(ctx, rc, rc.ClarificationQuestion)
+	} else {
+		LogDiscoveryResponse(ctx, rc, rc.RankedCandidates, "discovery")
+	}
+
+	// Construir respuesta
+	resp := &Response{
+		Mode:                 "discovery",
+		Intent:               string(SearchModeDiscovery),
+		Confidence:           rc.IntentConfidence,
+		Message:              buildFallbackMessage(rc),
+		Candidates:           rc.RankedCandidates,
+		TotalCandidates:      len(rc.RankedCandidates),
+		NeedsClarification:   rc.RequiresClarification,
+		ClarificationQuestion: rc.ClarificationQuestion,
+		FromCache:            false,
+	}
+
+	// CRITICAL 3: Cuando se necesita aclaración, no devolver candidatos.
+	if rc.RequiresClarification {
+		resp.Candidates = nil
+		resp.TotalCandidates = 0
+	}
+
+	return resp, nil
+}
+
+// resolveEnvCacheEntry reads the full env:{ip} cache entry from DragonflyDB.
+// Returns nil if the cache is not available or cannot be parsed.
+func (uc *UseCase) resolveEnvCacheEntry(ctx context.Context, ip string) *sharedEnv.CacheEntry {
+	if uc.rdb == nil {
+		return nil
+	}
+	key := sharedEnv.CacheKey(ip)
+	raw, err := uc.rdb.Get(ctx, key).Result()
+	if err != nil {
+		return nil
+	}
+	if raw == "" {
+		return nil
+	}
+	var entry sharedEnv.CacheEntry
+	if err := json.Unmarshal([]byte(raw), &entry); err != nil {
+		return nil
+	}
+	return &entry
+}
+
+// =============================================================================
+// dedupCandidates — elimina duplicados por nombre de destino
+// =============================================================================
+
+// dedupCandidates elimina candidatos duplicados manteniendo el primero encontrado.
+func dedupCandidates(candidates []Candidate) []Candidate {
+	seen := make(map[string]bool)
+	var unique []Candidate
+	for _, c := range candidates {
+		if !seen[c.Destination] {
+			seen[c.Destination] = true
+			unique = append(unique, c)
+		}
+	}
+	return unique
+}
+
+// =============================================================================
 // Conversation management
 // =============================================================================
 
@@ -528,25 +772,26 @@ func (uc *UseCase) resolveLocationHint(ctx context.Context, userID, clientIP str
 
 	if userID != "" {
 		// Authenticated user: get country_code from profile prefs.
-		_, _, cc, _, found, err := userprefs.GetProfilePrefs(ctx, uc.rdb, userID)
-		if err != nil || !found || cc == "" {
+		prefs, err := sharedUser.GetProfilePrefs(ctx, uc.rdb, userID)
+		if err != nil || prefs == nil || prefs.CountryCode == "" {
 			slog.DebugContext(ctx, "resolveLocationHint: auth user has no profile prefs, skipping",
 				slog.String("user_id", userID),
-				slog.Bool("found", found),
+				slog.Bool("found", prefs != nil),
 			)
 			return ""
 		}
-		countryCode = cc
+		countryCode = prefs.CountryCode
 
-		// Resolve country name and main airport IATA.
-		if info, ok := envdomain.GetCountryInfo(cc); ok {
-			country = info.Country
-		} else {
-			slog.DebugContext(ctx, "resolveLocationHint: unknown country code",
-				slog.String("country_code", cc),
+		// Resolve country name and main airport IATA from env cache for the client IP.
+		ci, ciErr := sharedEnv.GetCountryInfo(ctx, uc.rdb, clientIP)
+		if ciErr != nil || ci.Country == "" {
+			slog.DebugContext(ctx, "resolveLocationHint: env cache lookup failed for auth user",
+				slog.String("ip", clientIP),
+				slog.String("country_code", countryCode),
 			)
 			return ""
 		}
+		country = ci.Country
 
 		// Try to get main airport IATA for this country.
 		if mainIATA, found := airports.ResolveCountryToIATA(country); found {
@@ -611,10 +856,11 @@ func (uc *UseCase) resolveLocationHint(ctx context.Context, userID, clientIP str
 	// Fallback: use DEFAULT_COUNTRY_CODE from config when no location data is available
 	// (e.g. first request in local dev where /v1/environment hasn't been called).
 	if city == "" && country == "" && countryCode == "" && uc.defaultsCfg.CountryCode != "" {
-		cc := uc.defaultsCfg.CountryCode
-		if info, ok := envdomain.GetCountryInfo(cc); ok {
-			countryCode = cc
-			country = info.Country
+		// Intentar obtener CountryInfo desde la caché de entorno para la IP.
+		ci, ciErr := sharedEnv.GetCountryInfo(ctx, uc.rdb, clientIP)
+		if ciErr == nil && ci.Country != "" {
+			countryCode = uc.defaultsCfg.CountryCode
+			country = ci.Country
 			if mainIATA, found := airports.ResolveCountryToIATA(country); found {
 				iata = mainIATA
 				// Try to get the main city for this country (without the ", Country" suffix).
@@ -625,7 +871,7 @@ func (uc *UseCase) resolveLocationHint(ctx context.Context, userID, clientIP str
 				}
 			}
 			slog.DebugContext(ctx, "resolveLocationHint: resolved via default country code",
-				slog.String("country_code", cc),
+				slog.String("country_code", uc.defaultsCfg.CountryCode),
 				slog.String("country", country),
 				slog.String("city", city),
 				slog.String("iata", iata),
@@ -1021,8 +1267,11 @@ func normalizeDate(date string) string {
 }
 
 // Valid enum sets for SerpAPI flight search parameters.
+// Alineado con search_flights/command.go: top, price, departure_time,
+// arrival_time, duration, emissions.
 var validSortBy = map[string]bool{
-	"top": true, "best": true, "fastest": true, "cheapest": true,
+	"top": true, "price": true, "departure_time": true,
+	"arrival_time": true, "duration": true, "emissions": true,
 }
 
 var validTravelClass = map[string]bool{
@@ -1064,7 +1313,7 @@ func (uc *UseCase) interpretWithCache(ctx context.Context, message string, histo
 	// Only cache complete intents — incomplete/ambiguous queries
 	// need fresh follow-up questions per conversation context
 	if uc.interpCache != nil && isCompleteIntent(intent.Type) {
-		_ = uc.interpCache.Set(ctx, cacheKey, intent, 10*time.Minute)
+		_ = uc.interpCache.Set(ctx, cacheKey, intent, uc.interpCacheTTL)
 	}
 
 	return intent, false, nil

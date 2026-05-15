@@ -1,5 +1,5 @@
 // Lógica de negocio para obtener detalles de un vuelo.
-// Orkesta cache y proveedor externo.
+// Orquesta cache y proveedor externo.
 package flight_details
 
 import (
@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
+	searchshared "github.com/ProacTrip/Backend/internal/modules/search/shared"
 	"github.com/ProacTrip/Backend/internal/shared/ratelimit"
 	serrors "github.com/ProacTrip/Backend/internal/shared/errors"
 )
@@ -73,10 +74,23 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		return nil, err
 	}
 
-	// 2. Generate cache key — includes ALL params that affect results
-	cacheKey := generateCacheKey(cmd)
+	// 2. Construir request de dominio para proveedor y cache key
+	providerReq := domain.FlightDetailsRequest{
+		BookingToken: cmd.BookingToken,
+		Adults:       cmd.Adults,
+		DepartureID:  cmd.Departure,
+		ArrivalID:    cmd.Arrival,
+		OutboundDate: cmd.OutboundDate,
+		ReturnDate:   cmd.ReturnDate,
+		GL:           searchshared.PtrOrEmpty(cmd.GL),
+		HL:           searchshared.PtrOrEmpty(cmd.HL),
+		Currency:     searchshared.PtrOrEmpty(cmd.Currency),
+	}
 
-	// 3. Try cache
+	// 3. Generate cache key — includes ALL params that affect results
+	cacheKey := generateCacheKey(providerReq)
+
+	// 4. Try cache
 	if cached, err := uc.cache.Get(ctx, cacheKey); err == nil && cached != "" {
 		var resp Response
 		if err := json.Unmarshal([]byte(cached), &resp); err == nil {
@@ -90,7 +104,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		)
 	}
 
-	// 4. Rate limit check — after cache miss, before provider call
+	// 5. Rate limit check — after cache miss, before provider call
 	if uc.rateLimiter != nil {
 		if result, err := uc.rateLimiter.ProviderAllow(ctx, "serpapi"); err != nil {
 			slog.ErrorContext(ctx, "rate limit check failed", slog.Any("error", err))
@@ -100,41 +114,33 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		}
 	}
 
-	// 5. Cache miss — call provider
-	providerReq := domain.FlightDetailsRequest{
-		BookingToken: cmd.BookingToken,
-		Adults:       cmd.Adults,
-		DepartureID:  cmd.Departure,
-		ArrivalID:    cmd.Arrival,
-		OutboundDate: cmd.OutboundDate,
-		ReturnDate:   cmd.ReturnDate,
-		GL:           ptrStr(cmd.GL),
-		HL:           ptrStr(cmd.HL),
-		Currency:     ptrStr(cmd.Currency),
-	}
+	// 6. Cache miss — call provider
 	resp, err := uc.provider.GetFlightDetails(ctx, providerReq)
 	if err != nil {
 		return nil, fmt.Errorf("flight details: %w", err)
 	}
 
-	// 6. Save to cache async — fire-and-forget with WaitGroup tracking
-	bgCtx := context.WithoutCancel(ctx)
-	uc.wg.Go(func() {
-		data, err := json.Marshal(resp)
-		if err != nil {
-			slog.ErrorContext(bgCtx, "flight details cache marshal failed",
-				slog.String("key", cacheKey),
-				slog.Any("err", err),
-			)
-			return
-		}
-		if err := uc.cache.Set(bgCtx, cacheKey, string(data), uc.detailsTTL); err != nil {
-			slog.ErrorContext(bgCtx, "flight details cache set failed",
-				slog.String("key", cacheKey),
-				slog.Any("err", err),
-			)
-		}
-	})
+	// 7. Set timestamp, marshal BEFORE spawning goroutine to prevent
+	// data race: handler writes resp.FromCache=false after return, but
+	// goroutine reads resp via json.Marshal. Pre-marshaling avoids the race.
+	resp.CachedAt = new(time.Now()) // timestamp del fetch original
+	fullData, marshalErr := json.Marshal(resp)
+	if marshalErr != nil {
+		slog.ErrorContext(ctx, "flight details cache marshal failed",
+			slog.String("key", cacheKey),
+			slog.Any("err", marshalErr),
+		)
+	} else {
+		bgCtx := context.WithoutCancel(ctx)
+		uc.wg.Go(func() {
+			if err := uc.cache.Set(bgCtx, cacheKey, string(fullData), uc.detailsTTL); err != nil {
+				slog.ErrorContext(bgCtx, "flight details cache set failed",
+					slog.String("key", cacheKey),
+					slog.Any("err", err),
+				)
+			}
+		})
+	}
 
 	return resp, nil
 }
@@ -143,23 +149,13 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 // Generación de Clave de Cache
 // =============================================================================
 
-// generateCacheKey builds a deterministic cache key from ALL params that affect
-// the flight details response. Uses blake3 hash for fixed-size keys.
-func generateCacheKey(cmd Command) string {
-	// Marshal the command to JSON — includes booking_token, adults, currency,
-	// departure, arrival, outbound_date, return_date, gl, hl.
-	raw, err := json.Marshal(cmd)
+// generateCacheKey construye una clave de cache determinista a partir del request
+// de dominio. Usa blake3 para claves de tamaño fijo.
+func generateCacheKey(req domain.FlightDetailsRequest) string {
+	raw, err := json.Marshal(req)
 	if err != nil {
-		// Fallback: limited key (should never happen).
-		return fmt.Sprintf("details:fallback:%s:%s", cmd.BookingToken, ptrStr(cmd.Currency))
+		// Fallback: clave limitada (no debería ocurrir).
+		return fmt.Sprintf("details:fallback:%s:%s", req.BookingToken, req.Currency)
 	}
 	return "details:" + domain.HashKey(raw)
-}
-
-// ptrStr returns the dereferenced string, or "" if nil.
-func ptrStr(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }

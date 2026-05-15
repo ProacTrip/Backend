@@ -3,6 +3,14 @@
 // garantizar compatibilidad de formato en tiempo de compilación.
 package environment
 
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"github.com/redis/go-redis/v9"
+)
+
 // =============================================================================
 // CacheEntry — Entrada canónica del caché env:{ip}
 // =============================================================================
@@ -59,4 +67,46 @@ type WeatherDTO struct {
 // que leen y escriben la misma clave.
 func CacheKey(ip string) string {
 	return "env:" + ip
+}
+
+// =============================================================================
+// CountryInfo — información de país desde caché de entorno
+// =============================================================================
+
+// CountryInfo contiene la información de país extraída del caché env:{ip}.
+// Se obtiene llamando a GetCountryInfo, que lee el CacheEntry de Dragonfly.
+type CountryInfo struct {
+	Country  string `json:"country"`
+	Currency string `json:"currency"`
+	Language string `json:"language"`
+}
+
+// GetCountryInfo obtiene la información del país para una IP dada desde el
+// caché de entorno env:{ip} en DragonflyDB. Retorna CountryInfo con los campos
+// country, currency, language extraídos del LocationDTO en el CacheEntry.
+// En cache miss, retorna CountryInfo zero-value sin error.
+func GetCountryInfo(ctx context.Context, rdb *redis.Client, ip string) (CountryInfo, error) {
+	key := CacheKey(ip)
+
+	raw, err := rdb.Get(ctx, key).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return CountryInfo{}, nil // cache miss no es error
+		}
+		return CountryInfo{}, fmt.Errorf("get country info: %w", err)
+	}
+	if raw == "" {
+		return CountryInfo{}, nil
+	}
+
+	var entry CacheEntry
+	if err := json.Unmarshal([]byte(raw), &entry); err != nil {
+		return CountryInfo{}, fmt.Errorf("unmarshal env cache: %w", err)
+	}
+
+	return CountryInfo{
+		Country:  entry.Location.Country,
+		Currency: entry.Location.Currency,
+		Language: entry.Location.Language,
+	}, nil
 }

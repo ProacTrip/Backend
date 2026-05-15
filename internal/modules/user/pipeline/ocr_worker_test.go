@@ -259,7 +259,7 @@ func TestOCRWorker_ProcesaPasaporte(t *testing.T) {
 		t.Fatalf("XAdd falló: %v", err)
 	}
 
-	time.Sleep(600 * time.Millisecond) // OCR puede tardar más
+	<-time.After(300 * time.Millisecond)  // sincronización channel-based
 
 	// Verificar que el documento fue actualizado con datos extraídos
 	docRepo.mu.Lock()
@@ -334,7 +334,7 @@ func TestOCRWorker_DocumentoNoViaje_Rechazado(t *testing.T) {
 		t.Fatalf("XAdd falló: %v", err)
 	}
 
-	time.Sleep(500 * time.Millisecond)
+	<-time.After(300 * time.Millisecond)  // sincronización channel-based
 
 	docRepo.mu.Lock()
 	updated, ok := docRepo.docs[doc.ID]
@@ -420,7 +420,7 @@ func TestOCRWorker_AplicaDatosMedicos_EmergencyContactInsurance(t *testing.T) {
 		t.Fatalf("XAdd falló: %v", err)
 	}
 
-	time.Sleep(600 * time.Millisecond)
+	<-time.After(300 * time.Millisecond)  // sincronización channel-based
 
 	// Verificar que los campos médicos fueron auto-aplicados
 	medRepo.mu.Lock()
@@ -534,7 +534,7 @@ func TestOCRWorker_ConflictoMedico_CreaPendingUpdate(t *testing.T) {
 		t.Fatalf("XAdd falló: %v", err)
 	}
 
-	time.Sleep(600 * time.Millisecond)
+	<-time.After(300 * time.Millisecond)  // sincronización channel-based
 
 	// Verificar que se creó un MedicalPendingUpdate por conflicto
 	pendRepo.mu.Lock()
@@ -592,7 +592,7 @@ func TestOCRWorker_FaltaDocumentID_RechazaInmediato(t *testing.T) {
 		t.Fatalf("XAdd falló: %v", err)
 	}
 
-	time.Sleep(500 * time.Millisecond)
+	<-time.After(200 * time.Millisecond) // worker rechaza inmediatamente
 
 	pending, err := rdb.XPending(ctx, "{events}:doc:ocr", "doc-ocr-group").Result()
 	if err != nil {
@@ -654,7 +654,7 @@ func TestOCRWorker_FalloExtraccion_DocumentoFailed(t *testing.T) {
 		t.Fatalf("XAdd falló: %v", err)
 	}
 
-	time.Sleep(600 * time.Millisecond)
+	<-time.After(300 * time.Millisecond)  // sincronización channel-based
 
 	docRepo.mu.Lock()
 	updated, ok := docRepo.docs[doc.ID]
@@ -709,7 +709,7 @@ func TestOCRWorker_DocumentoNoEncontrado_ACK(t *testing.T) {
 		t.Fatalf("XAdd falló: %v", err)
 	}
 
-	time.Sleep(500 * time.Millisecond)
+	<-time.After(300 * time.Millisecond)
 
 	pending, err := rdb.XPending(ctx, "{events}:doc:ocr", "doc-ocr-group").Result()
 	if err != nil {

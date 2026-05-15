@@ -7,10 +7,11 @@ import (
 )
 
 func TestErrRateLimitExceededSentinel(t *testing.T) {
-	// Verify sentinel is defined and has expected message
-	if ErrRateLimitExceeded.Error() != "rate limit exceeded" {
+	// Verify sentinel uses correct CODE: description format
+	want := "RATE_LIMIT_EXCEEDED: límite de solicitudes excedido"
+	if ErrRateLimitExceeded.Error() != want {
 		t.Errorf("ErrRateLimitExceeded.Error() = %q, want %q",
-			ErrRateLimitExceeded.Error(), "rate limit exceeded")
+			ErrRateLimitExceeded.Error(), want)
 	}
 }
 

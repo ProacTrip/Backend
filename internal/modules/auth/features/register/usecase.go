@@ -201,6 +201,10 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command, envIP string) (*Res
 		if envTimezone != "" {
 			flatPayload["timezone_name"] = envTimezone
 		}
+		// Client IP — requerida por el user consumer para el fallback de entorno
+		if envIP != "" {
+			flatPayload["client_ip"] = envIP
+		}
 		if _, err := uc.eventPublisher.Publish(ctx, streamName, flatPayload); err != nil {
 			slog.ErrorContext(ctx, "failed to publish auth user event",
 				slog.String("event", "auth.user.registered"),

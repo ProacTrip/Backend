@@ -246,6 +246,52 @@ func TestUseCase_Execute(t *testing.T) {
 			errNoEs:     domain.ErrInvalidCredentials,
 			errContiene: "get user by email",
 		},
+		{
+			nombre:  "cuenta_deshabilitada",
+			comando: login.Command{Email: "disabled@test.com", Password: "password123"},
+			repo: &useCaseUserRepo{
+				getByEmail: func(ctx context.Context, email string) (*domain.User, error) {
+					u := useCaseUsuarioActivo(email)
+					u.Status = domain.StatusDisabled
+					return u, nil
+				},
+			},
+			hasher:    &useCasePasswordSvc{},
+			tokens:    &useCaseTokenSvc{},
+			quiereErr: true,
+			errEs:     domain.ErrAccountDisabled,
+		},
+		{
+			nombre:  "cuenta_suspendida",
+			comando: login.Command{Email: "suspended@test.com", Password: "password123"},
+			repo: &useCaseUserRepo{
+				getByEmail: func(ctx context.Context, email string) (*domain.User, error) {
+					u := useCaseUsuarioActivo(email)
+					u.Status = domain.StatusSuspended
+					return u, nil
+				},
+			},
+			hasher:    &useCasePasswordSvc{},
+			tokens:    &useCaseTokenSvc{},
+			quiereErr: true,
+			errEs:     domain.ErrAccountSuspended,
+		},
+		{
+			nombre:  "cuenta_pendiente_verificacion",
+			comando: login.Command{Email: "pending@test.com", Password: "password123"},
+			repo: &useCaseUserRepo{
+				getByEmail: func(ctx context.Context, email string) (*domain.User, error) {
+					u := useCaseUsuarioActivo(email)
+					u.Status = domain.StatusPendingVerification
+					u.EmailVerified = false // Consistencia con el estado
+					return u, nil
+				},
+			},
+			hasher:    &useCasePasswordSvc{},
+			tokens:    &useCaseTokenSvc{},
+			quiereErr: true,
+			errEs:     domain.ErrEmailNotVerified,
+		},
 	}
 
 	for _, tt := range tests {

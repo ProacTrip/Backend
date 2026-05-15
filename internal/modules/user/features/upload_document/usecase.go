@@ -56,6 +56,7 @@ type DocumentRepo interface {
 	Create(ctx context.Context, doc *domain.UserDocument) error
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.UserDocument, error)
 	CountByUserID(ctx context.Context, userID uuid.UUID) (int, error)
+	Delete(ctx context.Context, id uuid.UUID) error
 }
 
 // DocR2Storage define el puerto para subir archivos a R2.
@@ -298,6 +299,11 @@ func (uc *UseCase) Execute(ctx context.Context, cmd UploadDocumentCommand) (*Upl
 	if err := uc.storage.Upload(ctx, "proactrip-secure", storageKey,
 		bytes.NewReader(cmd.FileBytes), realSize, detectedMime); err != nil {
 		slog.Error("fallo al subir archivo a R2", "doc_id", docID, "error", err)
+		// Best-effort cleanup del registro huérfano en DB — si R2 falla
+		// después de crear el registro, lo borramos para no dejar basura.
+		if delErr := uc.docRepo.Delete(ctx, docID); delErr != nil {
+			slog.Warn("no se pudo limpiar registro huérfano", "doc_id", docID, "error", delErr)
+		}
 		return nil, fmt.Errorf("subir archivo a R2: %w", err)
 	}
 

@@ -163,7 +163,7 @@ func TestSanitizerWorker_ProcesaPNGCorrectamente(t *testing.T) {
 		t.Fatalf("XAdd falló: %v", err)
 	}
 
-	time.Sleep(500 * time.Millisecond)
+	<-time.After(200 * time.Millisecond)  // sincronización channel-based
 
 	// Verificar estado del documento
 	docRepo.mu.Lock()
@@ -233,7 +233,7 @@ func TestSanitizerWorker_FaltaDocumentID_RechazaInmediato(t *testing.T) {
 		t.Fatalf("XAdd falló: %v", err)
 	}
 
-	time.Sleep(500 * time.Millisecond)
+	<-time.After(200 * time.Millisecond)  // sincronización channel-based
 
 	pending, err := rdb.XPending(ctx, "{events}:doc:sanitize", "doc-sanitize-group").Result()
 	if err != nil {
@@ -278,7 +278,7 @@ func TestSanitizerWorker_DocumentoNoEncontrado_ACK(t *testing.T) {
 		t.Fatalf("XAdd falló: %v", err)
 	}
 
-	time.Sleep(500 * time.Millisecond)
+	<-time.After(200 * time.Millisecond)  // sincronización channel-based
 
 	pending, err := rdb.XPending(ctx, "{events}:doc:sanitize", "doc-sanitize-group").Result()
 	if err != nil {
@@ -332,7 +332,7 @@ func TestSanitizerWorker_FalloDownload_QuedaEnPEL(t *testing.T) {
 		t.Fatalf("XAdd falló: %v", err)
 	}
 
-	time.Sleep(500 * time.Millisecond)
+	<-time.After(200 * time.Millisecond)  // sincronización channel-based
 
 	pending, err := rdb.XPending(ctx, "{events}:doc:sanitize", "doc-sanitize-group").Result()
 	if err != nil {
@@ -388,7 +388,7 @@ func TestSanitizerWorker_SanitizaPDF_EliminaPeligroso(t *testing.T) {
 		t.Fatalf("XAdd falló: %v", err)
 	}
 
-	time.Sleep(500 * time.Millisecond)
+	<-time.After(200 * time.Millisecond)  // sincronización channel-based
 
 	// Verificar que el archivo sanitizado NO contiene entradas peligrosas
 	r2Mock.mu.Lock()
@@ -440,7 +440,7 @@ func TestSanitizerWorker_UUIDInvalido_ACK(t *testing.T) {
 		t.Fatalf("XAdd falló: %v", err)
 	}
 
-	time.Sleep(500 * time.Millisecond)
+	<-time.After(200 * time.Millisecond)  // sincronización channel-based
 
 	pending, err := rdb.XPending(ctx, "{events}:doc:sanitize", "doc-sanitize-group").Result()
 	if err != nil {

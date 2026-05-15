@@ -151,13 +151,21 @@ func (s *PasetoService) ValidateAccessToken(ctx context.Context, tokenString str
 
 	role, _ := pasetoToken.GetString("role")
 
+	// Leer token_version con default 1 para backward compatibility.
+	// Tokens legacy (emitidos antes de esta feature) no tienen el campo.
+	var tokenVersion int
+	if err := pasetoToken.Get("token_version", &tokenVersion); err != nil {
+		tokenVersion = 1 // Default seguro para tokens legacy
+	}
+
 	return &AccessClaims{
-		UserID:    userID,
-		Email:     email,
-		RoleID:    roleID,
-		Role:      role,
-		SessionID: sessionID,
-		JTI:       jtiUUID,
+		UserID:       userID,
+		Email:        email,
+		RoleID:       roleID,
+		Role:         role,
+		SessionID:    sessionID,
+		JTI:          jtiUUID,
+		TokenVersion: tokenVersion,
 	}, nil
 }
 
@@ -235,6 +243,8 @@ func (s *PasetoService) ValidateRefreshToken(ctx context.Context, tokenString st
 
 // ValidateAndRotateRefresh valida el refresh token, blacklistea el JTI anterior
 // y genera un nuevo par de tokens (access + refresh). Implementa rotación silenciosa.
+// Los tokens nuevos usan token_version=1 (legacy). Para rotación con versión real,
+// usar ValidateAndRotateRefreshWithVersion.
 func (s *PasetoService) ValidateAndRotateRefresh(ctx context.Context, refreshToken string) (*RefreshClaims, string, string, error) {
 	claims, err := s.ValidateRefreshToken(ctx, refreshToken)
 	if err != nil {
@@ -251,6 +261,46 @@ func (s *PasetoService) ValidateAndRotateRefresh(ctx context.Context, refreshTok
 	}
 
 	newRefresh, err := s.GenerateRefreshToken(claims.UserID, claims.Email, claims.Role, claims.RoleID, claims.SessionID)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("generate refresh token: %w", err)
+	}
+
+	return claims, newAccess, newRefresh, nil
+}
+
+// ValidateAndRotateRefreshWithVersion valida el refresh token, blacklistea el JTI
+// anterior y genera un nuevo par de tokens con la versión especificada.
+// El token_version pasado debe ser el valor actual en la DB del usuario.
+// Usado por el middleware de autenticación cuando el pipeline de sesión ya validó
+// el estado de la cuenta y obtuvo la versión real desde la DB.
+func (s *PasetoService) ValidateAndRotateRefreshWithVersion(
+	ctx context.Context,
+	refreshToken string,
+	tokenVersion int,
+) (*RefreshClaims, string, string, error) {
+	claims, err := s.ValidateRefreshToken(ctx, refreshToken)
+	if err != nil {
+		return nil, "", "", err
+	}
+
+	if err := s.blacklistJTI(ctx, claims.JTI); err != nil {
+		return nil, "", "", fmt.Errorf("blacklist JTI: %w", err)
+	}
+
+	// Generar access token con el token_version real desde DB
+	newAccess, _, err := s.generateAccessTokenWithVersion(
+		claims.UserID, claims.Email, claims.Role,
+		claims.RoleID, claims.SessionID, tokenVersion,
+	)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("generate access token: %w", err)
+	}
+
+	// Generar refresh token con el token_version real desde DB
+	newRefresh, _, err := s.generateRefreshTokenWithVersion(
+		claims.UserID, claims.Email, claims.Role,
+		claims.RoleID, claims.SessionID, tokenVersion,
+	)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("generate refresh token: %w", err)
 	}
@@ -297,6 +347,28 @@ func (s *PasetoService) generateAccessToken(userID uuid.UUID, email, role string
 	token.SetString("session_id", sessionID.String())
 	token.SetJti(jti.String())
 	token.SetString("type", "access")
+	token.Set("token_version", 1) // Por defecto 1 para nuevos logins y OAuth
+	token.SetExpiration(time.Now().Add(s.accessTTL))
+
+	encrypted := token.V4Encrypt(s.symmetricKey, nil)
+	return encrypted, jti, nil
+}
+
+// generateAccessTokenWithVersion genera un access token con el token_version especificado.
+// Usado por ValidateAndRotateRefreshWithVersion para tokens de rotación que deben
+// reflejar la versión actual en DB.
+func (s *PasetoService) generateAccessTokenWithVersion(userID uuid.UUID, email, role string, roleID, sessionID uuid.UUID, tokenVersion int) (string, uuid.UUID, error) {
+	jti := uuid.Must(uuid.NewV7())
+
+	token := paseto.NewToken()
+	token.SetSubject(userID.String())
+	token.SetString("email", email)
+	token.SetString("role", role)
+	token.SetString("role_id", roleID.String())
+	token.SetString("session_id", sessionID.String())
+	token.SetJti(jti.String())
+	token.SetString("type", "access")
+	token.Set("token_version", tokenVersion)
 	token.SetExpiration(time.Now().Add(s.accessTTL))
 
 	encrypted := token.V4Encrypt(s.symmetricKey, nil)
@@ -314,6 +386,27 @@ func (s *PasetoService) generateRefreshToken(userID uuid.UUID, email, role strin
 	token.SetString("session_id", sessionID.String())
 	token.SetJti(jti.String())
 	token.SetString("type", "refresh")
+	token.Set("token_version", 1) // Por defecto 1 para nuevos logins y OAuth
+	token.SetExpiration(time.Now().Add(s.refreshTTL))
+
+	encrypted := token.V4Encrypt(s.symmetricKey, nil)
+	return encrypted, jti, nil
+}
+
+// generateRefreshTokenWithVersion genera un refresh token con el token_version especificado.
+// Usado por ValidateAndRotateRefreshWithVersion para tokens de rotación.
+func (s *PasetoService) generateRefreshTokenWithVersion(userID uuid.UUID, email, role string, roleID, sessionID uuid.UUID, tokenVersion int) (string, uuid.UUID, error) {
+	jti := uuid.Must(uuid.NewV7())
+
+	token := paseto.NewToken()
+	token.SetSubject(userID.String())
+	token.SetString("email", email)
+	token.SetString("role", role)
+	token.SetString("role_id", roleID.String())
+	token.SetString("session_id", sessionID.String())
+	token.SetJti(jti.String())
+	token.SetString("type", "refresh")
+	token.Set("token_version", tokenVersion)
 	token.SetExpiration(time.Now().Add(s.refreshTTL))
 
 	encrypted := token.V4Encrypt(s.symmetricKey, nil)

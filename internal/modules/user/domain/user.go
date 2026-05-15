@@ -31,9 +31,10 @@ const (
 type UserProfileStatus string
 
 const (
-	ProfileStatusPending  UserProfileStatus = "pending"
-	ProfileStatusActive   UserProfileStatus = "active"
-	ProfileStatusInactive UserProfileStatus = "inactive"
+	ProfileStatusActive    UserProfileStatus = "active"
+	ProfileStatusInactive  UserProfileStatus = "inactive"
+	ProfileStatusSuspended UserProfileStatus = "suspended"
+	ProfileStatusDeleted   UserProfileStatus = "deleted"
 )
 
 // Gender representa el género del usuario
@@ -64,10 +65,11 @@ type UserProfile struct {
 	TimezoneName    string     `json:"timezone_name"` // NOT NULL DEFAULT 'UTC'
 	LanguageCode    string     `json:"language_code"` // NOT NULL DEFAULT 'es'
 	CurrencyCode    string     `json:"currency_code"` // NOT NULL DEFAULT 'EUR'
-	Role            string     `json:"role,omitzero"` // "client" or "admin", default "client"
-	IsPublic        bool       `json:"is_public"`     // NOT NULL DEFAULT FALSE
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	Role            string              `json:"role,omitzero"` // "client" or "admin", default "client"
+	Status          UserProfileStatus    `json:"status,omitzero"` // default "active"
+	IsPublic        bool                 `json:"is_public"`     // NOT NULL DEFAULT FALSE
+	CreatedAt       time.Time            `json:"created_at"`
+	UpdatedAt       time.Time            `json:"updated_at"`
 }
 
 // =============================================================================
@@ -89,6 +91,7 @@ func NewUserProfile(userID uuid.UUID, email string) *UserProfile {
 		LanguageCode:  DefaultLanguage,
 		CurrencyCode:  DefaultCurrency,
 		// Role es asignado por el sistema de auth, no por la factoría del perfil.
+		Status:        ProfileStatusActive,
 		IsPublic:      false,
 		PhoneVerified: false,
 		CreatedAt:     now,

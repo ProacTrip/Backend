@@ -30,6 +30,11 @@ func (h *Handler) Handle(c *echo.Context) error {
 		return httperr.MapError(c, err)
 	}
 
+	// Rate limit — chequeo más barato, bloquea spam antes de CPU/IO
+	if err := h.usecase.CheckRateLimit(c.Request().Context(), claims.UserID.String()); err != nil {
+		return httperr.MapError(c, err)
+	}
+
 	var cmd Command
 	if err := c.Bind(&cmd); err != nil {
 		return httperr.MapError(c, err)

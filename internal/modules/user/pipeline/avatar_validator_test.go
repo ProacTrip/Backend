@@ -25,11 +25,12 @@ type avatarMockRepo struct {
 	mu          sync.Mutex
 	avatars     map[uuid.UUID]string // userID → avatarURL
 	updateErr   error
+	updateDone chan struct{} // señala cuando UpdateAvatar es llamado
 	updateCalls int
 }
 
 func newAvatarMockRepo() *avatarMockRepo {
-	return &avatarMockRepo{avatars: make(map[uuid.UUID]string)}
+	return &avatarMockRepo{avatars: make(map[uuid.UUID]string), updateDone: make(chan struct{}, 1)}
 }
 
 func (m *avatarMockRepo) Create(ctx context.Context, profile *domain.UserProfile) error { return nil }
@@ -60,10 +61,7 @@ func (m *avatarMockRepo) UpdateAvatar(ctx context.Context, userID uuid.UUID, ava
 		return m.updateErr
 	}
 	m.avatars[userID] = avatarURL
-	return nil
-}
-
-func (m *avatarMockRepo) UpdateStatus(ctx context.Context, userID uuid.UUID, status domain.UserProfileStatus) error {
+	select { case m.updateDone <- struct{}{}: default: }
 	return nil
 }
 
@@ -108,11 +106,11 @@ func TestAvatarValidator_ProcesaAvatarCorrectamente(t *testing.T) {
 	}
 
 	// Esperar procesamiento (el worker usa Block: 5s)
-	time.Sleep(500 * time.Millisecond)
+	<-time.After(200 * time.Millisecond)
 
 	// Cancelar contexto y esperar cleanup
 	cancel()
-	time.Sleep(200 * time.Millisecond)
+	<-time.After(200 * time.Millisecond)
 
 	// Verificar que UpdateAvatar fue llamado
 	repo.mu.Lock()
@@ -163,9 +161,9 @@ func TestAvatarValidator_MensajeSinUserID_RechazaInmediato(t *testing.T) {
 		t.Fatalf("XAdd falló: %v", err)
 	}
 
-	time.Sleep(500 * time.Millisecond)
+	<-time.After(200 * time.Millisecond)
 	cancel()
-	time.Sleep(200 * time.Millisecond)
+	<-time.After(200 * time.Millisecond)
 
 	// Verificar que UpdateAvatar NO fue llamado
 	repo.mu.Lock()
@@ -206,9 +204,9 @@ func TestAvatarValidator_MensajeSinStorageKey_RechazaInmediato(t *testing.T) {
 		t.Fatalf("XAdd falló: %v", err)
 	}
 
-	time.Sleep(500 * time.Millisecond)
+	<-time.After(200 * time.Millisecond)
 	cancel()
-	time.Sleep(200 * time.Millisecond)
+	<-time.After(200 * time.Millisecond)
 
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
@@ -249,9 +247,9 @@ func TestAvatarValidator_UserIDInvalido_RechazaInmediato(t *testing.T) {
 		t.Fatalf("XAdd falló: %v", err)
 	}
 
-	time.Sleep(500 * time.Millisecond)
+	<-time.After(200 * time.Millisecond)
 	cancel()
-	time.Sleep(200 * time.Millisecond)
+	<-time.After(200 * time.Millisecond)
 
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
@@ -296,7 +294,7 @@ func TestAvatarValidator_FalloUpdateAvatar_QuedaEnPEL(t *testing.T) {
 	}
 
 	// Esperar que el worker intente procesar
-	time.Sleep(600 * time.Millisecond)
+	<-time.After(200 * time.Millisecond)
 
 	// Verificar que el mensaje está en PEL (NO fue XACkeado porque falló UpdateAvatar)
 	pending, err := rdb.XPending(ctx, "{events}:avatar:validate", "avatar-validator-group").Result()
@@ -310,7 +308,7 @@ func TestAvatarValidator_FalloUpdateAvatar_QuedaEnPEL(t *testing.T) {
 	}
 
 	cancel()
-	time.Sleep(200 * time.Millisecond)
+	<-time.After(200 * time.Millisecond)
 }
 
 // =============================================================================

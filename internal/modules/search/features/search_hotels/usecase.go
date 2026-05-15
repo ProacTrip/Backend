@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
+	searchshared "github.com/ProacTrip/Backend/internal/modules/search/shared"
 	"github.com/ProacTrip/Backend/internal/shared/ratelimit"
 	serrors "github.com/ProacTrip/Backend/internal/shared/errors"
 )
@@ -66,12 +67,8 @@ func (uc *UseCase) Wait() {
 // =============================================================================
 
 // Execute performs the hotel search with caching.
+// Validate() ya se ejecutó en el handler — no se repite acá.
 func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) {
-	// 1. Validate
-	if err := cmd.Validate(); err != nil {
-		return nil, err
-	}
-
 	// 2. Convert to domain request
 	domainReq := cmd.ToDomain()
 
@@ -117,8 +114,6 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 	}
 
 	// 5. Rate limit check — after cache miss, before provider call
-
-	// 5. Rate limit check — after cache miss, before provider call
 	if uc.rateLimiter != nil {
 		if result, err := uc.rateLimiter.ProviderAllow(ctx, "serpapi"); err != nil {
 			slog.ErrorContext(ctx, "rate limit check failed", slog.Any("error", err))
@@ -149,25 +144,29 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		slog.String("results_state", resp.ResultsState),
 	)
 
-	// 7. Set cached_at timestamp and save to cache async — fire-and-forget with WaitGroup tracking
-	resp.CachedAt = new(time.Now().UTC().Format(time.RFC3339))
-	bgCtx := context.WithoutCancel(ctx)
-	uc.wg.Go(func() {
-		data, err := json.Marshal(resp)
-		if err != nil {
-			slog.ErrorContext(bgCtx, "hotel search cache marshal failed",
+	// 7. Set cached_at timestamp and save to cache async — fire-and-forget with WaitGroup tracking.
+	// Marshal BEFORE spawning goroutine to prevent data race:
+	// handler writes resp.FromCache=false after return, goroutine reads resp via json.Marshal.
+	resp.CachedAt = new(time.Now())
+	if cacheKey != "" {
+		fullData, marshalErr := json.Marshal(resp)
+		if marshalErr != nil {
+			slog.ErrorContext(ctx, "hotel search cache marshal failed",
 				slog.String("key", cacheKey),
-				slog.Any("err", err),
+				slog.Any("err", marshalErr),
 			)
-			return
+		} else {
+			bgCtx := context.WithoutCancel(ctx)
+			uc.wg.Go(func() {
+				if err := uc.cache.Set(bgCtx, cacheKey, string(fullData), uc.searchTTL); err != nil {
+					slog.ErrorContext(bgCtx, "hotel search cache set failed",
+						slog.String("key", cacheKey),
+						slog.Any("err", err),
+					)
+				}
+			})
 		}
-		if err := uc.cache.Set(bgCtx, cacheKey, string(data), uc.searchTTL); err != nil {
-			slog.ErrorContext(bgCtx, "hotel search cache set failed",
-				slog.String("key", cacheKey),
-				slog.Any("err", err),
-			)
-		}
-	})
+	}
 
 	return resp, nil
 }
@@ -185,15 +184,7 @@ func generateCacheKey(req domain.HotelSearchRequest) string {
 	if err != nil {
 		// Fallback: limited key
 		return fmt.Sprintf("hotels:v2:fallback:%s:%s:%s:%s",
-			req.Query, req.CheckInDate, req.CheckOutDate, ptrStr(req.Currency))
+			req.Query, req.CheckInDate, req.CheckOutDate, searchshared.PtrOrEmpty(req.Currency))
 	}
-	return "hotels:v2:" + domain.HashKey(raw)
-}
-
-// ptrStr returns the dereferenced string, or "" if nil.
-func ptrStr(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
+	return "{search}:hotels:v2:" + domain.HashKey(raw)
 }

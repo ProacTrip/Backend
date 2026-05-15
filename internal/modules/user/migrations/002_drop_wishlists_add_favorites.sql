@@ -4,9 +4,6 @@
 -- Migra el modelo de wishlists a un modelo simplificado de favoritos.
 -- =============================================================================
 
--- +migrate Up
--- =============================================================================
-
 -- 1. Eliminar tablas antiguas de wishlists
 DROP TABLE IF EXISTS wishlist_items CASCADE;
 DROP TABLE IF EXISTS wishlists CASCADE;

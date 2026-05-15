@@ -13,7 +13,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/ProacTrip/Backend/internal/modules/user/domain"
-	"github.com/ProacTrip/Backend/internal/modules/user/features/shared"
+	sharedUser "github.com/ProacTrip/Backend/internal/shared/user"
 	"github.com/ProacTrip/Backend/internal/shared/eventbus"
 )
 
@@ -101,10 +101,12 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) error {
 
 	// Invalidate prefs cache
 	if uc.redisClient != nil {
-		_ = shared.DeleteProfilePrefs(ctx, uc.redisClient, userID.String())
+		_ = sharedUser.DeleteProfilePrefs(ctx, uc.redisClient, userID.String())
 	}
 
 	// Emit event (best-effort)
+	// Evento informativo — publicado para futuros consumers
+	// (notificación de locale, personalización de búsqueda).
 	if uc.eventPublisher != nil {
 		uc.wg.Go(func() {
 			bgCtx := context.WithoutCancel(ctx)

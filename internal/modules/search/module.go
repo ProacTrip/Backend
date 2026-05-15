@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"os"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/ProacTrip/Backend/internal/modules/search/adapters/postgres"
@@ -34,7 +36,7 @@ import (
 // =============================================================================
 
 // Module expone todos los handlers y dependencias del módulo Search.
-type 	Module struct {
+type Module struct {
 	SearchFlightsHandler      *search_flights.Handler
 	FlightDetailsHandler      *flight_details.Handler
 	SearchHotelsHandler       *search_hotels.Handler
@@ -49,6 +51,7 @@ type 	Module struct {
 	hdetailsUC     *hotel_details.UseCase
 	aiSearchUC     *ai_search.UseCase
 	ConvConsumer   *consumer.ConversationConsumer // event-driven PG persistence
+	sessionID      string                         // UUID v7 generado una vez por ciclo de vida del módulo
 }
 
 // Wait blocks until all fire-and-forget goroutines have completed.
@@ -115,6 +118,11 @@ type Config struct {
 
 	// SavedSearchProvider — provides access to saved searches from the user module.
 	SavedSearchProvider domain.SavedSearchProvider
+
+	// InterpretationCacheTTL — TTL para el caché de interpretación de IA.
+	// Leído de AI_INTERPRETATION_CACHE_TTL, default 10m.
+	// 0 = usar default 10m en el use case.
+	InterpretationCacheTTL time.Duration
 }
 
 // =============================================================================
@@ -123,6 +131,49 @@ type Config struct {
 
 // NewModule crea e inicializa el módulo Search con todas sus dependencias.
 func NewModule(cfg Config) (*Module, error) {
+	// 0. Read SEARCH_CACHE_TTL from env var (default 5m) if not explicitly set.
+	if cfg.SearchTTL == 0 {
+		cfg.SearchTTL = 5 * time.Minute
+		if envVal := os.Getenv("SEARCH_CACHE_TTL"); envVal != "" {
+			if parsed, err := time.ParseDuration(envVal); err == nil {
+				cfg.SearchTTL = parsed
+			} else {
+				slog.Warn("SEARCH_CACHE_TTL env var inválido, usando default 5m",
+					slog.String("value", envVal),
+					slog.String("error", err.Error()),
+				)
+			}
+		}
+	}
+	// Apply SEARCH_CACHE_TTL to all cache TTLs if not explicitly set
+	if cfg.FlightDetailsTTL == 0 {
+		cfg.FlightDetailsTTL = cfg.SearchTTL
+	}
+	if cfg.HotelSearchTTL == 0 {
+		cfg.HotelSearchTTL = cfg.SearchTTL
+	}
+	if cfg.HotelDetailsTTL == 0 {
+		cfg.HotelDetailsTTL = cfg.SearchTTL
+	}
+
+	// 0a. Read AI_INTERPRETATION_CACHE_TTL from env var (default 10m) if not explicitly set.
+	if cfg.InterpretationCacheTTL == 0 {
+		cfg.InterpretationCacheTTL = 10 * time.Minute
+		if envVal := os.Getenv("AI_INTERPRETATION_CACHE_TTL"); envVal != "" {
+			if parsed, err := time.ParseDuration(envVal); err == nil {
+				cfg.InterpretationCacheTTL = parsed
+			} else {
+				slog.Warn("AI_INTERPRETATION_CACHE_TTL env var inválido, usando default 10m",
+					slog.String("value", envVal),
+					slog.String("error", err.Error()),
+				)
+			}
+		}
+	}
+
+	// 0b. Generate sessionID once per module lifecycle.
+	sessionID := uuid.Must(uuid.NewV7()).String()
+
 	// 1. Provider
 	provider := cfg.Provider
 	if provider == nil {
@@ -177,9 +228,13 @@ func NewModule(cfg Config) (*Module, error) {
 
 	// 5. Handlers
 	searchHandler := search_flights.NewHandler(searchUC, cfg.RedisClient, cfg.SearchDefaults)
+	searchHandler.RateLimiter = cfg.RateLimiter
 	detailsHandler := flight_details.NewHandler(detailsUC, cfg.RedisClient, cfg.SearchDefaults)
+	detailsHandler.RateLimiter = cfg.RateLimiter
 	hotelsHandler := search_hotels.NewHandler(hotelsUC, cfg.RedisClient, cfg.SearchDefaults)
+	hotelsHandler.RateLimiter = cfg.RateLimiter
 	hdetailsHandler := hotel_details.NewHandler(hdetailsUC, cfg.RedisClient, cfg.SearchDefaults)
+	hdetailsHandler.RateLimiter = cfg.RateLimiter
 
 	// 6. AI Search (nil interpreter = AI disabled — handler returns 503)
 	var aiSearchHandler *ai_search.Handler
@@ -213,8 +268,13 @@ func NewModule(cfg Config) (*Module, error) {
 			},
 			RDB:         cfg.RedisClient,
 			DefaultsCfg: cfg.SearchDefaults,
+			// Discovery feature flags — leídos de variables de entorno
+			DiscoveryEnabled:        parseEnvBool("AI_DISCOVERY_ENABLED"),
+			DiscoveryClarifyEnabled: parseEnvBool("AI_DISCOVERY_CLARIFICATION_ENABLED"),
+			InterpretationCacheTTL:  cfg.InterpretationCacheTTL,
 		})
 		aiSearchHandler = ai_search.NewHandler(aiSearchUC, cfg.RedisClient, cfg.SearchDefaults)
+		aiSearchHandler.RateLimiter = cfg.RateLimiter
 
 		// Create conversation consumer (started in bootstrap/app.go with app context)
 		if cfg.EventBus != nil && cfg.ConversationStore != nil {
@@ -223,6 +283,7 @@ func NewModule(cfg Config) (*Module, error) {
 	} else {
 		// Handler with nil usecase → Handle() returns 503 "AI not configured"
 		aiSearchHandler = ai_search.NewHandler(nil, cfg.RedisClient, cfg.SearchDefaults)
+		aiSearchHandler.RateLimiter = cfg.RateLimiter
 	}
 
 	// 7. Register domain error mappings
@@ -232,6 +293,12 @@ func NewModule(cfg Config) (*Module, error) {
 		"features", []string{"search_flights", "flight_details", "search_hotels", "hotel_details"},
 		"search_ttl", cfg.SearchTTL,
 		"details_ttl", cfg.FlightDetailsTTL,
+		"hotel_search_ttl", cfg.HotelSearchTTL,
+		"hotel_details_ttl", cfg.HotelDetailsTTL,
+		"session_id", sessionID,
+	)
+	slog.Info("search cache TTL configured",
+		slog.String("ttl", cfg.SearchTTL.String()),
 	)
 
 	// 8. Execute Saved Search — requires SavedSearchProvider to be set
@@ -260,6 +327,7 @@ func NewModule(cfg Config) (*Module, error) {
 		hdetailsUC:           hdetailsUC,
 		aiSearchUC:           aiSearchUC,
 		ConvConsumer:         convConsumer,
+		sessionID:            sessionID,
 	}, nil
 }
 
@@ -317,23 +385,21 @@ func registerSearchErrors() {
 		// Conversation store (Dragonfly) failures
 		case errors.Is(err, conversation.ErrConversationStoreFailed):
 			return serrors.ErrServiceUnavailable("El almacenamiento de conversaciones no está disponible", err)
-		// Search provider failures
-		case errors.Is(err, domain.ErrSearchFailed):
-			return serrors.ErrBadGateway("Todos los proveedores de búsqueda fallaron — intentá de nuevo más tarde", err)
+		// Discovery errors
+		case errors.Is(err, domain.ErrDiscoveryDisabled):
+			return serrors.ErrServiceUnavailable("El modo discovery no está habilitado", err)
+		case errors.Is(err, domain.ErrNoCandidatesFound):
+			return nil // empty response, handled by usecase — no debe llegar al mapper
+		case errors.Is(err, domain.ErrClarifyMaxRounds):
+			return nil // fallback a best-effort, handled by usecase — no debe llegar al mapper
+		// Booking & property errors
+		case errors.Is(err, domain.ErrBookingTokenExpired):
+			return serrors.ErrNotFound("El token de reserva ha expirado o no es válido", err)
+		case errors.Is(err, domain.ErrPropertyNotFound):
+			return serrors.ErrNotFound("La propiedad no fue encontrada", err)
 		}
 		return nil
 	})
-}
-
-// =============================================================================
-// TTLs por Defecto
-// =============================================================================
-
-// DefaultTTLs retorna los TTLs por defecto recomendados para las caches de búsqueda.
-func DefaultTTLs() (searchTTL, detailsTTL time.Duration) {
-	searchTTL = 15 * time.Minute  // resultados de búsqueda cambian frecuentemente
-	detailsTTL = 15 * time.Minute // detalles de reserva también
-	return
 }
 
 // =============================================================================
@@ -387,4 +453,20 @@ func (c *dragonflyInterpCache) Set(ctx context.Context, key string, intent *doma
 		return err
 	}
 	return c.rdb.Set(ctx, key, raw, ttl).Err()
+}
+
+// =============================================================================
+// Feature flags — lectura de variables de entorno
+// =============================================================================
+
+// parseEnvBool lee una variable de entorno como booleano.
+// "true" y "1" → true, cualquier otro valor → false.
+func parseEnvBool(key string) bool {
+	val := os.Getenv(key)
+	switch val {
+	case "true", "1":
+		return true
+	default:
+		return false
+	}
 }

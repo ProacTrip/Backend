@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
+	searchshared "github.com/ProacTrip/Backend/internal/modules/search/shared"
 )
 
 // Command is the input DTO for AI-powered unified search.
@@ -15,6 +16,11 @@ type Command struct {
 	Message        string `json:"message"`
 	ConversationID string `json:"conversation_id,omitzero"`
 	Stream         bool   `json:"stream,omitzero"` // true → SSE streaming response
+
+	// SearchModeHint permite al cliente sugerir el modo de búsqueda.
+	// Valores válidos: "discovery", "exact", "" (vacío = automático).
+	// Si se especifica un valor inválido, Validate() retorna error.
+	SearchModeHint string `json:"search_mode,omitzero"`
 
 	// Resolved search defaults — populated by the handler after calling
 	// shared.ResolveSearchDefaults(). Not part of the JSON API.
@@ -35,22 +41,21 @@ func (c *Command) Validate() error {
 	}
 
 	// Trim spaces and check again — whitespace-only is invalid
-	trimmed := trimSpaces(c.Message)
+	trimmed := searchshared.TrimSpaces(c.Message)
 	if trimmed == "" {
 		return fmt.Errorf("%w: message", domain.ErrMissingRequiredField)
 	}
 
-	return nil
-}
+	// Validar SearchModeHint si está presente
+	if c.SearchModeHint != "" {
+		switch SearchMode(c.SearchModeHint) {
+		case SearchModeDiscovery, SearchModeExact:
+			// válido
+		default:
+			return fmt.Errorf("%w: search_mode debe ser 'discovery' o 'exact', recibido '%s'",
+				domain.ErrInvalidParameterRange, c.SearchModeHint)
+		}
+	}
 
-// trimSpaces removes leading and trailing whitespace.
-func trimSpaces(s string) string {
-	start, end := 0, len(s)
-	for start < end && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r') {
-		start++
-	}
-	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\n' || s[end-1] == '\r') {
-		end--
-	}
-	return s[start:end]
+	return nil
 }

@@ -3,6 +3,9 @@
 // Late-connection: emite un evento sintético con el estado actual desde Dragonfly cache.
 package document_events
 
+// Estructura SSE — no sigue la convención 6-archivos porque el handler de
+// streaming no tiene command separado ni response JSON.
+
 import (
 	"context"
 	"encoding/json"
