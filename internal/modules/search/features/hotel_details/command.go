@@ -15,6 +15,7 @@ import (
 // Command is the input DTO for hotel details.
 type Command struct {
 	ID              string `json:"id"`
+	Query           string `json:"query,omitzero"`
 	CheckInDate     string `json:"check_in_date"`
 	CheckOutDate    string `json:"check_out_date"`
 	Adults          int    `json:"adults"`
@@ -34,6 +35,7 @@ type Command struct {
 func (cmd Command) ToDomain() domain.HotelDetailsRequest {
 	return domain.HotelDetailsRequest{
 		ID:              cmd.ID,
+		Query:           cmd.Query,
 		CheckInDate:     cmd.CheckInDate,
 		CheckOutDate:    cmd.CheckOutDate,
 		Adults:          cmd.Adults,

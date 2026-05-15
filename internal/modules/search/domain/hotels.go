@@ -125,6 +125,7 @@ type HotelPriceSource struct {
 // HotelDetailsRequest es la representación de dominio de una solicitud de detalles de hotel.
 type HotelDetailsRequest struct {
 	ID              string  `json:"id"`
+	Query           string  `json:"query,omitzero"`
 	CheckInDate     string  `json:"check_in_date"`
 	CheckOutDate    string  `json:"check_out_date"`
 	Adults          int     `json:"adults"`

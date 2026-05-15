@@ -315,6 +315,7 @@ type HotelSearchParams struct {
 // HotelDetailsParams bundles all parameters for the hotel details adapter call.
 type HotelDetailsParams struct {
 	PropertyToken   string
+	Query           string
 	CheckInDate     string
 	CheckOutDate    string
 	Adults          int
@@ -424,6 +425,7 @@ func domainRequestToHotelParams(req domain.HotelSearchRequest) HotelSearchParams
 func domainRequestToDetailsParams(req domain.HotelDetailsRequest) HotelDetailsParams {
 	return HotelDetailsParams{
 		PropertyToken:   req.ID,
+		Query:           req.Query,
 		CheckInDate:     req.CheckInDate,
 		CheckOutDate:    req.CheckOutDate,
 		Adults:          req.Adults,
@@ -854,6 +856,9 @@ func buildHotelDetailsParams(p HotelDetailsParams) map[string]string {
 	params["engine"] = "google_hotels"
 	params["property_token"] = p.PropertyToken
 
+	if p.Query != "" {
+		params["q"] = p.Query
+	}
 	if p.CheckInDate != "" {
 		params["check_in_date"] = p.CheckInDate
 	}
