@@ -145,7 +145,15 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		slog.String("results_state", resp.ResultsState),
 	)
 
-	// 7. Set cached_at timestamp and save to cache async — fire-and-forget with WaitGroup tracking.
+	// Filtrar propiedades por tipo según el flag vacation_rentals.
+	// SerpAPI puede devolver resultados mixtos incluso cuando vacation_rentals no está seteado.
+	if domainReq.VacationRentals {
+		resp.Properties = filterVacationRentals(resp.Properties)
+	} else {
+		resp.Properties = filterHotels(resp.Properties)
+	}
+
+	// 8. Set cached_at timestamp and save to cache async — fire-and-forget with WaitGroup tracking.
 	resp.CachedAt = new(time.Now())
 	fullData, marshalErr := json.Marshal(resp)
 	if marshalErr != nil {
@@ -182,4 +190,30 @@ func generateCacheKey(req domain.HotelSearchRequest) string {
 			req.Query, req.CheckInDate, req.CheckOutDate, searchshared.PtrOrEmpty(req.Currency))
 	}
 	return "{search}:hotels:v2:" + domain.HashKey(raw)
+}
+
+// =============================================================================
+// Filtrado por Tipo de Propiedad
+// =============================================================================
+
+// filterHotels filtra las propiedades para devolver solo hoteles (excluye vacation_rental).
+func filterHotels(properties []domain.HotelProperty) []domain.HotelProperty {
+	filtered := make([]domain.HotelProperty, 0, len(properties))
+	for _, p := range properties {
+		if p.Type != "vacation_rental" {
+			filtered = append(filtered, p)
+		}
+	}
+	return filtered
+}
+
+// filterVacationRentals filtra las propiedades para devolver solo vacation rentals.
+func filterVacationRentals(properties []domain.HotelProperty) []domain.HotelProperty {
+	filtered := make([]domain.HotelProperty, 0, len(properties))
+	for _, p := range properties {
+		if p.Type == "vacation_rental" {
+			filtered = append(filtered, p)
+		}
+	}
+	return filtered
 }

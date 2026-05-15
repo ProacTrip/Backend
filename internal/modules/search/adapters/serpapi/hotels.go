@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"regexp"
 	"strings"
 
@@ -461,11 +462,13 @@ func mapHotelSearchDomainResponse(serpResp *HotelSearchResponse, currency string
 
 	resp.Brands = mapHotelBrands(serpResp.Brands)
 
-	// Map pagination from SerpAPI's serpapi_pagination block
+	// Map pagination from SerpAPI's serpapi_pagination block.
+	// Solo NextPageToken indica si realmente hay más resultados.
+	// El campo Next siempre contiene una URL, incluso en la última página.
 	if serpResp.SerpapiPagination != nil {
 		resp.Pagination = domain.HotelPagination{
 			NextToken: serpResp.SerpapiPagination.NextPageToken,
-			HasMore:   serpResp.SerpapiPagination.Next != "" || serpResp.SerpapiPagination.NextPageToken != "",
+			HasMore:   serpResp.SerpapiPagination.NextPageToken != "",
 		}
 	}
 
@@ -500,8 +503,8 @@ func mapSingleHotelProperty(sp HotelProperty, currency string) domain.HotelPrope
 		CheckIn:    sp.CheckInTime,
 		CheckOut:   sp.CheckOutTime,
 		Rating: domain.HotelPropertyRating{
-			Overall:  sp.OverallRating,
-			Location: sp.LocationRating,
+			Overall:  roundFloatPtr(sp.OverallRating),
+			Location: roundFloatPtr(sp.LocationRating),
 		},
 		TotalReviews: sp.Reviews,
 		Price: domain.HotelPrice{
@@ -590,8 +593,8 @@ func mapHotelDetailsDomainResponse(detail *HotelPropertyDetail, currency string)
 		CheckIn:    p.CheckInTime,
 		CheckOut:   p.CheckOutTime,
 		Rating: domain.HotelPropertyRating{
-			Overall:  p.OverallRating,
-			Location: p.LocationRating,
+			Overall:  roundFloatPtr(p.OverallRating),
+			Location: roundFloatPtr(p.LocationRating),
 		},
 		TotalReviews: p.Reviews,
 		Price: domain.HotelPrice{
@@ -630,8 +633,8 @@ func mapTypicalPriceRange(tpr *HotelTypicalPriceRange, currency string) *domain.
 	}
 	return &domain.HotelPriceRange{
 		Currency: currency,
-		Min:      tpr.ExtractedLowest,
-		Max:      tpr.ExtractedHighest,
+		Min:      roundToOneDecimal(tpr.ExtractedLowest),
+		Max:      roundToOneDecimal(tpr.ExtractedHighest),
 	}
 }
 
@@ -647,8 +650,8 @@ func mapExternalReviews(serpReviews []HotelOtherReview) []domain.HotelExternalRe
 			TotalReviews: sr.Reviews,
 		}
 		if sr.SourceRating != nil {
-			or.Score = sr.SourceRating.Score
-			or.MaxScore = sr.SourceRating.MaxScore
+			or.Score = roundToOneDecimal(sr.SourceRating.Score)
+			or.MaxScore = roundToOneDecimal(sr.SourceRating.MaxScore)
 		}
 		if sr.UserReview != nil {
 			fr := domain.HotelFeaturedReview{
@@ -657,7 +660,7 @@ func mapExternalReviews(serpReviews []HotelOtherReview) []domain.HotelExternalRe
 				Comment: sr.UserReview.Comment,
 			}
 			if sr.UserReview.Rating != nil {
-				fr.Score = sr.UserReview.Rating.Score
+				fr.Score = roundToOneDecimal(sr.UserReview.Rating.Score)
 			}
 			if sr.UserReview.URL != "" {
 				fr.URL = new(sr.UserReview.URL)
@@ -911,6 +914,21 @@ func joinInts(vals []int) string {
 		strs[i] = itoa(v)
 	}
 	return strings.Join(strs, ",")
+}
+
+// roundToOneDecimal redondea un float64 a un decimal.
+// Evita artefactos de precisión float como 3.0999999046325684 → 3.1.
+func roundToOneDecimal(f float64) float64 {
+	return math.Round(f*10) / 10
+}
+
+// roundFloatPtr redondea un *float64 a un decimal, preservando nil.
+func roundFloatPtr(f *float64) *float64 {
+	if f == nil {
+		return nil
+	}
+	rounded := roundToOneDecimal(*f)
+	return &rounded
 }
 
 // parseEssentialInfoString parses a single essential_info string into key-value pairs.
