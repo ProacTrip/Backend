@@ -205,6 +205,11 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command, envIP string) (*Res
 		if envIP != "" {
 			flatPayload["client_ip"] = envIP
 		}
+		// First name — opcional, el user consumer lo pasa al perfil y notification
+		// al template de verificación (fallback "Usuario" si está vacío)
+		if cmd.FirstName != "" {
+			flatPayload["first_name"] = cmd.FirstName
+		}
 		if _, err := uc.eventPublisher.Publish(ctx, streamName, flatPayload); err != nil {
 			slog.ErrorContext(ctx, "failed to publish auth user event",
 				slog.String("event", "auth.user.registered"),

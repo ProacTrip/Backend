@@ -11,8 +11,9 @@ import (
 // Tokens van en cookies HTTP, no en el JSON.
 
 type Command struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Email     string `json:"email"`
+	Password  string `json:"password"`
+	FirstName string `json:"first_name,omitempty"` // Opcional: se pasa al perfil y al email de verificación
 }
 
 // Validate valida los campos del comando de registro.

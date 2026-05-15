@@ -135,7 +135,7 @@ func TestUpsertProfile_CreateNew(t *testing.T) {
 		},
 	})
 
-	if err := uc.Execute(t.Context(), userID, email); err != nil {
+	if err := uc.Execute(t.Context(), userID, email, ""); err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
 	if !upsertCalled {
@@ -168,7 +168,7 @@ func TestUpsertProfile_CreateWithEnvPrefs(t *testing.T) {
 		TimezoneName: "Europe/Madrid",
 	}
 
-	if err := uc.Execute(t.Context(), userID, email, envPrefs); err != nil {
+	if err := uc.Execute(t.Context(), userID, email, "", envPrefs); err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
 }
@@ -180,7 +180,7 @@ func TestUpsertProfile_RepoError(t *testing.T) {
 		},
 	})
 
-	err := uc.Execute(t.Context(), uuid.Must(uuid.NewV7()), "")
+	err := uc.Execute(t.Context(), uuid.Must(uuid.NewV7()), "", "")
 	if err == nil {
 		t.Fatal("expected error on repo failure")
 	}
@@ -195,7 +195,7 @@ func TestUpsertProfile_PopulatesCache(t *testing.T) {
 	rdb, _ := setupMiniRedis(t)
 
 	uc := NewUseCaseWithCache(&mockProfileRepo{}, rdb)
-	if err := uc.Execute(t.Context(), userID, ""); err != nil {
+	if err := uc.Execute(t.Context(), userID, "", ""); err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
 
@@ -218,7 +218,7 @@ func TestUpsertProfile_PopulatesCache(t *testing.T) {
 func TestUpsertProfile_NoCacheWithoutRDB(t *testing.T) {
 	// Use constructor that doesn't set rdb
 	uc := NewUseCase(&mockProfileRepo{})
-	if err := uc.Execute(t.Context(), uuid.Must(uuid.NewV7()), ""); err != nil {
+	if err := uc.Execute(t.Context(), uuid.Must(uuid.NewV7()), "", ""); err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
 	// Should not panic — cache is optional
@@ -266,7 +266,7 @@ func TestUpsertProfile_CreatesAllDefaults(t *testing.T) {
 		nil,
 	)
 
-	if err := uc.Execute(t.Context(), userID, ""); err != nil {
+	if err := uc.Execute(t.Context(), userID, "", ""); err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
 
@@ -301,7 +301,7 @@ func TestUpsertProfile_DefaultsGracefulOnError(t *testing.T) {
 	)
 
 	// Should succeed — defaults are best-effort
-	if err := uc.Execute(t.Context(), userID, ""); err != nil {
+	if err := uc.Execute(t.Context(), userID, "", ""); err != nil {
 		t.Fatalf("Execute should succeed even when defaults fail: %v", err)
 	}
 }

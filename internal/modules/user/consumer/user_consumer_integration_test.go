@@ -136,7 +136,7 @@ func TestIntegration_RegistrationEventToProfileCache(t *testing.T) {
 	}
 
 	// 3. Execute upsert with env prefs (what the consumer calls)
-	if err := uc.Execute(ctx, userID, "test@example.com", envPrefs); err != nil {
+	if err := uc.Execute(ctx, userID, "test@example.com", "", envPrefs); err != nil {
 		t.Fatalf("upsert profile failed: %v", err)
 	}
 
@@ -197,7 +197,7 @@ func TestIntegration_RegistrationEventWithoutEnvFields_ProfileDefaults(t *testin
 	// Empty env prefs — simulates a legacy event without env fields
 	emptyPrefs := domain.EnvPrefs{}
 
-	if err := uc.Execute(ctx, userID, "", emptyPrefs); err != nil {
+	if err := uc.Execute(ctx, userID, "", "", emptyPrefs); err != nil {
 		t.Fatalf("upsert profile failed: %v", err)
 	}
 
@@ -280,7 +280,7 @@ func TestIntegration_RegistrationEventMixedStream(t *testing.T) {
 	uc := upsert_profile.NewUseCaseWithCache(repo, rdb)
 
 	// Process old-style event (no env fields)
-	if err := uc.Execute(ctx, userIDOld, ""); err != nil {
+	if err := uc.Execute(ctx, userIDOld, "", ""); err != nil {
 		t.Fatalf("old event upsert failed: %v", err)
 	}
 
@@ -291,7 +291,7 @@ func TestIntegration_RegistrationEventMixedStream(t *testing.T) {
 		CountryCode:  "MX",
 		TimezoneName: "America/Mexico_City",
 	}
-	if err := uc.Execute(ctx, userIDNew, "", newEnvPrefs); err != nil {
+	if err := uc.Execute(ctx, userIDNew, "", "", newEnvPrefs); err != nil {
 		t.Fatalf("new event upsert failed: %v", err)
 	}
 
@@ -366,7 +366,7 @@ func TestIntegration_ProfilePrefsUpdatedLater(t *testing.T) {
 		CountryCode:  "ES",
 		TimezoneName: "Europe/Madrid",
 	}
-	if err := uc.Execute(ctx, userID, "", initialPrefs); err != nil {
+	if err := uc.Execute(ctx, userID, "", "", initialPrefs); err != nil {
 		t.Fatalf("initial upsert failed: %v", err)
 	}
 
@@ -403,7 +403,7 @@ func TestIntegration_LegacyEventReplayDoesNotCrash(t *testing.T) {
 	uc := upsert_profile.NewUseCaseWithCache(repo, rdb)
 
 	// Replay a legacy event: only user_id and email, no env fields
-	if err := uc.Execute(ctx, userID, ""); err != nil {
+	if err := uc.Execute(ctx, userID, "", ""); err != nil {
 		t.Fatalf("legacy event replay should not crash: %v", err)
 	}
 

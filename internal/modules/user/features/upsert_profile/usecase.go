@@ -62,9 +62,15 @@ func NewUseCaseComplete(
 // El perfil se crea basado en user_id (FK al dominio Auth)
 // El Upsert usa user_id como clave de conflicto
 // email: desnormalizado del evento de registro (evita joins cross-DB).
-func (uc *UseCase) Execute(ctx context.Context, userID uuid.UUID, email string, envPrefs ...domain.EnvPrefs) error {
+// firstName: opcional, viene del evento de registro. Si está vacío, se deja nil.
+func (uc *UseCase) Execute(ctx context.Context, userID uuid.UUID, email string, firstName string, envPrefs ...domain.EnvPrefs) error {
 	// Crear nuevo perfil con los defaults de la migración
 	profile := domain.NewUserProfile(userID, email)
+
+	// Setear nombre si se proveyó en el registro
+	if firstName != "" {
+		profile.SetName(&firstName, nil)
+	}
 
 	// Override with environment prefs if provided
 	if len(envPrefs) > 0 && envPrefs[0].HasAny() {

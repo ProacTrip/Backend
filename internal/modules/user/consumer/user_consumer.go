@@ -175,6 +175,9 @@ func (c *UserEventConsumer) handleUserRegistered(ctx context.Context, event *eve
 	// Extract optional environment fields from the event (may be absent in legacy events)
 	envPrefs := extractEnvPrefs(payload)
 
+	// Extract optional first_name from the registration event
+	firstName, _ := payload["first_name"].(string)
+
 	// Fallback: si el evento no incluye environment preferences, intentar leer
 	// del caché env:{ip} en DragonflyDB (escrito por el módulo environment).
 	if !envPrefs.HasAny() {
@@ -184,7 +187,7 @@ func (c *UserEventConsumer) handleUserRegistered(ctx context.Context, event *eve
 	}
 
 	// Create profile using Upsert use case (inyectado en constructor, no crear en cada mensaje)
-	if err := c.uc.Execute(ctx, userID, email, envPrefs); err != nil {
+	if err := c.uc.Execute(ctx, userID, email, firstName, envPrefs); err != nil {
 		slog.Error("upsert profile failed", "error", err, "user_id", userID)
 		// Don't ack - leave in PEL for retry
 		return

@@ -56,7 +56,7 @@ func TestHandler_ConsumerCall_RegistrationEvent(t *testing.T) {
 		TimezoneName: "America/Sao_Paulo",
 	}
 
-	if err := uc.Execute(t.Context(), userID, email, envPrefs); err != nil {
+	if err := uc.Execute(t.Context(), userID, email, "", envPrefs); err != nil {
 		t.Fatalf("consumer call failed: %v", err)
 	}
 
@@ -95,7 +95,7 @@ func TestHandler_ConsumerCall_LegacyEventNoEnv(t *testing.T) {
 	uc := NewUseCase(repo)
 
 	// Legacy event: no env fields
-	if err := uc.Execute(t.Context(), userID, ""); err != nil {
+	if err := uc.Execute(t.Context(), userID, "", ""); err != nil {
 		t.Fatalf("legacy event call failed: %v", err)
 	}
 
@@ -131,7 +131,7 @@ func TestHandler_ConsumerCall_WithCache(t *testing.T) {
 		TimezoneName: "America/New_York",
 	}
 
-	if err := uc.Execute(t.Context(), userID, "", envPrefs); err != nil {
+	if err := uc.Execute(t.Context(), userID, "", "", envPrefs); err != nil {
 		t.Fatalf("consumer call with cache failed: %v", err)
 	}
 

@@ -192,6 +192,7 @@ POST /v1/auth/register
 |-------|------|-----------|------------|-------------|
 | `email` | string | Sí | Email válido | Correo del usuario |
 | `password` | string | Sí | Mínimo 8 caracteres | Contraseña |
+| `first_name` | string | No | Máximo 100 caracteres | Nombre del usuario. Se usa en el email de verificación y se guarda en el perfil |
 
 **Ejemplo:**
 
@@ -199,7 +200,7 @@ POST /v1/auth/register
 curl -X POST {base_url}/register \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: 019d5439-cb43-716d-90b5-51dcbe980908" \
-  -d '{"email":"user@example.com","password":"SecurePass123!"}'
+  -d '{"email":"user@example.com","password":"SecurePass123!","first_name":"María"}'
 ```
 
 ### Responses
@@ -238,9 +239,10 @@ El template de verificación de Resend usa la variable `{{first_name}}` para per
 
 | Origen del registro | `first_name` | Resultado en el email |
 |---------------------|-------------|----------------------|
+| **Email + contraseña (con nombre)** | `first_name` del body del register | "Hola, **María**" (nombre indicado) |
+| **Email + contraseña (sin nombre)** | no se envía en el evento | "Hola, **Usuario**" (fallback del template) |
 | **OAuth (Google)** | `given_name` del perfil de Google | "Hola, **Juan**" (nombre real) |
 | **OAuth (Google) sin given_name** | string vacío | "Hola, **Usuario**" (fallback del template) |
-| **Email + contraseña** | no se envía en el evento | "Hola, **Usuario**" (fallback del template) |
 
 > El template de Resend está configurado para mostrar "Usuario" cuando `first_name` no está definido o es una cadena vacía. El módulo de notificación pasa el valor tal cual lo recibe del evento `auth.user.registered`, sin transformarlo.
 
