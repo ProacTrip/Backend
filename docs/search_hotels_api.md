@@ -736,14 +736,10 @@ traceparent: 00-019ef5439cb43716d90b551dcbe980908-a1b2c3d4e5f67890-01
       ],
       "prices": [
         {
-          "source": "Booking.com",
-          "logo": "https://www.gstatic.com/travel-hotels/branding/icon_booking.png",
           "num_guests": 2,
           "rate_per_night": { "amount": 49.0, "before_taxes": 44.0 }
         },
         {
-          "source": "Agoda",
-          "logo": "https://www.gstatic.com/travel-hotels/branding/icon_agoda.png",
           "num_guests": 2,
           "rate_per_night": { "amount": 51.0, "before_taxes": 46.0 }
         }
@@ -876,8 +872,6 @@ Todos los campos de Hotel más (incluye `ratings` y `reviews_breakdown`, heredad
 | `capacity.beds` | integer\|null | Número de camas |
 | `capacity.area` | string\|null | Superficie. Ej: `"45 ft²"` |
 | `prices` | array | Precios por fuente de reserva (comparación de OTAs). Permite mostrar tarifas por plataforma |
-| `prices[].source` | string | Nombre de la plataforma. Ej: `"Booking.com"`, `"Agoda"`, `"Expedia"` |
-| `prices[].logo` | string\|null | URL del logo de la plataforma |
 | `prices[].num_guests` | integer\|null | Número de huéspedes para esa tarifa |
 | `prices[].rate_per_night.amount` | number | Precio por noche con impuestos en esa plataforma |
 | `prices[].rate_per_night.before_taxes` | number\|null | Precio por noche sin impuestos en esa plataforma |

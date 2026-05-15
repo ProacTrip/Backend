@@ -559,8 +559,6 @@ func mapHotelPrices(serpPrices []HotelPriceSource) []domain.HotelPriceSource {
 	out := make([]domain.HotelPriceSource, len(serpPrices))
 	for i, p := range serpPrices {
 		ps := domain.HotelPriceSource{
-			Source:    p.Source,
-			Logo:      p.Logo,
 			NumGuests: p.NumGuests,
 		}
 		if p.RatePerNight != nil {

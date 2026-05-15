@@ -111,9 +111,8 @@ type HotelPagination struct {
 }
 
 // HotelPriceSource representa precios de una OTA específica en resultados VR.
+// Source y Logo se omiten porque no redirigimos a sitios externos de reserva.
 type HotelPriceSource struct {
-	Source       string       `json:"source"`
-	Logo         string       `json:"logo,omitzero"`
 	NumGuests    *int         `json:"num_guests,omitzero"`
 	RatePerNight *PriceDetail `json:"rate_per_night,omitzero"`
 }
