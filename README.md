@@ -7,7 +7,7 @@
 [![Docker](https://img.shields.io/badge/Docker-✓-2496ED?logo=docker)](https://www.docker.com/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-API server for the **Proactrip** travel platform — flight + hotel search, user authentication, email notifications, and environment detection.
+API server for the **Proactrip** travel platform — AI-powered flight + hotel search, user authentication, profile management, admin dashboard, email notifications, and environment detection.
 
 ---
 
@@ -26,6 +26,8 @@ API server for the **Proactrip** travel platform — flight + hotel search, user
 | **Hotels**     | SerpAPI (HTTP client) | —            |
 | **GeoIP**      | IPQuery (HTTP client) | —            |
 | **Weather**    | OpenWeather (HTTP client) | —        |
+| **AI / LLM**   | DeepSeek / Ollama       | —            |
+| **Storage**    | MinIO / R2 (S3-compatible) | —         |
 | **DevOps**     | Docker + Compose      | —            |
 
 ---
@@ -40,20 +42,23 @@ internal/
 ├── bootstrap/            # App initialization, routes, middleware wiring
 ├── config/               # Environment configuration
 ├── modules/
-│   ├── auth/             # Authentication (register, login, logout, verify email)
-│   │   ├── domain/       # Entities, repository interfaces, domain errors
-│   │   ├── features/     # Use cases: register, login, logout, verify_email
+│   ├── auth/             # Authentication + Admin Dashboard
+│   │   ├── domain/       # Entities, repository interfaces, domain errors, permissions
+│   │   ├── features/     # register, login, logout, verify_email, oauth
+│   │   │   └── dashboard/# account_status, feature_limits, list_users,
+│   │   │                 # permission_overrides, user_detail
 │   │   ├── adapters/     # Postgres repo, PASETO, Argon2id, Blake3, encryption
-│   │   └── migrations/   # SQL migrations
+│   │   └── migrations/   # SQL migrations (4)
 │   ├── environment/      # Geolocation + weather from client IP (IPQuery + OpenWeather)
 │   │   ├── domain/       # CountryMetadata, WeatherData, Geolocation types
 │   │   ├── features/     # get_environment
 │   │   ├── adapters/     # IPQuery HTTP client, OpenWeather HTTP client
 │   │   └── migrations/
-│   ├── search/           # Flight + hotel search (SerpAPI adapter, cache, pagination)
-│   │   ├── domain/       # Flight entities, provider interface, errors, hotel mappers
-│   │   ├── features/     # search_flights, flight_details, search_hotels, hotel_details
-│   │   ├── adapters/     # SerpAPI HTTP client (flights + hotels)
+│   ├── search/           # Flight + hotel search + AI natural language
+│   │   ├── domain/       # Flight/Hotel entities, provider interfaces, AI types
+│   │   ├── features/     # search_flights, flight_details, search_hotels,
+│   │   │                 # hotel_details, ai_search, execute_saved_search
+│   │   ├── adapters/     # SerpAPI HTTP client, DeepSeek/Ollama AI clients
 │   │   └── migrations/
 │   ├── notification/     # Email notifications (Resend, event consumer)
 │   │   ├── adapters/     # Postgres repo, Resend email provider
@@ -61,21 +66,33 @@ internal/
 │   │   ├── domain/       # Notification entity, repository interface
 │   │   ├── features/     # send_verification_email
 │   │   └── migrations/
-│   └── user/             # User profile management
-│       ├── consumer/     # Event stream consumer
-│       ├── domain/       # User entity, repository interface
-│       └── migrations/
+│   └── user/             # User profile management + documents + avatars
+│       ├── consumer/     # Event stream consumer (user.registered, user.locale.updated)
+│       ├── domain/       # User entity, profile, preferences, repository interfaces
+│       ├── features/     # get_profile, update_profile, upsert_profile, update_locale,
+│       │                 # upload_avatar, upload_document, download_document,
+│       │                 # add_favorite, delete_favorite, list_favorites,
+│       │                 # save_search, delete_saved_search, list_saved_searches,
+│       │                 # document_events (SSE), document_types
+│       ├── adapters/     # Postgres repo, MinIO/R2 storage, OCR, SearchResolver
+│       ├── pipeline/     # Async workers: avatar_validator, ocr_worker,
+│       │                 # sanitizer_worker, validator_worker
+│       └── migrations/   # SQL migrations (7)
 └── shared/
-    ├── cache/            # DragonflyDB cache helpers (TTL, permission cache)
+    ├── auth/             # Permission constants + JWT claims helpers
+    ├── cache/            # DragonflyDB helpers + MetricsDecorator (hit/miss/set counters)
     ├── context/          # Trace ID propagation
     ├── crypto/           # Cryptographic utilities
     ├── database/         # PostgreSQL connection pool (multi-DB pool manager)
     ├── encoding/         # Cursor-based pagination
-    ├── errors/           # RFC 9457 Problem JSON types
+    ├── errors/           # RFC 9457 Problem JSON types + error mappers
     ├── eventbus/         # Event-driven architecture (Dragonfly Streams)
     ├── http/             # Cookie helpers, error mapping
-    ├── middleware/       # Security headers (CSP, HSTS, X-Frame-Options)
+    ├── middleware/       # Security headers + permission middleware (RBAC)
     ├── ratelimit/        # Multi-tier rate limiting (Dragonfly + Lua)
+    ├── search/           # Cross-module contract (SavedSearchProvider interface)
+    ├── session/          # Session cache + schema versioning
+    ├── user/             # Profile preferences contract (hashtag {user}:prefs: + TTL)
     └── types.go
 ```
 
@@ -151,7 +168,7 @@ register()                     │                      │
                                └─► XACK             └─► XACK
 ```
 
-**Event types:** `user.registered`, `trip.created`, `trip.updated`, `trip.deleted`
+**Event types:** `user.registered`, `user.locale.updated`, `conversation.saved`, `doc.uploaded`, `trip.created`, `trip.updated`, `trip.deleted`
 
 ---
 
@@ -160,9 +177,12 @@ register()                     │                      │
 | API          | Docs                                | Base Path   |
 | ------------ | ----------------------------------- | ----------- |
 | Auth         | [docs/AUTH_API.md](docs/AUTH_API.md)           | `/v1/auth`  |
+| User         | [docs/USER_API.md](docs/USER_API.md)           | `/v1/user`  |
 | Flight Search| [docs/search_flights_api.md](docs/search_flights_api.md) | `/v1/search` |
 | Hotel Search | [docs/search_hotels_api.md](docs/search_hotels_api.md) | `/v1/search` |
+| AI Search    | [docs/search_ai_api.md](docs/search_ai_api.md)    | `/v1/search` |
 | Environment  | [docs/ENVIRONMENT_API.md](docs/ENVIRONMENT_API.md) | `/v1/environment` |
+| Dashboard    | [docs/DASHBOARD_API.md](docs/DASHBOARD_API.md)    | `/v1/dashboard` |
 
 All errors follow **RFC 9457 Problem JSON** format with `type`, `title`, `status`, `detail`, `instance`, and `trace_id` fields.
 
@@ -184,6 +204,40 @@ All errors follow **RFC 9457 Problem JSON** format with `type`, `title`, `status
 | POST   | `/v1/search/flight-details` | Anon (5 req/min) + SerpAPI (50 req/hr) |
 | POST   | `/v1/search/hotels`         | Anon (5 req/min) + SerpAPI (50 req/hr) |
 | POST   | `/v1/search/hotel-details`  | Anon (5 req/min) + SerpAPI (50 req/hr) |
+| POST   | `/v1/search/ai`             | Auth (10 req/min) + AI provider        |
+
+> **AI Search**: Interpretación en lenguaje natural con DeepSeek/Ollama. Soporta búsqueda por voz, fechas flexibles, y refinamiento multi-turno con `conversation_id`. Ver [docs/search_ai_api.md](docs/search_ai_api.md).
+
+### User Endpoints
+
+| Method | Path                              | Auth Required | Description                    |
+| ------ | --------------------------------- | :-----------: | ------------------------------ |
+| GET    | `/v1/user/profile`                | PASETO        | Obtener perfil del usuario     |
+| PUT    | `/v1/user/profile`                | PASETO        | Actualizar perfil              |
+| PUT    | `/v1/user/locale`                 | PASETO        | Cambiar idioma/moneda/timezone |
+| POST   | `/v1/user/avatar`                 | PASETO        | Subir avatar (presigned URL)   |
+| POST   | `/v1/user/documents`              | PASETO        | Subir documento                |
+| GET    | `/v1/user/documents/:id`          | PASETO        | Descargar documento            |
+| GET    | `/v1/user/documents/types`        | No            | Tipos de documento aceptados   |
+| GET    | `/v1/user/documents/:id/events`   | PASETO        | SSE: estado de procesamiento   |
+| POST   | `/v1/user/favorites`              | PASETO        | Agregar favorito               |
+| DELETE | `/v1/user/favorites/:id`          | PASETO        | Eliminar favorito              |
+| GET    | `/v1/user/favorites`              | PASETO        | Listar favoritos               |
+| POST   | `/v1/user/saved-searches`         | PASETO        | Guardar búsqueda               |
+| DELETE | `/v1/user/saved-searches/:id`     | PASETO        | Eliminar búsqueda guardada     |
+| GET    | `/v1/user/saved-searches`         | PASETO        | Listar búsquedas guardadas     |
+
+### Dashboard Endpoints (Admin)
+
+| Method | Path                                    | Permission Required        |
+| ------ | --------------------------------------- | -------------------------- |
+| GET    | `/v1/dashboard/users`                   | `dashboard:users:list`     |
+| GET    | `/v1/dashboard/users/:id`               | `dashboard:users:detail`   |
+| GET    | `/v1/dashboard/users/:id/status`        | `dashboard:users:status`   |
+| GET    | `/v1/dashboard/feature-limits`          | `dashboard:limits:read`    |
+| PUT    | `/v1/dashboard/feature-limits`          | `dashboard:limits:write`   |
+| GET    | `/v1/dashboard/permission-overrides`    | `dashboard:permissions:read` |
+| PUT    | `/v1/dashboard/permission-overrides`    | `dashboard:permissions:write` |
 
 ### Environment Endpoint
 
@@ -285,6 +339,18 @@ docker run -p 8080:8080 --env-file .env proactrip-backend
 | `RATELIMIT_PROVIDER_RESEND_WINDOW_SEC` | `86400`           | Resend window (seconds, default: 24h)           |
 | `RATELIMIT_PROVIDER_SERPAPI_MAX`       | `50`              | SerpAPI max requests                            |
 | `RATELIMIT_PROVIDER_SERPAPI_WINDOW_SEC`| `3600`            | SerpAPI window (seconds, default: 1h)           |
+| `SEARCH_CACHE_TTL`                      | `5m`              | Cache TTL for flight/hotel search results       |
+| `AI_INTERPRETATION_CACHE_TTL`           | `10m`             | Cache TTL for AI natural language interpretation |
+| `AI_DISCOVERY_ENABLED`                  | `false`           | Enable AI-powered destination discovery         |
+| `DEEPSEEK_API_KEY`                      | *(optional)*      | DeepSeek API key for AI search                  |
+| `DEEPSEEK_BASE_URL`                     | `https://api.deepseek.com/v1` | DeepSeek API base URL              |
+| `OLLAMA_BASE_URL`                       | `http://localhost:11434` | Ollama local server URL                    |
+| `DOCUMENT_UPLOAD_RATE_LIMIT`            | `10`              | Max document uploads per user per window        |
+| `DOCUMENT_UPLOAD_RATE_WINDOW`           | `1h`              | Document upload rate window                    |
+| `R2_ENDPOINT`                           | *(optional)*      | R2/S3-compatible storage endpoint               |
+| `R2_ACCESS_KEY`                         | *(optional)*      | R2 access key                                   |
+| `R2_SECRET_KEY`                         | *(optional)*      | R2 secret key                                   |
+| `R2_BUCKET_NAME`                        | `proactrip`       | R2 bucket name                                  |
 
 ---
 

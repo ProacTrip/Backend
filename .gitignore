@@ -34,3 +34,4 @@ docker-compose.override.yml
 # docs/
 # *.md
 openspec/
+docs/audit-*.md
