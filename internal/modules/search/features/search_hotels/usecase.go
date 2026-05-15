@@ -72,6 +72,13 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 	// 2. Convert to domain request
 	domainReq := cmd.ToDomain()
 
+	// Filtrar hoteles sin precios (placeholders de Google Maps)
+	// estableciendo min_price=1 internamente solo si el usuario no especificó uno.
+	if domainReq.MinPrice == nil || *domainReq.MinPrice == 0 {
+		minPrice := 1.0
+		domainReq.MinPrice = &minPrice
+	}
+
 	// 3. Generate cache key — includes page_token for independent page caching
 	cacheKey := generateCacheKey(domainReq)
 
