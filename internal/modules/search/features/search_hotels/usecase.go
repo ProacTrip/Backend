@@ -72,46 +72,40 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 	// 2. Convert to domain request
 	domainReq := cmd.ToDomain()
 
-	// 3. Generate cache key (skip cache entirely when page_token is non-empty — different pages need fresh data)
-	skipCache := domainReq.PageToken != ""
-	var cacheKey string
-	if !skipCache {
-		cacheKey = generateCacheKey(domainReq)
-	}
+	// 3. Generate cache key — includes page_token for independent page caching
+	cacheKey := generateCacheKey(domainReq)
 
-	// 4. Try cache (only for first page, not paginated requests)
-	if !skipCache {
-		slog.DebugContext(ctx, "checking cache for hotel search",
-			slog.String("key", cacheKey),
-			slog.String("query", cmd.Query),
-		)
+	// 4. Try cache
+	slog.DebugContext(ctx, "checking cache for hotel search",
+		slog.String("key", cacheKey),
+		slog.String("query", cmd.Query),
+	)
 
-		if cached, err := uc.cache.Get(ctx, cacheKey); err == nil && cached != "" {
-			var resp Response
-			if err := json.Unmarshal([]byte(cached), &resp); err == nil {
-				slog.InfoContext(ctx, "hotel search cache hit",
-					slog.String("key", cacheKey),
-					slog.String("query", cmd.Query),
-					slog.Int("property_count", len(resp.Properties)),
-				)
-				resp.FromCache = true
-				// CachedAt is already stored in the cache entry — don't recompute
-				return &resp, nil
-			}
-			slog.WarnContext(ctx, "hotel search cache unmarshal failed, falling through to provider",
-				slog.String("key", cacheKey),
-				slog.Any("err", err),
-			)
-		} else {
-			slog.InfoContext(ctx, "hotel search cache miss, calling provider",
+	if cached, err := uc.cache.Get(ctx, cacheKey); err == nil && cached != "" {
+		var resp Response
+		if err := json.Unmarshal([]byte(cached), &resp); err == nil {
+			slog.InfoContext(ctx, "hotel search cache hit",
 				slog.String("key", cacheKey),
 				slog.String("query", cmd.Query),
-				slog.String("check_in", cmd.CheckInDate),
-				slog.String("check_out", cmd.CheckOutDate),
-				slog.Int("adults", cmd.Adults),
+				slog.Int("property_count", len(resp.Properties)),
 			)
+			resp.FromCache = true
+			// CachedAt is already stored in the cache entry — don't recompute
+			return &resp, nil
 		}
+		slog.WarnContext(ctx, "hotel search cache unmarshal failed, falling through to provider",
+			slog.String("key", cacheKey),
+			slog.Any("err", err),
+		)
 	}
+
+	slog.InfoContext(ctx, "hotel search cache miss, calling provider",
+		slog.String("key", cacheKey),
+		slog.String("query", cmd.Query),
+		slog.String("check_in", cmd.CheckInDate),
+		slog.String("check_out", cmd.CheckOutDate),
+		slog.Int("adults", cmd.Adults),
+	)
 
 	// 5. Rate limit check — after cache miss, before provider call
 	if uc.rateLimiter != nil {
@@ -145,27 +139,23 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 	)
 
 	// 7. Set cached_at timestamp and save to cache async — fire-and-forget with WaitGroup tracking.
-	// Marshal BEFORE spawning goroutine to prevent data race:
-	// handler writes resp.FromCache=false after return, goroutine reads resp via json.Marshal.
 	resp.CachedAt = new(time.Now())
-	if cacheKey != "" {
-		fullData, marshalErr := json.Marshal(resp)
-		if marshalErr != nil {
-			slog.ErrorContext(ctx, "hotel search cache marshal failed",
-				slog.String("key", cacheKey),
-				slog.Any("err", marshalErr),
-			)
-		} else {
-			bgCtx := context.WithoutCancel(ctx)
-			uc.wg.Go(func() {
-				if err := uc.cache.Set(bgCtx, cacheKey, string(fullData), uc.searchTTL); err != nil {
-					slog.ErrorContext(bgCtx, "hotel search cache set failed",
-						slog.String("key", cacheKey),
-						slog.Any("err", err),
-					)
-				}
-			})
-		}
+	fullData, marshalErr := json.Marshal(resp)
+	if marshalErr != nil {
+		slog.ErrorContext(ctx, "hotel search cache marshal failed",
+			slog.String("key", cacheKey),
+			slog.Any("err", marshalErr),
+		)
+	} else {
+		bgCtx := context.WithoutCancel(ctx)
+		uc.wg.Go(func() {
+			if err := uc.cache.Set(bgCtx, cacheKey, string(fullData), uc.searchTTL); err != nil {
+				slog.ErrorContext(bgCtx, "hotel search cache set failed",
+					slog.String("key", cacheKey),
+					slog.Any("err", err),
+				)
+			}
+		})
 	}
 
 	return resp, nil
@@ -176,10 +166,8 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 // =============================================================================
 
 // generateCacheKey builds a deterministic cache key from the domain request.
-// Excludes page_token from the hash (different pages are different cache keys).
+// PageToken is included so each page gets its own independent cache entry.
 func generateCacheKey(req domain.HotelSearchRequest) string {
-	// Create a copy without page_token for the cache key
-	req.PageToken = ""
 	raw, err := json.Marshal(req)
 	if err != nil {
 		// Fallback: limited key

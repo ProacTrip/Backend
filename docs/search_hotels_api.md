@@ -1641,8 +1641,8 @@ El backend **siempre obtiene datos frescos del proveedor** (SerpAPI). La caché 
 > **Nota interna:** El backend envía `no_cache=true` a SerpAPI para hoteles, forzando datos frescos en cada llamada. La caché interna de DragonflyDB es la única capa de caché — se prefiere la frescura de los datos sobre la caché del proveedor externo para hoteles, ya que la disponibilidad y precios cambian constantemente. Para vuelos, SerpAPI sí usa su caché interna (`no_cache=false`).
 
 - Si un usuario busca sin autenticarse, se registra, y vuelve a buscar con los mismos parámetros dentro de la ventana de caché → se reutilizan los resultados cacheados (sin nueva llamada a SerpAPI)
-- `from_cache` es **siempre `false`** en todas las respuestas. La caché no se expone al frontend
-- `cached_at` es **siempre `null`** en todas las respuestas
+- `from_cache` es **`true`** cuando la respuesta se sirvió desde caché, **`false`** cuando es fresca del proveedor
+- `cached_at` contiene el timestamp UTC de cuándo se cacheó la respuesta. Es `null` en respuestas frescas del proveedor
 
 > **Motivo:** Los resultados de vuelos y hoteles cambian constantemente. 5 minutos es el máximo razonable antes de que los datos queden obsoletos. El manejo interno de caché evita llamadas redundantes al proveedor sin exponer detalles al frontend.
 
@@ -1675,9 +1675,9 @@ La clave de caché se genera haciendo hash de los siguientes campos del request:
 | `eco_certified` | Sí |
 | `bedrooms` | Sí |
 | `bathrooms` | Sí |
-| `page_token` | **No** — la paginación ocurre post-caché en el servidor |
+| `page_token` | **Sí** — cada página con un token distinto tiene su propia entrada de caché |
 
-> Dos requests con exactamente los mismos parámetros (excepto `page_token`) se benefician de la caché interna durante la ventana de TTL, evitando llamadas redundantes a SerpAPI.
+> **Nota:** `page_token` ahora se incluye en la clave de caché. Cada página (primera página, segunda página con token "abc", etc.) obtiene su propia entrada de caché independiente. Esto se debe a que SerpAPI usa paginación nativa basada en tokens — el servidor no puede obtener todos los resultados en una sola llamada. Cada `page_token` produce resultados diferentes y debe cachearse por separado.
 
 ---
 

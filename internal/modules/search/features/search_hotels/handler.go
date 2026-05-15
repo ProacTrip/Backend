@@ -96,9 +96,6 @@ func (h *Handler) Handle(c *echo.Context) error {
 		slog.String("results_state", resp.ResultsState),
 	)
 
-	resp.FromCache = false
-	resp.CachedAt = nil
-
 	// Rate limit provider headers (SerpAPI quota)
 	if h.RateLimiter != nil {
 		if rlResult, err := h.RateLimiter.ProviderStatus(c.Request().Context(), "serpapi"); err == nil {
