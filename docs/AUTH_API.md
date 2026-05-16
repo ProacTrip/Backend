@@ -224,14 +224,15 @@ Set-Cookie: __Secure-refresh_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=L
 
 #### Posibles Errores
 
-| Código | HTTP | Cuándo |
-|--------|------|--------|
-| `EMAIL_ALREADY_EXISTS` | 409 | Email ya registrado |
-| `INVALID_EMAIL` | 400 | Formato inválido |
-| `WEAK_PASSWORD` | 400 | No cumple requisitos |
-| `VALIDATION_ERROR` | 400 | Body malformado |
-| `RATE_LIMIT_EXCEEDED` | 429 | Demasiadas peticiones (RFC 9457 Problem JSON). Ver [Rate Limiting](#rate-limiting) |
-| `INTERNAL_ERROR` | 500 | Error inesperado |
+| Código | HTTP | Problem Type | Cuándo |
+|--------|------|-------------|--------|
+| `EMAIL_ALREADY_EXISTS` | 409 | `conflict` | Email ya registrado |
+| `INVALID_EMAIL` | 400 | `invalid-email` | Formato de email inválido |
+| `WEAK_PASSWORD` | 400 | `weak-password` | La contraseña no cumple los requisitos: mínimo 8 caracteres, al menos una mayúscula, una minúscula, un dígito y un carácter especial (!@#$%^&*) |
+| `INVALID_INPUT` | 400 | `invalid-input` | Faltan campos requeridos (email o password vacíos) |
+| `VALIDATION_ERROR` | 400 | `validation-error` | Body malformado (JSON inválido) |
+| `RATE_LIMIT_EXCEEDED` | 429 | `rate-limit-exceeded` | Demasiadas peticiones |
+| `INTERNAL_ERROR` | 500 | `internal-error` | Error inesperado |
 
 ### Comportamiento del campo `first_name` en el email de verificación
 

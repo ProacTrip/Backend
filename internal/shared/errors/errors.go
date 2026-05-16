@@ -29,6 +29,11 @@ const (
 	ProblemTypeInternalError      ProblemType = "https://api.proactrip.com/errors/internal-error"
 	ProblemTypeBadGateway         ProblemType = "https://api.proactrip.com/errors/bad-gateway"
 	ProblemTypeServiceUnavailable ProblemType = "https://api.proactrip.com/errors/service-unavailable"
+
+	// Auth-specific validation errors
+	ProblemTypeInvalidEmail ProblemType = "https://api.proactrip.com/errors/invalid-email"
+	ProblemTypeWeakPassword ProblemType = "https://api.proactrip.com/errors/weak-password"
+	ProblemTypeInvalidInput ProblemType = "https://api.proactrip.com/errors/invalid-input"
 )
 
 // Problem es el formato RFC 9457 Problem Details
@@ -123,6 +128,17 @@ var (
 	ErrServiceUnavailable = func(detail string, err error) *Problem {
 		return New(ProblemTypeServiceUnavailable, "Service Unavailable", detail, http.StatusServiceUnavailable, err)
 	}
+
+	// Auth-specific validation errors
+	ErrInvalidEmail = func(detail string, err error) *Problem {
+		return New(ProblemTypeInvalidEmail, "Invalid Email", detail, http.StatusBadRequest, err)
+	}
+	ErrWeakPassword = func(detail string, err error) *Problem {
+		return New(ProblemTypeWeakPassword, "Weak Password", detail, http.StatusBadRequest, err)
+	}
+	ErrInvalidInput = func(detail string, err error) *Problem {
+		return New(ProblemTypeInvalidInput, "Invalid Input", detail, http.StatusBadRequest, err)
+	}
 )
 
 // =============================================================================
@@ -156,7 +172,7 @@ func MapDomainError(err error) *Problem {
 // HTTPStatusFromType mapea ProblemType a código HTTP
 func HTTPStatusFromType(typ ProblemType) int {
 	switch typ {
-	case ProblemTypeBadRequest, ProblemTypeValidationError:
+	case ProblemTypeBadRequest, ProblemTypeValidationError, ProblemTypeInvalidEmail, ProblemTypeWeakPassword, ProblemTypeInvalidInput:
 		return http.StatusBadRequest
 	case ProblemTypeUnauthorized:
 		return http.StatusUnauthorized

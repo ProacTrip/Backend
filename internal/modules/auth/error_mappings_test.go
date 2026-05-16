@@ -8,8 +8,8 @@ import (
 )
 
 // =============================================================================
-// Test: validation-related domain errors must produce ProblemTypeValidationError
-// (not ProblemTypeBadRequest — compliance with RFC 9457 error taxonomy)
+// Test: validation-related domain errors must produce specific RFC 9457 Problem types
+// so the frontend can distinguish error codes properly.
 // =============================================================================
 
 func TestErrorMapping_ValidationErrors_UseValidationErrorURI(t *testing.T) {
@@ -17,13 +17,13 @@ func TestErrorMapping_ValidationErrors_UseValidationErrorURI(t *testing.T) {
 	registerAuthErrorMappings()
 
 	tests := []struct {
-		name        string
-		err         error
-		wantType    serrors.ProblemType
+		name     string
+		err      error
+		wantType serrors.ProblemType
 	}{
-		{"ErrInvalidEmail", domain.ErrInvalidEmail, serrors.ProblemTypeValidationError},
-		{"ErrInvalidInput", domain.ErrInvalidInput, serrors.ProblemTypeValidationError},
-		{"ErrValidationError", domain.ErrValidationError, serrors.ProblemTypeValidationError},
+		{"ErrInvalidEmail", domain.ErrInvalidEmail, serrors.ProblemTypeInvalidEmail},
+		{"ErrInvalidInput", domain.ErrInvalidInput, serrors.ProblemTypeInvalidInput},
+		{"ErrValidationError", domain.ErrValidationError, serrors.ProblemTypeInvalidInput},
 	}
 
 	for _, tt := range tests {
@@ -48,9 +48,9 @@ func TestErrorMapping_PasswordErrors_KeepBadRequest(t *testing.T) {
 		err      error
 		wantType serrors.ProblemType
 	}{
-		{"ErrInvalidPassword", domain.ErrInvalidPassword, serrors.ProblemTypeBadRequest},
-		{"ErrPasswordTooShort", domain.ErrPasswordTooShort, serrors.ProblemTypeBadRequest},
-		{"ErrWeakPassword", domain.ErrWeakPassword, serrors.ProblemTypeBadRequest},
+		{"ErrInvalidPassword", domain.ErrInvalidPassword, serrors.ProblemTypeWeakPassword},
+		{"ErrPasswordTooShort", domain.ErrPasswordTooShort, serrors.ProblemTypeWeakPassword},
+		{"ErrWeakPassword", domain.ErrWeakPassword, serrors.ProblemTypeWeakPassword},
 		{"ErrOAuthProviderNotFound", domain.ErrOAuthProviderNotFound, serrors.ProblemTypeBadRequest},
 	}
 

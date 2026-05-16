@@ -372,8 +372,12 @@ func registerAuthErrorMappings() {
 		// Credenciales
 		case errors.Is(err, domain.ErrInvalidCredentials):
 			return serrors.ErrUnauthorized("Credenciales inválidas", err)
-		case errors.Is(err, domain.ErrInvalidPassword), errors.Is(err, domain.ErrPasswordTooShort), errors.Is(err, domain.ErrWeakPassword):
-			return serrors.ErrBadRequest("La contraseña no cumple los requisitos de seguridad", err)
+		case errors.Is(err, domain.ErrPasswordTooShort):
+			return serrors.ErrWeakPassword("La contraseña debe tener al menos 8 caracteres", err)
+		case errors.Is(err, domain.ErrWeakPassword):
+			return serrors.ErrWeakPassword("La contraseña debe contener al menos una mayúscula, una minúscula, un dígito y un carácter especial", err)
+		case errors.Is(err, domain.ErrInvalidPassword):
+			return serrors.ErrWeakPassword("La contraseña no cumple los requisitos de seguridad", err)
 		case errors.Is(err, domain.ErrPasswordMismatch):
 			return serrors.ErrBadRequest("Las contraseñas no coinciden", err)
 
@@ -407,9 +411,11 @@ func registerAuthErrorMappings() {
 
 		// Validación
 		case errors.Is(err, domain.ErrInvalidEmail):
-			return serrors.ErrValidationError("Dirección de correo inválida", err)
-		case errors.Is(err, domain.ErrInvalidInput), errors.Is(err, domain.ErrValidationError):
-			return serrors.ErrValidationError("Datos de entrada inválidos", err)
+			return serrors.ErrInvalidEmail("El formato del email no es válido", err)
+		case errors.Is(err, domain.ErrInvalidInput):
+			return serrors.ErrInvalidInput("Faltan campos requeridos", err)
+		case errors.Is(err, domain.ErrValidationError):
+			return serrors.ErrInvalidInput("Datos de entrada inválidos", err)
 
 		// MFA
 		case errors.Is(err, domain.ErrMFARequired):
