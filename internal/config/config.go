@@ -62,6 +62,7 @@ type Config struct {
 	AI                 AIConfig               // Configuración del intérprete AI
 	Medical            MedicalConfig          // Configuración del módulo médico
 	Documents          DocumentLimitsConfig   // Límites de documentos
+	R2                 R2StorageConfig        // Configuración de R2 (S3-compatible)
 	CookieDomain       string                 // Dominio para cookies de auth (.proactrip.com en prod, vacío en dev)
 }
 
@@ -151,6 +152,20 @@ type DocumentLimitsConfig struct {
 	MaxPerUser  int // Máximo de documentos por usuario
 	RateLimit   int // Subidas por minuto por usuario
 	RateWindow  int // Ventana del rate limit (segundos)
+}
+
+// R2StorageConfig contiene la configuración de R2 (S3-compatible).
+type R2StorageConfig struct {
+	Endpoint  string // R2 endpoint (ej: https://account.r2.cloudflarestorage.com)
+	AccessKey string // R2 access key ID
+	SecretKey string // R2 secret access key
+	Bucket    string // R2 bucket name
+	UseSSL    bool   // Usar HTTPS para conexiones
+}
+
+// IsConfigured verifica si R2 está configurado.
+func (c *R2StorageConfig) IsConfigured() bool {
+	return c.Endpoint != "" && c.AccessKey != "" && c.SecretKey != ""
 }
 
 // ValidateAll valida todas las configuraciones sensibles al arrancar.
@@ -332,6 +347,13 @@ func Load() *Config {
 			MaxPerUser: getEnvInt("DOCUMENT_MAX_PER_USER", 5),
 			RateLimit:  getEnvInt("DOCUMENT_UPLOAD_RATE_LIMIT", 10),
 			RateWindow: getEnvInt("DOCUMENT_UPLOAD_RATE_WINDOW", 60),
+		},
+		R2: R2StorageConfig{
+			Endpoint:  getEnv("R2_ENDPOINT", ""),
+			AccessKey: getEnv("R2_ACCESS_KEY_ID", ""),
+			SecretKey: getEnv("R2_SECRET_ACCESS_KEY", ""),
+			Bucket:    getEnv("R2_BUCKET_NAME", "proactrip"),
+			UseSSL:    getEnv("R2_USE_SSL", "true") == "true",
 		},
 		CookieDomain: getEnv("COOKIE_DOMAIN", func() string {
 			if getEnv("SERVER_ENV", "dev") == "prod" {

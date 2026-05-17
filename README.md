@@ -348,9 +348,10 @@ docker run -p 8080:8080 --env-file .env proactrip-backend
 | `DOCUMENT_UPLOAD_RATE_LIMIT`            | `10`              | Max document uploads per user per window        |
 | `DOCUMENT_UPLOAD_RATE_WINDOW`           | `1h`              | Document upload rate window                    |
 | `R2_ENDPOINT`                           | *(optional)*      | R2/S3-compatible storage endpoint               |
-| `R2_ACCESS_KEY`                         | *(optional)*      | R2 access key                                   |
-| `R2_SECRET_KEY`                         | *(optional)*      | R2 secret key                                   |
+| `R2_ACCESS_KEY_ID`                      | *(optional)*      | R2 access key ID                                |
+| `R2_SECRET_ACCESS_KEY`                  | *(optional)*      | R2 secret access key                            |
 | `R2_BUCKET_NAME`                        | `proactrip`       | R2 bucket name                                  |
+| `R2_USE_SSL`                            | `true`            | Use HTTPS for R2 connections                    |
 
 ---
 

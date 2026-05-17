@@ -90,7 +90,7 @@ func NewUserProfile(userID uuid.UUID, email string) *UserProfile {
 		TimezoneName:  DefaultTimezone,
 		LanguageCode:  DefaultLanguage,
 		CurrencyCode:  DefaultCurrency,
-		// Role es asignado por el sistema de auth, no por la factoría del perfil.
+		Role:          DefaultRole,
 		Status:        ProfileStatusActive,
 		IsPublic:      false,
 		PhoneVerified: false,

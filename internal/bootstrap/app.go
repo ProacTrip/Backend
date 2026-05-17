@@ -29,6 +29,7 @@ import (
 	searchShared "github.com/ProacTrip/Backend/internal/modules/search/features/shared"
 	userModule "github.com/ProacTrip/Backend/internal/modules/user"
 	userAdapters "github.com/ProacTrip/Backend/internal/modules/user/adapters"
+	userStorage "github.com/ProacTrip/Backend/internal/modules/user/adapters/storage"
 	"github.com/ProacTrip/Backend/internal/modules/auth/features/register"
 	"github.com/ProacTrip/Backend/internal/shared/cache"
 	contextutil "github.com/ProacTrip/Backend/internal/shared/context"
@@ -250,6 +251,16 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		return nil, fmt.Errorf("auth migrations: %w", err)
 	}
 
+	// Search DB migrations — idempotentes, usan IF NOT EXISTS / CREATE TABLE IF NOT EXISTS
+	if err := searchModule.RunMigrations(appCtx, searchPool); err != nil {
+		return nil, fmt.Errorf("search migrations: %w", err)
+	}
+
+	// Notification DB migrations — idempotentes, usan IF NOT EXISTS / ADD CONSTRAINT IF NOT EXISTS
+	if err := notifModule.RunMigrations(appCtx, notifPool); err != nil {
+		return nil, fmt.Errorf("notification migrations: %w", err)
+	}
+
 	// Auth Module (incluye DragonflyClient para idempotency)
 	authMod, err := authModule.NewModule(authModule.Config{
 		EnvResolver: environmentMod.EnvironmentResolver,
@@ -270,13 +281,32 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		return nil, err
 	}
 
-	// User Module (simplified for MVP)
+	// User Module
 	encKeyBytes, _ := cfg.Medical.EncryptionKeyBytes()
+
+	// Inicializar R2 Storage si está configurado
+	var r2Storage *userStorage.R2Storage
+	if cfg.R2.IsConfigured() {
+		var err error
+		r2Storage, err = userStorage.NewR2Storage(
+			cfg.R2.Endpoint,
+			cfg.R2.AccessKey,
+			cfg.R2.SecretKey,
+			cfg.R2.UseSSL,
+		)
+		if err != nil {
+			slog.Warn("R2 storage initialization failed — document uploads disabled", "error", err)
+		} else {
+			slog.Info("R2 storage initialized", "endpoint", cfg.R2.Endpoint, "bucket", cfg.R2.Bucket)
+		}
+	}
+
 	userMod, err := userModule.NewModule(userModule.Config{
 		PostgresPool:  userPool,
 		RedisClient:   rdb,
 		EventBus:      eventBus,
 		EncryptionKey: encKeyBytes,
+		R2Storage:     r2Storage,
 		RateLimiter:   rateLimiter,
 	})
 	if err != nil {
