@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
+	"github.com/ProacTrip/Backend/internal/modules/search/shared/airports"
 )
 
 // =============================================================================
@@ -104,9 +105,16 @@ func convertToBookingResponse(raw map[string]interface{}) (*serpapiBookingRespon
 func buildSerpapiParams(req domain.FlightSearchRequest) map[string]string {
 	params := make(map[string]string)
 
+	// Resolve country names to IATA codes (e.g., "Perú" → "LIM", "México" → "MEX").
+	// Only resolves when the input is a single identifier (no commas — those are
+	// already explicit IATA/kgmid lists). Already-valid IATA codes like "MAD"
+	// and kgmids like "/m/04jpl" pass through unchanged.
+	departureID := resolveIdentifier(req.Departure)
+	arrivalID := resolveIdentifier(req.Arrival)
+
 	// Required fields
-	params["departure_id"] = req.Departure
-	params["arrival_id"] = req.Arrival
+	params["departure_id"] = departureID
+	params["arrival_id"] = arrivalID
 	params["outbound_date"] = req.OutboundDate
 	params["currency"] = req.Currency
 
@@ -227,6 +235,55 @@ func buildSerpapiParams(req domain.FlightSearchRequest) map[string]string {
 	params["no_cache"] = "false"  // Use SerpAPI's own cache
 
 	return params
+}
+
+// resolveIdentifier translates a user-provided location identifier into a
+// SerpAPI-compatible format. It handles three cases:
+//  1. Country name → IATA code (via countryToMainAirport map)
+//  2. Already-valid IATA code (e.g., "MAD") → passes through unchanged
+//  3. kgmid (e.g., "/m/04jpl") → passes through unchanged
+//  4. Comma-separated list (e.g., "CDG,ORY") → passes through unchanged
+//     (assumes user provided explicit airport identifiers)
+func resolveIdentifier(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return trimmed
+	}
+
+	// Comma-separated lists are explicit airport identifiers — don't resolve
+	if strings.Contains(trimmed, ",") {
+		return trimmed
+	}
+
+	// kgmids start with /m/ — pass through
+	if strings.HasPrefix(trimmed, "/m/") {
+		return trimmed
+	}
+
+	// Check if it looks like a valid IATA code (3 uppercase letters)
+	// If not, try country name resolution
+	if len(trimmed) == 3 && isAllUpperAlpha(trimmed) {
+		// Already looks like IATA — pass through
+		return trimmed
+	}
+
+	// Try country name resolution
+	if iata, ok := airports.ResolveCountryToIATA(trimmed); ok {
+		return iata
+	}
+
+	// No match — pass through as-is (it might be a city name that SerpAPI accepts)
+	return trimmed
+}
+
+// isAllUpperAlpha checks if a string consists only of uppercase ASCII letters.
+func isAllUpperAlpha(s string) bool {
+	for _, r := range s {
+		if r < 'A' || r > 'Z' {
+			return false
+		}
+	}
+	return true
 }
 
 // =============================================================================

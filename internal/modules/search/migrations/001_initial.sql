@@ -36,3 +36,11 @@ CREATE INDEX idx_search_history_session_id ON search_history(session_id)
     WHERE session_id IS NOT NULL;
 CREATE INDEX idx_search_history_created_at ON search_history(created_at DESC);
 CREATE INDEX idx_search_history_type       ON search_history(query_type, created_at DESC);
+
+-- +migrate Down
+
+DROP INDEX IF EXISTS idx_search_history_type;
+DROP INDEX IF EXISTS idx_search_history_created_at;
+DROP INDEX IF EXISTS idx_search_history_session_id;
+DROP INDEX IF EXISTS idx_search_history_user_id;
+DROP TABLE IF EXISTS search_history;

@@ -63,13 +63,19 @@ func NewUseCaseComplete(
 // El Upsert usa user_id como clave de conflicto
 // email: desnormalizado del evento de registro (evita joins cross-DB).
 // firstName: opcional, viene del evento de registro. Si está vacío, se deja nil.
-func (uc *UseCase) Execute(ctx context.Context, userID uuid.UUID, email string, firstName string, envPrefs ...domain.EnvPrefs) error {
+// avatarURL: opcional, viene del evento de registro (ej. Google OAuth picture).
+func (uc *UseCase) Execute(ctx context.Context, userID uuid.UUID, email string, firstName string, avatarURL string, envPrefs ...domain.EnvPrefs) error {
 	// Crear nuevo perfil con los defaults de la migración
 	profile := domain.NewUserProfile(userID, email)
 
 	// Setear nombre si se proveyó en el registro
 	if firstName != "" {
 		profile.SetName(&firstName, nil)
+	}
+
+	// Setear avatar si se proveyó (ej. Google OAuth)
+	if avatarURL != "" {
+		profile.SetAvatar(new(avatarURL))
 	}
 
 	// Override with environment prefs if provided

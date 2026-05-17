@@ -20,6 +20,7 @@ services:
     # PostgreSQL 18+ requiere mount en /var/lib/postgresql (no en /data)
     volumes:
       - postgres_data:/var/lib/postgresql
+      - ./docker/postgres/init-databases.sql:/docker-entrypoint-initdb.d/init-databases.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-proactrip}"]
       interval: 10s

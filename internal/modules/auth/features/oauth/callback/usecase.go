@@ -242,6 +242,10 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 			"verification_token": verificationToken,
 			"first_name":         userInfo.GivenName, // nombre de pila de Google, vacío si no está disponible
 		}
+		// Avatar URL — Google OAuth picture, vacío para otros proveedores
+		if userInfo.Picture != "" {
+			flatPayload["avatar_url"] = userInfo.Picture
+		}
 		if _, err := uc.eventPublisher.Publish(ctx, streamName, flatPayload); err != nil {
 			slog.ErrorContext(ctx, "failed to publish auth user event",
 				slog.String("event", "auth.user.registered"),

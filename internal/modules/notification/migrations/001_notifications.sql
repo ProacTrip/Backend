@@ -59,3 +59,11 @@ CREATE INDEX idx_notifications_status  ON notifications(status)
 CREATE INDEX idx_notifications_provider_msg ON notifications(provider_message_id)
     WHERE provider_message_id IS NOT NULL;
 
+-- +migrate Down
+
+DROP INDEX IF EXISTS idx_notifications_provider_msg;
+DROP INDEX IF EXISTS idx_notifications_status;
+DROP INDEX IF EXISTS idx_notifications_user_id;
+DROP FUNCTION IF EXISTS update_updated_at_column;
+DROP TABLE IF EXISTS notifications;
+

@@ -1,5 +1,14 @@
 -- +migrate Up
 
+-- Shared utility function — idempotente con CREATE OR REPLACE
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+    RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 -- =============================================================================
 -- CONVERSACIONES DE IA — Persistencia durable para sesiones multi-turno.
 -- Solo se almacenan conversaciones de usuarios autenticados (UserID != "").
@@ -38,3 +47,11 @@ CREATE INDEX idx_ai_conversations_user_id ON ai_conversations(user_id);
 
 -- Índice para listar conversaciones recientes (dashboard, paginación)
 CREATE INDEX idx_ai_conversations_updated_at ON ai_conversations(updated_at DESC);
+
+-- +migrate Down
+
+DROP INDEX IF EXISTS idx_ai_conversations_updated_at;
+DROP INDEX IF EXISTS idx_ai_conversations_user_id;
+DROP TRIGGER IF EXISTS trg_ai_conversations_updated_at ON ai_conversations;
+DROP FUNCTION IF EXISTS update_updated_at_column;
+DROP TABLE IF EXISTS ai_conversations;
