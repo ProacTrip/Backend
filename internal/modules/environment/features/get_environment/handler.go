@@ -3,6 +3,7 @@ package get_environment
 import (
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/ProacTrip/Backend/internal/modules/environment/domain"
@@ -28,8 +29,8 @@ func (h *Handler) Handle(c *echo.Context) error {
 	}
 	slog.DebugContext(c.Request().Context(), "get_environment handler: resolved IP", "ip", ip)
 
-	// Validar IP: rechazar IPs privadas, loopback y malformadas
-	if domain.IsPrivateOrLocalIP(ip) {
+	// Validar IP: rechazar IPs privadas, loopback y malformadas (solo en producción)
+	if os.Getenv("SERVER_ENV") != "dev" && domain.IsPrivateOrLocalIP(ip) {
 		slog.WarnContext(c.Request().Context(), "get_environment handler: IP inválida o privada", "ip", ip)
 		return httperr.MapError(c, domain.ErrInvalidIP)
 	}
