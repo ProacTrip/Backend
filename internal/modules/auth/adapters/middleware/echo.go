@@ -107,6 +107,13 @@ func (m *AuthMiddleware) Handle(next echo.HandlerFunc) echo.HandlerFunc {
 		refreshCookie, _ := c.Cookie(refreshName)
 
 		if accessCookie == nil && refreshCookie == nil {
+			// Sin cookies: si el path requiere enforce, devolver 401.
+			// Si no (observe mode), pasar el request sin claims.
+			if m.shouldEnforce(c.Request().URL.Path) {
+				return c.JSON(http.StatusUnauthorized, serrors.ErrUnauthorized(
+					"Autenticación requerida", nil,
+				).WithInstance(c.Request().URL.Path))
+			}
 			return next(c)
 		}
 
@@ -642,7 +649,7 @@ func (m *AuthMiddleware) shouldEnforce(path string) bool {
 	case "global":
 		return true
 	case "dashboard":
-		return strings.HasPrefix(path, "/v1/dashboard/")
+		return strings.HasPrefix(path, "/v1/dashboard/") || strings.HasPrefix(path, "/v1/user/")
 	default:
 		return false
 	}

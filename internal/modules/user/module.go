@@ -467,9 +467,10 @@ func NewModule(cfg Config) (*Module, error) {
 	return m, nil
 }
 
-// RegisterRoutes registra las rutas del módulo en el grupo proporcionado.
+// RegisterRoutes registra las rutas del módulo en los grupos proporcionados.
 // authMW es el middleware de autenticación (cookie-based).
-func (m *Module) RegisterRoutes(g *echo.Group, authMW echo.MiddlewareFunc) {
+// publicG es el grupo sin middleware de auth para rutas públicas.
+func (m *Module) RegisterRoutes(g *echo.Group, publicG *echo.Group, authMW echo.MiddlewareFunc) {
 	// Phase 2
 	g.GET("/profile", m.getProfileHandler.Handle, authMW)
 	g.PUT("/profile", m.updateProfileHandler.Handle, authMW)
@@ -500,7 +501,7 @@ func (m *Module) RegisterRoutes(g *echo.Group, authMW echo.MiddlewareFunc) {
 	// Phase 5 — Documentos
 	// GET /documents/types — público, sin auth
 	if m.documentTypesHandler != nil {
-		g.GET("/documents/types", m.documentTypesHandler.Handle)
+		publicG.GET("/documents/types", m.documentTypesHandler.Handle)
 	}
 	// Resto de endpoints de documentos requieren auth
 	if m.uploadDocumentHandler != nil {

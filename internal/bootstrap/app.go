@@ -500,7 +500,8 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 
 	// User routes: /v1/user/profile/* (autenticado via cookie)
 	userGroup := e.Group("/v1/user", authMiddleware.Handle, authRateLimitMW)
-	userMod.RegisterRoutes(userGroup, authMiddleware.Handle)
+	userPublicGroup := e.Group("/v1/user") // rutas públicas sin auth middleware
+	userMod.RegisterRoutes(userGroup, userPublicGroup, authMiddleware.Handle)
 
 	// ========== DASHBOARD ROUTES ==========
 	// Todas las rutas del dashboard requieren PASETO válido + permiso users:read base.

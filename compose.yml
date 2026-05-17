@@ -98,6 +98,7 @@ services:
       start_period: 30s
     environment:
       - APP_ENV=development
+      - AUTHZ_ENFORCE_MODE=dashboard
 
 # =============================================================================
 # Volumes
