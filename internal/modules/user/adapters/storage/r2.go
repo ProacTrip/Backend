@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -35,11 +36,15 @@ type R2Storage struct {
 }
 
 // NewR2Storage crea un nuevo cliente de almacenamiento R2.
-// endpoint: URL del endpoint S3 (ej. "https://account.r2.cloudflarestorage.com")
+// endpoint: URL del endpoint S3 (ej. "https://account.r2.cloudflarestorage.com" o "account.r2.cloudflarestorage.com")
 // accessKey: clave de acceso
 // secretKey: clave secreta
 // useSSL: true para HTTPS, false para HTTP (dev local)
 func NewR2Storage(endpoint, accessKey, secretKey string, useSSL bool) (*R2Storage, error) {
+	// MinIO SDK espera solo host:port, no URL completa con scheme
+	endpoint = strings.TrimPrefix(endpoint, "https://")
+	endpoint = strings.TrimPrefix(endpoint, "http://")
+
 	client, err := minio.New(endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
 		Secure: useSSL,
