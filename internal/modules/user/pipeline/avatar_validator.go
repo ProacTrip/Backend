@@ -51,23 +51,27 @@ type R2Client interface {
 // AvatarValidator consume el stream {events}:avatar:validate, valida
 // archivos en R2 y actualiza el avatar del usuario.
 type AvatarValidator struct {
-	rdb        *redis.Client
-	repo       domain.ProfileRepository
-	group      string
-	consumer   string
-	dlqStream  string
-	running    atomic.Bool
-	orphanDone chan struct{} // cerrado cuando rescueOrphans termina
+	rdb          *redis.Client
+	repo         domain.ProfileRepository
+	group        string
+	consumer     string
+	dlqStream    string
+	avatarBaseURL string // URL base para avatares (CDN en prod, vacío en dev)
+	running      atomic.Bool
+	orphanDone   chan struct{} // cerrado cuando rescueOrphans termina
 }
 
 // NewAvatarValidator crea un nuevo validador de avatares.
-func NewAvatarValidator(rdb *redis.Client, repo domain.ProfileRepository) *AvatarValidator {
+// avatarBaseURL: prefijo para la URL del avatar (ej. "https://cdn.proactrip.com").
+// Si está vacío, no se actualiza el avatar_url (el frontend usará el default).
+func NewAvatarValidator(rdb *redis.Client, repo domain.ProfileRepository, avatarBaseURL string) *AvatarValidator {
 	return &AvatarValidator{
-		rdb:       rdb,
-		repo:      repo,
-		group:     avatarGroup,
-		consumer:  fmt.Sprintf("avatar-validator-%d", time.Now().UnixMilli()),
-		dlqStream: AvatarDLQStream,
+		rdb:          rdb,
+		repo:         repo,
+		group:        avatarGroup,
+		consumer:     fmt.Sprintf("avatar-validator-%d", time.Now().UnixMilli()),
+		dlqStream:    AvatarDLQStream,
+		avatarBaseURL: avatarBaseURL,
 	}
 }
 
@@ -174,8 +178,15 @@ func (v *AvatarValidator) processMessage(ctx context.Context, msg redis.XMessage
 	// el consumer asume que el archivo fue verificado en el paso de confirmación).
 	// La validación de MIME y tamaño se delega al caller vía la confirmación inicial.
 
-	// Construir URL del avatar (CDN o direct)
-	avatarURL := fmt.Sprintf("https://cdn.proactrip.com/%s", storageKey)
+	// Construir URL del avatar si hay base URL configurada.
+	// Si no (dev), el frontend usará el avatar por defecto.
+	if v.avatarBaseURL == "" {
+		slog.Info("avatar validator: skipping avatar URL update (no CDN configured)",
+			"user_id", userID, "storage_key", storageKey)
+		_ = v.rdb.XAck(ctx, avatarStream, v.group, msg.ID)
+		return
+	}
+	avatarURL := fmt.Sprintf("%s/%s", v.avatarBaseURL, storageKey)
 
 	// Actualizar el perfil del usuario con la URL del avatar
 	if err := v.repo.UpdateAvatar(ctx, userID, avatarURL); err != nil {

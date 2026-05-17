@@ -290,7 +290,7 @@ func NewModule(cfg Config) (*Module, error) {
 		m.confirmAvatarUploadHandler = confirm_avatar_upload.NewHandler(confirmUC)
 
 		// Avatar Validator — consumer de Dragonfly Streams
-		m.avatarValidator = pipeline.NewAvatarValidator(cfg.RedisClient, m.profileRepo)
+		m.avatarValidator = pipeline.NewAvatarValidator(cfg.RedisClient, m.profileRepo, "")
 	}
 
 	// 11. Inicializar repositorio de documentos (Phase 5)
