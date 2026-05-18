@@ -224,6 +224,24 @@ func (c *NotificationConsumer) handleUserRegistered(ctx context.Context, payload
 		return fmt.Errorf("missing email")
 	}
 
+	// Si el usuario se registró vía OAuth (Google, GitHub, etc.), el email ya fue
+	// verificado por el proveedor — no hay que enviar email de verificación.
+	provider, hasProvider := payload["provider"].(string)
+	if hasProvider && provider != "" {
+		slog.InfoContext(ctx, "skipping verification email for OAuth user",
+			"user_id", userID, "provider", provider,
+		)
+		return nil
+	}
+
+	// Verificación secundaria: email_verified flag explícito en el payload.
+	if verified, ok := payload["email_verified"].(bool); ok && verified {
+		slog.InfoContext(ctx, "skipping verification email (email_verified=true in payload)",
+			"user_id", userID,
+		)
+		return nil
+	}
+
 	// Obtener token de verificación del payload (generado por el módulo auth)
 	verificationToken, _ := payload["verification_token"].(string)
 	if verificationToken == "" {

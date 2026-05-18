@@ -86,11 +86,12 @@ func (uc *UseCase) Execute(ctx context.Context, cmd EnableDisableCommand) (*Resp
 		return nil, fmt.Errorf("update user status: %w", err)
 	}
 
-	// 6. Invalidar sesiones si se deshabilita (best-effort)
-	// AS-SPEC-005: token_version++ es la defensa primaria; la invalidación de cache
-	// es best-effort. Si falla, el token_version mismatch rechazará requests viejos.
+	// 6. Invalidar sesiones cacheadas (disable Y enable)
+	// AS-SPEC-005: token_version++ es la defensa primaria en disable.
+	// En enable también invalidamos para que el cache no siga diciendo "disabled".
+	// Best-effort: si falla, el TTL del cache (1 min) lo resuelve eventualmente.
 	sessionsInvalidated := 0
-	if cmd.Status == "disabled" {
+	if cmd.Status == "disabled" || cmd.Status == "active" {
 		sessionsInvalidated = uc.invalidateSessions(ctx, cmd.UserID)
 	}
 

@@ -11,6 +11,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -46,7 +47,10 @@ type SessionData struct {
 
 const (
 	// SessionTTL es el TTL por defecto para las entradas de cache de sesión.
-	SessionTTL = 5 * time.Minute
+	// Reducido de 5min a 1min para que cambios de estado (disable/enable)
+	// se propaguen más rápido. El sliding reset en cada request mantiene
+	// las sesiones activas sin afectar el rendimiento.
+	SessionTTL = 1 * time.Minute
 
 	// SchemaVersionActual es la versión actual del schema de cache.
 	// Incrementar cuando cambie la estructura del hash para forzar repoblación.
@@ -168,7 +172,9 @@ func InvalidateAllUserSessions(ctx context.Context, rdb *redis.Client, userID st
 				continue
 			}
 			if ownerID == userID {
-				rdb.Del(ctx, key)
+				if err := rdb.Del(ctx, key).Err(); err != nil {
+					slog.WarnContext(ctx, "failed to delete cached session", "key", key, "error", err)
+				}
 			}
 		}
 

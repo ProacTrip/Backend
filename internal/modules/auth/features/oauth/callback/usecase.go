@@ -226,21 +226,20 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 	if isNewUser && uc.eventPublisher != nil {
 		streamName := eventbus.StreamName("auth.user.registered")
 
-		// Generar token de verificación para el notification consumer.
-		// Para usuarios OAuth el email ya está verificado por el proveedor,
-		// pero se incluye el token para que el consumer pueda armar el enlace del email.
-		verificationToken := uuid.Must(uuid.NewV7()).String()
+		// Para usuarios OAuth el email ya está verificado por el proveedor.
+		// No se incluye verification_token — el notification consumer usa email_verified
+		// para decidir si enviar el email de verificación.
 
 		flatPayload := map[string]any{
-			"event_type":         "user_registered",
-			"event_version":      int64(1),
-			"aggregate_id":       user.ID.String(),
-			"timestamp":          time.Now().UnixMilli(),
-			"user_id":            user.ID.String(),
-			"email":              user.Email,
-			"provider":           cmd.Provider,
-			"verification_token": verificationToken,
-			"first_name":         userInfo.GivenName, // nombre de pila de Google, vacío si no está disponible
+			"event_type":     "user_registered",
+			"event_version":  int64(1),
+			"aggregate_id":   user.ID.String(),
+			"timestamp":      time.Now().UnixMilli(),
+			"user_id":        user.ID.String(),
+			"email":          user.Email,
+			"provider":       cmd.Provider,
+			"email_verified": true, // OAuth users are pre-verified
+			"first_name":     userInfo.GivenName, // nombre de pila de Google, vacío si no está disponible
 		}
 		// Avatar URL — Google OAuth picture, vacío para otros proveedores
 		if userInfo.Picture != "" {

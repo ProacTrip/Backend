@@ -4,7 +4,7 @@
 -- Migración de schema del módulo auth (002).
 
 -- 1. Agregar 'disabled' al CHECK constraint de status
--- +migrate Down
+-- Down below:
 ALTER TABLE users DROP CONSTRAINT IF EXISTS chk_user_status;
 ALTER TABLE users ADD CONSTRAINT chk_user_status
     CHECK (status IN ('active', 'inactive', 'suspended', 'pending_verification', 'locked', 'disabled'));
@@ -18,10 +18,8 @@ ALTER TABLE users ADD CONSTRAINT chk_token_version_positive
 
 -- +migrate Down
 -- Revierte los cambios del migration 002.
--- +migrate Down
 ALTER TABLE users DROP CONSTRAINT IF EXISTS chk_token_version_positive;
 ALTER TABLE users DROP COLUMN IF EXISTS token_version;
--- +migrate Down
 ALTER TABLE users DROP CONSTRAINT IF EXISTS chk_user_status;
 ALTER TABLE users ADD CONSTRAINT chk_user_status
     CHECK (status IN ('active', 'inactive', 'suspended', 'pending_verification', 'locked'));

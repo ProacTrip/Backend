@@ -53,12 +53,17 @@ func decodeHash(encoded string) (salt, hash []byte, params HashParams, err error
 		return nil, nil, HashParams{}, fmt.Errorf("error parseando parámetros: %w", err)
 	}
 
-	salt, err = base64.StdEncoding.DecodeString(parts[4])
+	// Strip padding before decoding — accepts both padded (StdEncoding) and
+	// unpadded (RawStdEncoding) base64. Pre-computed seed hashes may use either format.
+	saltStr := strings.TrimRight(parts[4], "=")
+	hashStr := strings.TrimRight(parts[5], "=")
+
+	salt, err = base64.RawStdEncoding.DecodeString(saltStr)
 	if err != nil {
 		return nil, nil, HashParams{}, fmt.Errorf("error decodificando salt: %w", err)
 	}
 
-	hash, err = base64.StdEncoding.DecodeString(parts[5])
+	hash, err = base64.RawStdEncoding.DecodeString(hashStr)
 	if err != nil {
 		return nil, nil, HashParams{}, fmt.Errorf("error decodificando hash: %w", err)
 	}
