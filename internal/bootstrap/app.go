@@ -31,6 +31,9 @@ import (
 	userAdapters "github.com/ProacTrip/Backend/internal/modules/user/adapters"
 	userStorage "github.com/ProacTrip/Backend/internal/modules/user/adapters/storage"
 	"github.com/ProacTrip/Backend/internal/modules/auth/features/register"
+	"github.com/ProacTrip/Backend/internal/modules/auth/features/me"
+	sendverification "github.com/ProacTrip/Backend/internal/modules/notification/features/send_verification_email"
+	userDomain "github.com/ProacTrip/Backend/internal/modules/user/domain"
 	"github.com/ProacTrip/Backend/internal/shared/cache"
 	contextutil "github.com/ProacTrip/Backend/internal/shared/context"
 	"github.com/ProacTrip/Backend/internal/shared/database"
@@ -41,6 +44,7 @@ import (
 	sharedmiddleware "github.com/ProacTrip/Backend/internal/shared/middleware"
 	"github.com/ProacTrip/Backend/internal/shared/ratelimit"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
 	"github.com/redis/go-redis/v9"
@@ -51,6 +55,45 @@ type StartConfig = echo.StartConfig
 
 // Compile-time interface check: EnvironmentResolverAdapter implements register.EnvironmentResolver.
 var _ register.EnvironmentResolver = (*envShared.EnvironmentResolverAdapter)(nil)
+
+// meProfileAdapter implementa me.UserProfileProvider usando el ProfileRepository
+// del módulo user. Definido en el composition root (app.go) para evitar imports
+// cross-module desde auth → user/domain.
+// Convierte ErrProfileNotFound → (nil, nil) porque el perfil se crea asíncronamente
+// por el consumer de eventos.
+type meProfileAdapter struct {
+	repo userDomain.ProfileRepository
+}
+
+func (a *meProfileAdapter) GetByUserID(ctx context.Context, userID uuid.UUID) (*me.Profile, error) {
+	profile, err := a.repo.GetByUserID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, userDomain.ErrProfileNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &me.Profile{AvatarURL: profile.AvatarURL}, nil
+}
+
+// resendNotificationAdapter adapta SendVerificationEmailUseCase del módulo
+// notification al NotificationPort local de resend_verification.
+// Definido en el composition root (app.go) para evitar imports cross-module
+// desde auth → notification/features.
+type resendNotificationAdapter struct {
+	uc *sendverification.UseCase
+}
+
+func (a *resendNotificationAdapter) SendVerificationEmail(ctx context.Context, userID uuid.UUID, email, token string) error {
+	cmd := sendverification.Command{
+		UserID:            userID,
+		Email:             email,
+		VerificationToken: token,
+		FirstName:         "", // El adapter de resend no tiene acceso al first_name
+	}
+	_, err := a.uc.Execute(ctx, cmd)
+	return err
+}
 
 type App struct {
 	Echo        *echo.Echo
@@ -331,8 +374,15 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		// No es fatal - el servidor puede iniciar sin el consumer
 	}
 
-	// Wire resend-verification feature (notification module must exist first)
-	authMod.WireResendVerification(notifMod.SendVerificationEmailUseCase)
+	// Wire resend-verification feature (notification module must exist first).
+	// El adapter (resendNotificationAdapter) está definido a nivel paquete en este archivo
+	// (composition root) para evitar imports cross-module desde auth → notification/features.
+	authMod.WireResendVerification(&resendNotificationAdapter{uc: notifMod.SendVerificationEmailUseCase})
+
+	// Wire user profile provider para GET /v1/auth/me avatar_url enrichment.
+	// El adapter (meProfileAdapter) está definido a nivel paquete en este archivo
+	// (composition root) para evitar imports cross-module desde auth → user/domain.
+	authMod.WireUserProfile(&meProfileAdapter{repo: userMod.ProfileRepo()})
 
 	// Start user consumer (BACKGROUND - consume eventos de Dragonfly Streams)
 	if err := userMod.EventConsumer().Start(appCtx); err != nil {

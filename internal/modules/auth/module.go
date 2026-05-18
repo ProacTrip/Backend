@@ -30,7 +30,6 @@ import (
 	"github.com/ProacTrip/Backend/internal/modules/auth/features/register"
 	"github.com/ProacTrip/Backend/internal/modules/auth/features/resend_verification"
 	"github.com/ProacTrip/Backend/internal/modules/auth/features/verify_email"
-	sendverification "github.com/ProacTrip/Backend/internal/modules/notification/features/send_verification_email"
 	serrors "github.com/ProacTrip/Backend/internal/shared/errors"
 	"github.com/ProacTrip/Backend/internal/shared/eventbus"
 	"github.com/redis/go-redis/v9"
@@ -210,8 +209,9 @@ func NewModule(cfg Config) (*Module, error) {
 	})
 	m.LogoutHandler = logout.NewHandler(m.Logout, cfg.IsProduction, cfg.CookieDomain)
 
-	// Me (current user)
-	m.MeHandler = me.NewHandler(m.TokenService, m.Repository)
+	// Me (current user) — sin profile provider inicialmente.
+	// Se cablea después de que el user module esté inicializado vía WireUserProfile().
+	m.MeHandler = me.NewHandler(m.TokenService, m.Repository, nil)
 
 	// ========== OAUTH FEATURES ==========
 
@@ -313,39 +313,40 @@ func MustNewModule(cfg Config) *Module {
 // =============================================================================
 // Resend Verification — Wired after notification module is initialized
 // (notification module is created after auth, so this is called from app.go)
+//
+// El adapter concreto (resendNotificationAdapter) se define en bootstrap/app.go
+// (composition root) para evitar imports cross-module desde auth → notification.
+// auth solo conoce resend_verification.NotificationPort (interfaz local).
 // =============================================================================
-
-// resendNotificationAdapter adapta el SendVerificationEmailUseCase del módulo
-// notification al NotificationPort local definido en resend_verification/usecase.go.
-type resendNotificationAdapter struct {
-	uc *sendverification.UseCase
-}
-
-// SendVerificationEmail implementa resend_verification.NotificationPort.
-func (a *resendNotificationAdapter) SendVerificationEmail(ctx context.Context, userID uuid.UUID, email, token string) error {
-	cmd := sendverification.Command{
-		UserID:            userID,
-		Email:             email,
-		VerificationToken: token,
-		FirstName:         "", // El adapter de resend no tiene acceso al first_name
-	}
-	_, err := a.uc.Execute(ctx, cmd)
-	return err
-}
 
 // WireResendVerification crea el usecase y handler del feature resend-verification
 // y los almacena en el Module. Debe llamarse DESPUÉS de que el notification module
-// esté inicializado, pasando su SendVerificationEmailUseCase.
-func (m *Module) WireResendVerification(notifUC *sendverification.UseCase) {
-	adapter := &resendNotificationAdapter{uc: notifUC}
-
+// esté inicializado. El adapter es creado en app.go y pasado como NotificationPort.
+func (m *Module) WireResendVerification(notifier resend_verification.NotificationPort) {
 	uc := resend_verification.NewUseCase(resend_verification.UseCaseDeps{
 		Repo:     m.Repository,
 		TokenSvc: m.VerificationService,
-		Notifier: adapter,
+		Notifier: notifier,
 	})
 
 	m.ResendVerificationHandler = resend_verification.NewHandler(uc)
+}
+
+// =============================================================================
+// User Profile Wiring — Ports & Adapters
+// =============================================================================
+//
+// El adapter concreto (MeProfileAdapter) se define en bootstrap/app.go
+// (composition root) para evitar imports cross-module desde auth → user.
+// auth solo conoce me.UserProfileProvider (interfaz local definida en
+// auth/features/me/provider.go).
+
+// WireUserProfile inyecta el UserProfileProvider en el handler me.
+// Debe llamarse DESPUÉS de que el user module esté inicializado.
+// El adapter es creado en bootstrap/app.go y pasado como me.UserProfileProvider.
+func (m *Module) WireUserProfile(provider me.UserProfileProvider) {
+	m.MeHandler = me.NewHandler(m.TokenService, m.Repository, provider)
+	slog.Info("auth: user profile provider wired for /v1/auth/me")
 }
 
 // GeneratePasetoKey genera una clave PASETO aleatoria de 32 bytes

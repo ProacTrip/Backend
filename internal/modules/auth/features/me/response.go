@@ -11,4 +11,5 @@ type UserResponse struct {
 	Email         string    `json:"email"`
 	EmailVerified bool      `json:"email_verified"`
 	RoleName      string    `json:"role_name"`
+	AvatarURL     *string   `json:"avatar_url,omitzero"`
 }

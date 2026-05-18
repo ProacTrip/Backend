@@ -721,10 +721,13 @@ GET /v1/auth/me
     "id": "019d5439-cb43-716d-90b5-51dcbe980908",
     "email": "user@example.com",
     "email_verified": true,
-    "role_name": "client"
+    "role_name": "client",
+    "avatar_url": "https://lh3.googleusercontent.com/a/photo.jpg"
   }
 }
 ```
+
+> `avatar_url` usa `omitzero` — se omite cuando es `nil` (perfil aún no creado por el consumer asíncrono de eventos). El frontend lo interpreta como `null`/ausente.
 
 **Headers:**
 

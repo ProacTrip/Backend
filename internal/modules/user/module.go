@@ -155,6 +155,13 @@ func (m *Module) SavedSearchRepo() *postgres.SavedSearchRepository {
 	return m.savedSearchRepo
 }
 
+// ProfileRepo expone el repositorio de perfiles de usuario.
+// Usado por el módulo auth para enriquecer GET /v1/auth/me con avatar_url
+// sin acoplar auth → user (Ports & Adapters via UserProfileProvider interface).
+func (m *Module) ProfileRepo() domain.ProfileRepository {
+	return m.profileRepo
+}
+
 // EventConsumer expone el consumer de eventos de usuario.
 // Accedido por bootstrap para iniciar el consumer.
 func (m *Module) EventConsumer() *consumer.UserEventConsumer {

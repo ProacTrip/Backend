@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ProacTrip/Backend/internal/shared/ratelimit"
@@ -364,12 +365,18 @@ func Load() *Config {
 	}
 }
 
-// getEnv obtiene valor de variable de entorno, retorna default si no existe
+// getEnv obtiene valor de variable de entorno, retorna default si no existe.
+// Soporta comentarios inline con # (formato .env de Docker).
 func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
 	}
-	return defaultValue
+	// Strip inline comments (e.g., "value  # comment")
+	if idx := strings.IndexByte(value, '#'); idx >= 0 {
+		value = strings.TrimSpace(value[:idx])
+	}
+	return value
 }
 
 func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
