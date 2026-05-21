@@ -1,4 +1,4 @@
-// Handler HTTP para PUT /v1/user/profile.
+// Handler HTTP para PATCH /v1/user/profile.
 package update_profile
 
 import (
@@ -44,5 +44,5 @@ func (h *Handler) Handle(c *echo.Context) error {
 		return httperr.MapError(c, err)
 	}
 
-	return c.JSON(http.StatusOK, map[string]string{"message": "Perfil actualizado correctamente"})
+	return c.JSON(http.StatusOK, map[string]string{"message": "Perfil actualizado correctamente."})
 }

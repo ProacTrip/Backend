@@ -164,6 +164,40 @@ func (r *MedicalPendingUpdateRepository) Resolve(ctx context.Context, id uuid.UU
 }
 
 // =============================================================================
+// ListByUserID — Recupera actualizaciones con filtro de status opcional
+// =============================================================================
+
+// ListByUserID recupera actualizaciones para un usuario, con filtro de status opcional.
+// Si status es nil, retorna todas las actualizaciones sin filtrar por status.
+func (r *MedicalPendingUpdateRepository) ListByUserID(ctx context.Context, userID uuid.UUID, status *domain.MedicalPendingUpdateStatus) ([]*domain.MedicalPendingUpdate, error) {
+	query := `
+		SELECT pu.id, pu.user_id, pu.source_type, pu.source_document_id, pu.conversation_id,
+		       pu.field_name, pu.current_value, pu.proposed_value,
+		       pu.suggested_at, pu.expires_at, pu.status, pu.resolved_at,
+		       d.file_name AS source_file_name
+		FROM medical_pending_updates pu
+		LEFT JOIN user_documents d ON pu.source_document_id = d.id
+		WHERE pu.user_id = $1
+	`
+	args := []interface{}{userID}
+
+	if status != nil {
+		query += ` AND pu.status = $2`
+		args = append(args, string(*status))
+	}
+
+	query += ` ORDER BY pu.suggested_at DESC`
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list updates by user_id: %w", err)
+	}
+	defer rows.Close()
+
+	return scanMedicalPendingUpdates(rows)
+}
+
+// =============================================================================
 // CountPending — Cuenta actualizaciones pendientes para un usuario
 // =============================================================================
 

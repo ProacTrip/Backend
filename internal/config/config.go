@@ -33,6 +33,7 @@ func generateSecureKey() (string, error) {
 type EnvironmentConfig struct {
 	OpenWeatherAPIKey   string
 	OpenWeatherCacheTTL time.Duration
+	OpenWeatherTimeout  time.Duration
 	IpQueryBaseURL      string
 }
 
@@ -46,25 +47,26 @@ type OAuthConfig struct {
 
 // Configuración principal que agrupa todos los componentes de la aplicación
 type Config struct {
-	Server         ServerConfig
-	DB             DBConfig
-	Dragonfly      DragonflyConfig
-	Frontend       FrontendConfig
-	Security       SecurityConfig
-	Email          EmailConfig
-	Environment    EnvironmentConfig
-	OAuth          OAuthConfig               // Credenciales OAuth por proveedor
-	SerpAPIKey     string                    // API key de SerpAPI para búsqueda de vuelos
-	PasetoKeyBytes []byte                    // Bytes decodificados de PASETO_KEY (para uso directo)
-	RateLimit      *ratelimit.RateLimitConfig // Configuración de rate limiting
-	DefaultCurrency    string                 // Moneda por defecto para usuarios sin geoip (DEFAULT_CURRENCY env)
-	DefaultLanguage    string                 // Idioma por defecto para usuarios sin geoip (DEFAULT_LANGUAGE env)
-	DefaultCountryCode string                 // País por defecto para búsquedas sin geoip (DEFAULT_COUNTRY_CODE env)
-	AI                 AIConfig               // Configuración del intérprete AI
-	Medical            MedicalConfig          // Configuración del módulo médico
-	Documents          DocumentLimitsConfig   // Límites de documentos
-	R2                 R2StorageConfig        // Configuración de R2 (S3-compatible)
-	CookieDomain       string                 // Dominio para cookies de auth (.proactrip.com en prod, vacío en dev)
+	Server             ServerConfig
+	DB                 DBConfig
+	Dragonfly          DragonflyConfig
+	Frontend           FrontendConfig
+	Security           SecurityConfig
+	Email              EmailConfig
+	Environment        EnvironmentConfig
+	OAuth              OAuthConfig                // Credenciales OAuth por proveedor
+	SerpAPIKey         string                     // API key de SerpAPI para búsqueda de vuelos
+	PasetoKeyBytes     []byte                     // Bytes decodificados de PASETO_KEY (para uso directo)
+	RateLimit          *ratelimit.RateLimitConfig // Configuración de rate limiting
+	DefaultCurrency    string                     // Moneda por defecto para usuarios sin geoip (DEFAULT_CURRENCY env)
+	DefaultLanguage    string                     // Idioma por defecto para usuarios sin geoip (DEFAULT_LANGUAGE env)
+	DefaultCountryCode string                     // País por defecto para búsquedas sin geoip (DEFAULT_COUNTRY_CODE env)
+	AI                 AIConfig                   // Configuración del intérprete AI (búsqueda NL)
+	OCR                AIOCRConfig                // Configuración del OCR de documentos
+	Medical            MedicalConfig              // Configuración del módulo médico
+	Documents          DocumentLimitsConfig       // Límites de documentos
+	R2                 R2StorageConfig            // Configuración de R2 (S3-compatible)
+	CookieDomain       string                     // Dominio para cookies de auth (.proactrip.com en prod, vacío en dev)
 }
 
 // Configuración de la base de datos PostgreSQL
@@ -133,6 +135,16 @@ type AIConfig struct {
 	Timeout  time.Duration // timeout for AI requests
 }
 
+// AIOCRConfig contiene la configuración del servicio OCR para documentos.
+// Usa DeepSeek V4 Flash multimodal para extracción de datos de documentos.
+type AIOCRConfig struct {
+	Provider string        // "deepseek" | "openai"
+	BaseURL  string        // API endpoint base
+	APIKey   string        // API key
+	Model    string        // e.g. "deepseek-chat" (multimodal required)
+	Timeout  time.Duration // timeout for OCR requests (longer than search)
+}
+
 // MedicalConfig contiene la configuración del módulo médico.
 type MedicalConfig struct {
 	EncryptionKey string // 32 bytes (64 hex chars) para ChaCha20-Poly1305
@@ -148,11 +160,11 @@ func (c *MedicalConfig) EncryptionKeyBytes() ([]byte, error) {
 
 // DocumentLimitsConfig contiene los límites de subida de documentos.
 type DocumentLimitsConfig struct {
-	MaxSizeMB   int // Tamaño máximo por documento (MB)
-	ImageMaxMB  int // Tamaño máximo para imágenes (MB)
-	MaxPerUser  int // Máximo de documentos por usuario
-	RateLimit   int // Subidas por minuto por usuario
-	RateWindow  int // Ventana del rate limit (segundos)
+	MaxSizeMB  int // Tamaño máximo por documento (MB)
+	ImageMaxMB int // Tamaño máximo para imágenes (MB)
+	MaxPerUser int // Máximo de documentos por usuario
+	RateLimit  int // Subidas por minuto por usuario
+	RateWindow int // Ventana del rate limit (segundos)
 }
 
 // R2StorageConfig contiene la configuración de R2 (S3-compatible).
@@ -195,7 +207,7 @@ func validateAIConfig(cfg *Config) error {
 		return nil // AI not configured — optional feature
 	}
 	if cfg.AI.Timeout <= 0 {
-		return errors.New("AI_TIMEOUT must be > 0 when AI provider is configured")
+		return errors.New("AI_SEARCH_TIMEOUT must be > 0 when AI provider is configured")
 	}
 	return nil
 }
@@ -319,7 +331,8 @@ func Load() *Config {
 		},
 		Environment: EnvironmentConfig{
 			OpenWeatherAPIKey:   getEnv("OPENWEATHER_API_KEY", ""),
-			OpenWeatherCacheTTL: getEnvDuration("ENVIRONMENT_WEATHER_CACHE_TTL", 10*time.Minute),
+			OpenWeatherCacheTTL: getEnvDuration("ENVIRONMENT_WEATHER_CACHE_TTL", 30*time.Minute),
+			OpenWeatherTimeout:  getEnvDuration("OPENWEATHER_TIMEOUT", 10*time.Second),
 			IpQueryBaseURL:      cmp.Or(getEnv("IPQUERY_BASE_URL", ""), "https://api.ipquery.io"),
 		},
 		OAuth: OAuthConfig{
@@ -327,17 +340,24 @@ func Load() *Config {
 			GoogleClientSecret: getEnv("GOOGLE_CLIENT_SECRET", ""),
 			GoogleRedirectURL:  getEnv("GOOGLE_REDIRECT_URL", ""),
 		},
-		SerpAPIKey: getEnv("SERPAPI_KEY", ""),
-		RateLimit:       ratelimit.LoadRateLimitConfig(),
+		SerpAPIKey:         getEnv("SERPAPI_KEY", ""),
+		RateLimit:          ratelimit.LoadRateLimitConfig(),
 		DefaultCurrency:    getEnv("DEFAULT_CURRENCY", "EUR"),
 		DefaultLanguage:    getEnv("DEFAULT_LANGUAGE", "es"),
-		DefaultCountryCode: getEnv("DEFAULT_COUNTRY_CODE", "AR"),
+		DefaultCountryCode: getEnv("DEFAULT_COUNTRY_CODE", "ES"),
 		AI: AIConfig{
-			Provider: getEnv("AI_PROVIDER", ""),
-			BaseURL:  getEnv("AI_BASE_URL", ""),
-			APIKey:   getEnv("AI_API_KEY", ""),
-			Model:    getEnv("AI_MODEL", ""),
-			Timeout:  getEnvDuration("AI_TIMEOUT", 30*time.Second),
+			Provider: getEnv("AI_SEARCH_PROVIDER", ""),
+			BaseURL:  getEnv("AI_SEARCH_BASE_URL", ""),
+			APIKey:   getEnv("AI_SEARCH_API_KEY", ""),
+			Model:    getEnv("AI_SEARCH_MODEL", ""),
+			Timeout:  getEnvDuration("AI_SEARCH_TIMEOUT", 30*time.Second),
+		},
+		OCR: AIOCRConfig{
+			Provider: getEnv("AI_OCR_PROVIDER", ""),
+			BaseURL:  getEnv("AI_OCR_BASE_URL", ""),
+			APIKey:   getEnv("AI_OCR_API_KEY", ""),
+			Model:    getEnv("AI_OCR_MODEL", "deepseek-chat"),
+			Timeout:  getEnvDuration("AI_OCR_TIMEOUT", 60*time.Second),
 		},
 		Medical: MedicalConfig{
 			EncryptionKey: getEnv("MEDICAL_ENCRYPTION_KEY", ""),

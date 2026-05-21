@@ -1,13 +1,11 @@
-// Handler HTTP para PUT /v1/user/profile/medical.
+// Handler HTTP para PATCH /v1/user/profile/medical.
 // Bindea JSON, encripta campos sensibles y actualiza el perfil médico.
 package update_medical_profile
 
 import (
-	"errors"
 	"net/http"
 
 	sharedauth "github.com/ProacTrip/Backend/internal/shared/auth"
-	"github.com/ProacTrip/Backend/internal/modules/user/domain"
 	httperr "github.com/ProacTrip/Backend/internal/shared/http"
 	"github.com/labstack/echo/v5"
 )
@@ -46,11 +44,6 @@ func (h *Handler) Handle(c *echo.Context) error {
 
 	resp, err := h.usecase.Execute(c.Request().Context(), cmd)
 	if err != nil {
-		if errors.Is(err, domain.ErrMedicalProfileNotFound) {
-			return c.JSON(http.StatusNotFound, map[string]string{
-				"error": "perfil médico no encontrado",
-			})
-		}
 		return httperr.MapError(c, err)
 	}
 

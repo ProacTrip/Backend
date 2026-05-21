@@ -40,14 +40,6 @@ func (s *stubFlightProvider) GetFlightDetails(ctx context.Context, req domain.Fl
 	return nil, nil
 }
 
-type stubRepo struct {
-	saveFn func(ctx context.Context, entry domain.SearchHistoryEntry) error
-}
-
-func (s *stubRepo) Save(ctx context.Context, entry domain.SearchHistoryEntry) error {
-	return s.saveFn(ctx, entry)
-}
-
 // =============================================================================
 // Setup
 // =============================================================================
@@ -123,7 +115,6 @@ func TestExecute_RateLimitDenied(t *testing.T) {
 	uc := search_flights.NewUseCase(search_flights.UseCaseDeps{
 		Provider:    provider,
 		Cache:       cache,
-		Repo:        &stubRepo{},
 		SearchTTL:   15 * time.Minute,
 		RateLimiter: rl,
 	})
@@ -177,7 +168,6 @@ func TestExecute_RateLimitError(t *testing.T) {
 	uc := search_flights.NewUseCase(search_flights.UseCaseDeps{
 		Provider:    provider,
 		Cache:       cache,
-		Repo:        &stubRepo{},
 		SearchTTL:   15 * time.Minute,
 		RateLimiter: rl,
 	})

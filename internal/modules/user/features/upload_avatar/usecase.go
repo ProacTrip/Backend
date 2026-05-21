@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/ProacTrip/Backend/internal/modules/user/adapters/storage"
 	"github.com/ProacTrip/Backend/internal/modules/user/domain"
 	"github.com/ProacTrip/Backend/internal/shared/ratelimit"
 	"github.com/google/uuid"
@@ -86,7 +87,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 	storageKey := fmt.Sprintf("avatars/%s/%s%s", userID.String(), avatarUUID.String(), ext)
 
 	// Generar URL prefirmada de R2
-	uploadURL, err := uc.storage.GenerateUploadURL(ctx, "proactrip-assets", storageKey, expiry)
+	uploadURL, err := uc.storage.GenerateUploadURL(ctx, storage.AssetsBucket(), storageKey, expiry)
 	if err != nil {
 		return nil, fmt.Errorf("generar URL prefirmada: %w", err)
 	}
@@ -97,6 +98,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		UploadURL:  uploadURL,
 		StorageKey: storageKey,
 		ExpiresAt:  expiresAt,
+		EventsURL:  storage.SSEBaseURL(),
 		Message:    "Subí el archivo binario a upload_url, luego llamá a /avatar/confirm.",
 	}, nil
 }

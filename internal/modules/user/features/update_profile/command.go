@@ -18,8 +18,9 @@ type Command struct {
 	Gender      *string    `json:"gender,omitzero"`
 	Nationality *string    `json:"nationality,omitzero"`
 	Phone       *string    `json:"phone,omitzero"`
-	Bio         *string    `json:"bio,omitzero"`
-	IsPublic    *bool      `json:"is_public,omitzero"`
+	Bio       *string `json:"bio,omitzero"`
+	Language  *string `json:"language,omitzero"`
+	Currency  *string `json:"currency,omitzero"`
 }
 
 // Validate verifica que UserID sea un UUID válido.

@@ -20,4 +20,9 @@ var (
 
 	// ErrInternal se retorna para errores internos inesperados del servidor.
 	ErrInternal = errors.New("error interno del servidor")
+
+	// ErrWeatherProviderRateLimited es un centinela que envuelve el adaptador
+	// OpenWeather cuando el proveedor externo responde HTTP 429.
+	// Se detecta con errors.Is para decidir entre degradación elegante y propagación del error.
+	ErrWeatherProviderRateLimited = errors.New("proveedor de clima: rate limit excedido")
 )

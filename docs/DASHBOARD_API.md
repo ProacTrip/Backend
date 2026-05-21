@@ -1,23 +1,25 @@
-# Dashboard API Documentation (Cookie-Based Authorization)
+# Dashboard Module API Documentation (Cookie-Based)
 
-> **Arquitectura:** Cookie-based authentication con autorización RBAC vía middleware `RequirePermission`. El frontend nunca manipula tokens ni permisos.
+> **Arquitectura:** Endpoints administrativos protegidos con PASETO HttpOnly cookies + RBAC granular (5 permisos). **Uso exclusivo del rol admin.** Separado del User module para mantener aislamiento de responsabilidades.
+> **Alcance:** Gestión de usuarios, feature limits y verificación de documentos. 6 endpoints implementados + 3 endpoints de verificación de documentos diseñados para implementación.
 
 ---
 
 ## Índice
 
-| Endpoint | Estado |
-|----------|--------|
+| Sección | Estado |
+|---------|--------|
 | [Arquitectura](#arquitectura) | ✅ |
-| [Seguridad](#seguridad) | ✅ |
+| [Modelo RBAC](#modelo-rbac) | ✅ |
 | [Base URLs](#base-urls) | ✅ |
 | [Errores Estándar](#errores-estándar) | ✅ |
+| [Autenticación](#autenticación) | ✅ |
 | [List Users](#list-users) | ✅ Implementado |
 | [User Detail](#user-detail) | ✅ Implementado |
 | [Account Status](#account-status) | ✅ Implementado |
-| [Feature Limits — Usuario](#feature-limits-—-usuario) | ✅ Implementado |
-| [Feature Limits — Rol](#feature-limits-—-rol) | ✅ Implementado |
-| [Permission Overrides](#permission-overrides) | ✅ Implementado |
+| [Feature Limits (User)](#feature-limits-user) | ✅ Implementado |
+| [Document Verification](#document-verification) | ✅ Documentado |
+| [Configuración CORS](#configuración-cors) | ✅ |
 | [Rate Limiting](#rate-limiting) | ✅ |
 | [Cache](#cache) | ✅ |
 | [Notas de Seguridad](#notas-de-seguridad) | ✅ |
@@ -26,71 +28,79 @@
 
 ## Arquitectura
 
-### Pipeline de Autorización
+### Flujo de Request
 
 ```
-PASETO Token ──→ AuthMiddleware ──→ Session Cache [{auth}:session:{sid}]
-   │               (popula              │ HIT: extrae permissions[], status, tv
-   │                user_claims)        │ MISS: PermissionResolver → DB → GetOrSet
-   ▼                                    ▼
-  Cookie                        Compara token_version
-                                  └─ MISMATCH → 401 TOKEN_VERSION_STALE
-                                  └─ status != active → 403
-                                Inyecta claims con Permissions[]
-                                      ▼
-                               RequirePermission("users:read")
-                                 └─ slices.Contains(claims.Permissions, perm)
-                                    └─ MISSING → 403 (o observe: log only)
-                                      ▼
-                                    Handler → DB query → 200
+Cliente (Frontend proactrip.com)
+  │
+  │ Cookie: __Secure-access_token
+  ▼
+┌──────────────────────────────────────────┐
+│ AuthMiddleware (PASETO validation)        │  ← Verifica token, inyecta claims
+├──────────────────────────────────────────┤
+│ AuthenticatedRateLimitMW (10 req/min)     │  ← Rate limit por user UUID
+├──────────────────────────────────────────┤
+│ RequirePermission(users:read)             │  ← Grupo base: todos los endpoints
+├──────────────────────────────────────────┤
+│ [RequirePermission adicional]             │  ← Solo endpoints de mutación
+├──────────────────────────────────────────┤
+│ Handler (list_users / account_status...)  │  ← Lógica de negocio
+└──────────────────────────────────────────┘
+  │
+  ▼
+Respuesta JSON + X-Trace-Id
 ```
 
-### Permisos Requeridos
+### Acceso Restringido al Admin
 
-| Permiso | Código | Alcance |
-|---------|--------|---------|
-| Lectura de usuarios | `users:read` | GET /users, GET /users/:id |
-| Escritura de usuarios | `users:write` | PUT /users/:id/status |
-| Lectura de feature limits | `feature_limits:read` | GET /feature-limits |
-| Escritura de feature limits | `feature_limits:write` | POST/DELETE /feature-limits |
-| Lectura de permisos | `permissions:read` | GET /permission-overrides |
-| Escritura de permisos | `permissions:write` | POST/DELETE /permission-overrides |
+**Todos los endpoints de este módulo requieren permisos que solo el rol `admin` posee.** El middleware `RequirePermission` verifica que los claims del token PASETO incluyan permisos como `users:read`, `users:write` y `feature_limits:write`. El rol `admin` tiene los 5 permisos asignados en base de datos, por lo que todos los checks pasan. El rol `client` no tiene ninguno de estos permisos y recibe `403` en cualquier endpoint del dashboard.
 
-### Modo Observe
+La granularidad de permisos existe para un futuro donde otros roles puedan tener acceso parcial, pero en el diseño actual solo `admin` posee los permisos necesarios.
 
-Cuando `AUTHZ_ENFORCE_MODE=observe` (default), el middleware `RequirePermission` **nunca bloquea requests**. Ejecuta la verificación completa, loguea `"authz would deny"` con campos estructurados (`permission`, `user_id`, `path`), e incrementa métricas, pero siempre llama a `next(c)`. Esto permite medir el impacto antes de activar la enforce real (`AUTHZ_ENFORCE_MODE=enforce`).
+### Separación del User Module
+
+El Dashboard module (`/v1/dashboard/*`) está aislado del User module (`/v1/user/*`). El User module expone endpoints de perfil para el usuario autenticado (lectura de sus propios datos, aplica solo a rol `client`. El Dashboard module expone endpoints administrativos que solo el rol `admin` puede consumir. Ambos comparten el mismo middleware de autenticación PASETO, pero difieren en los requisitos de autorización.
+
+El grupo de rutas se define en `internal/bootstrap/app.go:524-569` con la cadena de middleware `authMiddleware → authRateLimitMW → RequirePermission(users:read)`.
 
 ---
 
-## Seguridad
+## Modelo RBAC
 
-### Autenticación
+El dashboard usa **autorización basada en permisos, no en roles**. El middleware `RequirePermission` verifica que el usuario autenticado tenga un permiso específico en sus claims PASETO — nunca consulta "¿es admin?". El acceso al dashboard funciona así:
 
-Todas las rutas del dashboard requieren cookie `__Secure-access_token` válida (PASETO v4). El middleware de autenticación:
-1. Valida el token criptográficamente
-2. Verifica que el JTI no esté en la blacklist de DragonflyDB (`{auth}:blacklist:jti:{JTI}`)
-3. Lee el cache de sesión (`{auth}:session:{sessionID}`) o resuelve desde DB
-4. Compara `token_version` entre el token y la DB/cache → mismatch = 401
-5. Verifica que el estado de la cuenta sea `active` → si no, 403
-6. Inyecta `user_claims` en el contexto con `Permissions[]`
+1. **AuthMiddleware** valida el PASETO y carga `user_claims` en el contexto (incluye el array de permisos del usuario)
+2. **RequirePermission** lee ese array y verifica que contenga el permiso requerido con `slices.Contains`
+3. Si el permiso está presente → next handler. Si no → 403 Forbidden
 
-### Invalidación de Sesiones
+El rol `admin` existe a nivel de base de datos como una agrupación de permisos. Cuando un admin inicia sesión, su token PASETO incluye los 5 permisos. Esa lista plana es lo único que el middleware ve.
 
-| Evento | Acción |
-|--------|--------|
-| Deshabilitar cuenta | `token_version++` + DELETE todas las `{auth}:session:*` |
-| Cambio de rol | `token_version++` + DELETE sesiones cacheadas |
-| CRUD de overrides | DELETE sesiones cacheadas del usuario afectado |
-| Logout | Blacklist JTI en `{auth}:blacklist:jti:{JTI}` |
-| Override expirado | Lazy refresh en próximo request vía TTL |
+### Permisos
 
-### Cache de Sesión
+| Constante | Permiso | Dashboard |
+|-----------|---------|-----------|
+| `PermUsersRead` | `users:read` | ✅ Grupo base — requerido en todos los endpoints |
+| `PermUsersWrite` | `users:write` | ✅ Account Status |
+| `PermFeatureLimitsWrite` | `feature_limits:write` | ✅ Feature Limits (crear/eliminar) |
+| `PermSessionsWrite` | `sessions:write` | ✅ Account Status — requerido para invalidar sesiones al deshabilitar |
+| `PermSessionsRead` | `sessions:read` | — |
 
-- **Clave**: `{auth}:session:{sessionID}` (hash en DragonflyDB)
-- **Campos**: `permissions` (comma-separated), `status`, `token_version`, `schema_version`
-- **TTL**: 5 minutos, sliding reset en cada request autenticado
-- **Cache miss**: `PermissionResolver` → DB → repoblación vía `GetOrSet`
-- **DragonflyDB caído**: fallback a DB (nunca bloquea requests)
+### Modelo de Grupo Base + Aditivo
+
+Cada endpoint del dashboard recibe una combinación de permisos:
+
+1. **Grupo base**: `users:read` — aplicado a nivel de grupo (`RequirePermission` en `app.go:527`). Todo endpoint del dashboard requiere este permiso como mínimo.
+
+2. **Permisos aditivos**: los endpoints de mutación añaden un segundo `RequirePermission` con un permiso más específico:
+   - `PUT /users/:id/status` → `users:read` + `users:write` + `sessions:write`
+   - `POST/DELETE /users/:id/feature-limits` → `users:read` + `feature_limits:write`
+
+### Quién puede acceder
+
+| Rol | Acceso al Dashboard |
+|-----|---------------------|
+| **admin** | ✅ **Acceso total** — el rol admin tiene los 5 permisos asignados. Todos los `RequirePermission` pasan. |
+| **client** | ❌ **Sin acceso** — el rol client no tiene permisos administrativos. Cualquier request a `/v1/dashboard` recibe 403. |
 
 ---
 
@@ -101,13 +111,13 @@ Todas las rutas del dashboard requieren cookie `__Secure-access_token` válida (
 | **Production** | `https://api.proactrip.com/v1/dashboard` |
 | **Development** | `http://localhost:8080/v1/dashboard` |
 
-Todos los ejemplos usan `{base_url}` como placeholder.
-
 ---
 
 ## Errores Estándar
 
-Formato **RFC 9457 Problem Details**. Todas las respuestas de error usan `Content-Type: application/problem+json`.
+Todos los errores usan el formato **RFC 9457 Problem Details** con `Content-Type: application/problem+json`.
+
+### Ejemplo
 
 ```json
 {
@@ -115,23 +125,79 @@ Formato **RFC 9457 Problem Details**. Todas las respuestas de error usan `Conten
   "title": "Forbidden",
   "status": 403,
   "detail": "Permiso denegado",
-  "instance": "/v1/dashboard/users",
-  "trace_id": "019d5439-cb43-716d-90b5-51dcbe980908"
+  "instance": "/v1/dashboard/users/0193c8c6-1234-7abc-8def-0123456789ab/status",
+  "trace_id": "0193c8c6-5678-7def-9abc-0123456789cd"
 }
 ```
 
-**Headers de respuesta en TODOS los endpoints:**
+### Headers de Error
 
-| Header | Descripción |
-|--------|-------------|
+| Header | Valor |
+|--------|-------|
+| `Content-Type` | `application/problem+json` |
 | `X-Trace-Id` | UUID v7 para trazabilidad |
-| `traceparent` | W3C Trace Context |
+| `traceparent` | W3C Trace Context (generado por middleware) |
+
+### Flujo de Mapeo de Errores
+
+```
+Error de dominio (ej. ErrUserNotFound)
+  │
+  ▼
+auth/module.go: RegisterDomainErrorMapper
+  │  errors.Is(err, domain.ErrUserNotFound) → serrors.ErrNotFound(...)
+  │
+  ▼
+shared/errors/errors.go: ProblemTypeNotFound → HTTP 404
+  │
+  ▼
+shared/http/error_mapper.go: MapError()
+  │  Set X-Trace-Id, Content-Type: application/problem+json
+  │  c.JSON(http.StatusNotFound, problem)
+  │
+  ▼
+Respuesta RFC 9457 al cliente
+```
+
+### Problem Types del Dashboard
+
+| Problem Type URI | Categoría |
+|------------------|-----------|
+| `https://api.proactrip.com/errors/unauthorized` | 401 — Token faltante o inválido |
+| `https://api.proactrip.com/errors/forbidden` | 403 — Sin permisos |
+| `https://api.proactrip.com/errors/not-found` | 404 — Recurso no encontrado |
+| `https://api.proactrip.com/errors/bad-request` | 400 — Input inválido |
+| `https://api.proactrip.com/errors/conflict` | 409 — Conflicto (ya existe) |
+| `https://api.proactrip.com/errors/invalid-input` | 400 — Campos requeridos faltantes |
+| `https://api.proactrip.com/errors/internal-error` | 500 — Error interno |
 
 ---
 
-## List Users
+## Autenticación
 
-Lista usuarios del sistema con paginación por cursor y filtros combinables.
+Todos los endpoints del dashboard requieren autenticación vía **PASETO cookies HttpOnly** y permisos administrativos. Solo el rol `admin` — que tiene los 5 permisos asignados en base de datos — puede consumir estas rutas. El rol `client` no posee estos permisos y recibe `403` en cualquier endpoint del dashboard.
+
+El middleware **no verifica roles** — verifica permisos. El admin accede porque su token PASETO incluye todos los permisos, no porque exista un `RequireRole("admin")`.
+
+### Cookies
+
+| Cookie | Atributos |
+|--------|-----------|
+| `__Secure-access_token` | `HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=900` |
+| `__Secure-refresh_token` | `HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=604800` |
+
+### Requisitos
+
+- El frontend debe enviar las cookies automáticamente (`credentials: 'include'` en fetch).
+- El middleware `AuthMiddleware` valida el PASETO, verifica que el token no esté revocado (DragonflyDB blacklist), y rota el access token silenciosamente si está por expirar (últimos 25% de su TTL).
+- Si el token es inválido o expirado, se devuelve `401 Unauthorized` con `TOKEN_INVALID` o `TOKEN_EXPIRED`.
+- El middleware `RequirePermission` verifica que el usuario autenticado tenga el permiso requerido. Si no, devuelve `403 Forbidden` con `PERMISSION_DENIED`.
+
+---
+
+## List Users ✅
+
+Lista usuarios del dashboard con filtros y paginación por cursor.
 
 ### Request
 
@@ -139,29 +205,31 @@ Lista usuarios del sistema con paginación por cursor y filtros combinables.
 GET /v1/dashboard/users
 ```
 
-**Query Parameters:**
+**Query Params:**
 
-| Campo | Tipo | Requerido | Default | Descripción |
-|-------|------|-----------|---------|-------------|
-| `limit` | int | No | 20 | Cantidad de resultados por página (max 100) |
-| `cursor` | string | No | — | Cursor opaco para paginación (base64) |
-| `role` | string | No | — | Filtrar por nombre de rol (exact match) |
-| `status` | string | No | — | Filtrar por estado: `active`, `disabled`, `suspended`, etc. |
-| `search` | string | No | — | Búsqueda por email (ILIKE) |
-| `created_before` | string | No | — | Fecha ISO 8601 (límite superior) |
-| `created_after` | string | No | — | Fecha ISO 8601 (límite inferior) |
+| Parámetro | Tipo | Requerido | Default | Validación | Descripción |
+|-----------|------|-----------|---------|------------|-------------|
+| `limit` | int | No | `10` | 1–100 | Cantidad de resultados por página |
+| `role` | string | No | `""` | — | Filtrar por nombre de rol |
+| `status` | string | No | `""` | `unverified`, `active`, `disabled` | Filtrar por estado de cuenta |
+| `search` | string | No | `""` | — | Búsqueda por email o nombre |
+| `cursor` | string | No | `""` | — | Cursor opaco para paginación (base64) |
+| `created_before` | string | No | `""` | — | Filtrar creados antes de fecha ISO 8601 |
+| `created_after` | string | No | `""` | — | Filtrar creados después de fecha ISO 8601 |
 
 **Headers:**
 
-| Header | Tipo | Requerido | Descripción |
-|--------|------|-----------|-------------|
-| `Cookie` | string | Sí | `__Secure-access_token` válido |
+| Header | Requerido | Descripción |
+|--------|-----------|-------------|
+| `Cookie: __Secure-access_token` | Sí | PASETO token HttpOnly |
+| `Accept: application/json` | No | Formato esperado |
 
 **Ejemplo:**
 
 ```bash
-curl -X GET "{base_url}/users?limit=10&status=active&role=client" \
-  -H "Cookie: __Secure-access_token=v4.local.eyJ..."
+curl -X GET "http://localhost:8080/v1/dashboard/users?limit=20&status=active&role=admin" \
+  -H "Accept: application/json" \
+  -b cookies.txt -c cookies.txt
 ```
 
 ### Responses
@@ -172,43 +240,63 @@ curl -X GET "{base_url}/users?limit=10&status=active&role=client" \
 {
   "users": [
     {
-      "id": "019d5439-cb43-716d-90b5-51dcbe980908",
-      "email": "usuario@example.com",
+      "id": "0193c8c6-1234-7abc-8def-0123456789ab",
+      "email": "admin@proactrip.com",
       "status": "active",
-      "role_id": "019d5439-cb43-716d-90b5-51dcbe980909",
-      "role_name": "client",
+      "role_id": "0193c8c6-1234-7abc-8def-0123456789cd",
+      "role_name": "admin",
       "email_verified": true,
       "created_at": "2026-01-15T10:30:00Z",
-      "updated_at": "2026-05-10T14:22:00Z"
+      "updated_at": "2026-05-18T14:22:00Z"
     }
   ],
   "meta": {
-    "next_cursor": "eyJvIjoyMH0=",
+    "next_cursor": "eyJpZCI6IjAxOTNjOGM2LTEyMzQtN2FiYy04ZGVmLTAxMjM0NTY3ODllZiJ9",
     "prev_cursor": null,
     "has_next": true,
-    "limit": 10
+    "limit": 20
   }
 }
 ```
 
-> **Seguridad:** `password_hash`, `locked_until`, `failed_attempts` y datos de OAuth **NUNCA** se incluyen en la respuesta.
+**Campos de `UserResponse`:**
+
+| Campo | Tipo | JSON key | Descripción |
+|-------|------|----------|-------------|
+| `ID` | UUID | `id` | Identificador único del usuario |
+| `Email` | string | `email` | Email del usuario |
+| `Status` | string | `status` | Estado actual de la cuenta |
+| `RoleID` | UUID | `role_id` | ID del rol asignado |
+| `RoleName` | string | `role_name` | Nombre del rol asignado |
+| `EmailVerified` | bool | `email_verified` | Si el email fue verificado |
+| `CreatedAt` | datetime | `created_at` | Fecha de creación (ISO 8601) |
+| `UpdatedAt` | datetime | `updated_at` | Fecha de última actualización (ISO 8601) |
+
+**Campos de `Meta`:**
+
+| Campo | Tipo | JSON key | Descripción |
+|-------|------|----------|-------------|
+| `NextCursor` | *string | `next_cursor` | Cursor para la página siguiente (omitzero: omitido si no hay más páginas) |
+| `PrevCursor` | *string | `prev_cursor` | Cursor para la página anterior (omitzero: omitido en primera página) |
+| `HasNext` | bool | `has_next` | Indica si hay más resultados |
+| `Limit` | int | `limit` | Límite aplicado en esta página |
 
 #### Posibles Errores
 
-| Código | HTTP | Cuándo |
-|--------|------|--------|
-| `NOT_AUTHENTICATED` | 401 | Cookie ausente o expirada |
-| `TOKEN_VERSION_STALE` | 401 | Sesión invalidada (cuenta deshabilitada o rol cambiado) |
-| `ACCOUNT_DISABLED` | 403 | Cuenta deshabilitada |
-| `MISSING_PERMISSION` | 403 | Usuario sin permiso `users:read` |
-| `INVALID_STATUS` | 400 | Parámetro `status` inválido |
-| `INTERNAL_ERROR` | 500 | Error inesperado |
+| Código | HTTP | Problem Type | Cuándo |
+|--------|------|-------------|--------|
+| `TOKEN_INVALID` | 401 | `unauthorized` | Cookie ausente, token inválido o expirado |
+| `TOKEN_EXPIRED` | 401 | `unauthorized` | Token PASETO expirado y no se pudo rotar |
+| `NOT_AUTHENTICATED` | 401 | `unauthorized` | No hay token de acceso en la cookie |
+| `PERMISSION_DENIED` | 403 | `forbidden` | El usuario no tiene el permiso `users:read` |
+| `INVALID_INPUT` | 400 | `invalid-input` | `limit` fuera de rango (1–100) o `status` inválido |
+| `INTERNAL_ERROR` | 500 | `internal-error` | Error inesperado del servidor |
 
 ---
 
-## User Detail
+## User Detail ✅
 
-Obtiene el detalle de un usuario incluyendo sus permisos efectivos calculados.
+Obtiene el detalle de un usuario específico, incluyendo sus permisos efectivos.
 
 ### Request
 
@@ -216,23 +304,20 @@ Obtiene el detalle de un usuario incluyendo sus permisos efectivos calculados.
 GET /v1/dashboard/users/:id
 ```
 
-**Path Parameters:**
+**Path Params:**
 
-| Campo | Tipo | Requerido | Descripción |
-|-------|------|-----------|-------------|
-| `id` | UUID v7 | Sí | ID del usuario |
+| Parámetro | Tipo | Requerido | Descripción |
+|-----------|------|-----------|-------------|
+| `id` | UUID | Sí | ID del usuario a consultar |
 
-**Headers:**
-
-| Header | Tipo | Requerido | Descripción |
-|--------|------|-----------|-------------|
-| `Cookie` | string | Sí | `__Secure-access_token` válido |
+**Permisos requeridos:** `users:read` (grupo base)
 
 **Ejemplo:**
 
 ```bash
-curl -X GET "{base_url}/users/019d5439-cb43-716d-90b5-51dcbe980908" \
-  -H "Cookie: __Secure-access_token=v4.local.eyJ..."
+curl -X GET "http://localhost:8080/v1/dashboard/users/0193c8c6-1234-7abc-8def-0123456789ab" \
+  -H "Accept: application/json" \
+  -b cookies.txt -c cookies.txt
 ```
 
 ### Responses
@@ -242,42 +327,66 @@ curl -X GET "{base_url}/users/019d5439-cb43-716d-90b5-51dcbe980908" \
 ```json
 {
   "user": {
-    "id": "019d5439-cb43-716d-90b5-51dcbe980908",
-    "email": "usuario@example.com",
+    "id": "0193c8c6-1234-7abc-8def-0123456789ab",
+    "email": "admin@proactrip.com",
     "status": "active",
-    "role_id": "019d5439-cb43-716d-90b5-51dcbe980909",
-    "role_name": "client",
+    "role_id": "0193c8c6-1234-7abc-8def-0123456789cd",
+    "role_name": "admin",
     "email_verified": true,
-    "mfa_enabled": false,
     "login_count": 42,
-    "last_login_at": "2026-05-12T08:15:00Z",
+    "last_login_at": "2026-05-20T08:15:00Z",
     "created_at": "2026-01-15T10:30:00Z",
-    "updated_at": "2026-05-12T08:15:00Z"
+    "updated_at": "2026-05-18T14:22:00Z"
   },
   "effective_permissions": [
     "users:read",
     "users:write",
-    "feature_limits:read"
+    "feature_limits:write",
+    "sessions:read",
+    "sessions:write"
   ]
 }
 ```
 
-> **Cálculo de permisos efectivos:** `(rol_permissions ∪ active_grants) − active_denies`. Overrides expirados se excluyen. Deny siempre gana.
+**Campos de `UserDetailResponse`:**
+
+| Campo | Tipo | JSON key | Descripción |
+|-------|------|----------|-------------|
+| `ID` | UUID | `id` | Identificador único del usuario |
+| `Email` | string | `email` | Email del usuario |
+| `Status` | string | `status` | Estado actual de la cuenta |
+| `RoleID` | UUID | `role_id` | ID del rol asignado |
+| `RoleName` | string | `role_name` | Nombre del rol asignado |
+| `EmailVerified` | bool | `email_verified` | Si el email fue verificado |
+| `LoginCount` | int | `login_count` | Cantidad total de inicios de sesión |
+| `LastLoginAt` | *datetime | `last_login_at` | Último inicio de sesión (omitzero: omitido si nunca inició sesión) |
+| `CreatedAt` | datetime | `created_at` | Fecha de creación (ISO 8601) |
+| `UpdatedAt` | datetime | `updated_at` | Fecha de última actualización (ISO 8601) |
+
+**Campos de respuesta:**
+
+| Campo | Tipo | JSON key | Descripción |
+|-------|------|----------|-------------|
+| `User` | object | `user` | Datos del usuario |
+| `EffectivePermissions` | []string | `effective_permissions` | Permisos efectivos del usuario (incluye role + overrides) |
 
 #### Posibles Errores
 
-| Código | HTTP | Cuándo |
-|--------|------|--------|
-| `NOT_AUTHENTICATED` | 401 | Cookie ausente o expirada |
-| `MISSING_PERMISSION` | 403 | Usuario sin permiso `users:read` |
-| `USER_NOT_FOUND` | 404 | ID de usuario no existe |
-| `INTERNAL_ERROR` | 500 | Error inesperado |
+| Código | HTTP | Problem Type | Cuándo |
+|--------|------|-------------|--------|
+| `TOKEN_INVALID` | 401 | `unauthorized` | Cookie ausente, token inválido o expirado |
+| `TOKEN_EXPIRED` | 401 | `unauthorized` | Token PASETO expirado |
+| `NOT_AUTHENTICATED` | 401 | `unauthorized` | No hay token de acceso en la cookie |
+| `PERMISSION_DENIED` | 403 | `forbidden` | El usuario no tiene el permiso `users:read` |
+| `USER_NOT_FOUND` | 404 | `not-found` | El `:id` no corresponde a un usuario existente |
+| `INVALID_INPUT` | 400 | `invalid-input` | El `:id` no es un UUID válido |
+| `INTERNAL_ERROR` | 500 | `internal-error` | Error inesperado del servidor |
 
 ---
 
-## Account Status
+## Account Status ✅
 
-Habilita o deshabilita una cuenta de usuario. Solo acepta transiciones `active` ↔ `disabled`.
+Habilita o deshabilita la cuenta de un usuario. Al deshabilitar, se invalidan todas las sesiones activas.
 
 ### Request
 
@@ -285,11 +394,13 @@ Habilita o deshabilita una cuenta de usuario. Solo acepta transiciones `active` 
 PUT /v1/dashboard/users/:id/status
 ```
 
-**Path Parameters:**
+**Path Params:**
 
-| Campo | Tipo | Requerido | Descripción |
-|-------|------|-----------|-------------|
-| `id` | UUID v7 | Sí | ID del usuario |
+| Parámetro | Tipo | Requerido | Descripción |
+|-----------|------|-----------|-------------|
+| `id` | UUID | Sí | ID del usuario objetivo |
+
+**Permisos requeridos:** `users:read` (grupo base) + `users:write` + `sessions:write` (aditivo)
 
 **Body:**
 
@@ -297,20 +408,14 @@ PUT /v1/dashboard/users/:id/status
 |-------|------|-----------|------------|-------------|
 | `status` | string | Sí | `"active"` o `"disabled"` | Nuevo estado de la cuenta |
 
-**Headers:**
-
-| Header | Tipo | Requerido | Descripción |
-|--------|------|-----------|-------------|
-| `Cookie` | string | Sí | `__Secure-access_token` válido |
-| `Content-Type` | string | Sí | `application/json` |
-
 **Ejemplo:**
 
 ```bash
-curl -X PUT "{base_url}/users/019d5439-cb43-716d-90b5-51dcbe980908/status" \
+curl -X PUT "http://localhost:8080/v1/dashboard/users/0193c8c6-1234-7abc-8def-0123456789ab/status" \
   -H "Content-Type: application/json" \
-  -H "Cookie: __Secure-access_token=v4.local.eyJ..." \
-  -d '{"status":"disabled"}'
+  -H "Accept: application/json" \
+  -b cookies.txt -c cookies.txt \
+  -d '{"status": "disabled"}'
 ```
 
 ### Responses
@@ -319,384 +424,482 @@ curl -X PUT "{base_url}/users/019d5439-cb43-716d-90b5-51dcbe980908/status" \
 
 ```json
 {
-  "user_id": "019d5439-cb43-716d-90b5-51dcbe980908",
+  "user_id": "0193c8c6-1234-7abc-8def-0123456789ab",
   "previous_status": "active",
   "new_status": "disabled",
   "token_version": 3,
-  "sessions_invalidated": 1
+  "sessions_invalidated": 2
 }
 ```
 
-> **Efectos de deshabilitar:** `token_version++` (atómico en DB), todas las sesiones cacheadas eliminadas (`{auth}:session:*`). El próximo request del usuario con cualquier token viejo recibe 401 `TOKEN_VERSION_STALE`.
+**Campos de respuesta:**
 
-> **Efectos de habilitar:** solo cambia el estado. No rota `token_version` (el usuario puede usar sus tokens existentes).
+| Campo | Tipo | JSON key | Descripción |
+|-------|------|----------|-------------|
+| `UserID` | UUID | `user_id` | ID del usuario modificado |
+| `PreviousStatus` | string | `previous_status` | Estado anterior a la modificación |
+| `NewStatus` | string | `new_status` | Nuevo estado aplicado |
+| `TokenVersion` | int | `token_version` | Nueva versión del token (incrementada en disable) |
+| `SessionsInvalidated` | int | `sessions_invalidated` | Cantidad de sesiones activas invalidadas |
 
 #### Posibles Errores
 
-| Código | HTTP | Cuándo |
-|--------|------|--------|
-| `NOT_AUTHENTICATED` | 401 | Cookie ausente o expirada |
-| `MISSING_PERMISSION` | 403 | Usuario sin permiso `users:write` |
-| `USER_NOT_FOUND` | 404 | ID de usuario no existe |
-| `CANNOT_DISABLE_SELF` | 400 | Intentás deshabilitar tu propia cuenta |
-| `INVALID_INPUT` | 400 | Estado no válido (solo `active`/`disabled`) o ya está en ese estado |
-| `VALIDATION_ERROR` | 400 | Body malformado |
-| `INTERNAL_ERROR` | 500 | Error inesperado |
+| Código | HTTP | Problem Type | Cuándo |
+|--------|------|-------------|--------|
+| `TOKEN_INVALID` | 401 | `unauthorized` | Cookie ausente, token inválido o expirado |
+| `TOKEN_EXPIRED` | 401 | `unauthorized` | Token PASETO expirado |
+| `NOT_AUTHENTICATED` | 401 | `unauthorized` | No hay token de acceso en la cookie |
+| `PERMISSION_DENIED` | 403 | `forbidden` | El usuario no tiene `users:read` + `users:write` + `sessions:write` |
+| `USER_NOT_FOUND` | 404 | `not-found` | El `:id` no existe en la DB |
+| `INVALID_INPUT` | 400 | `invalid-input` | UUID inválido, `status` faltante, o valor no permitido (distinto de `active`/`disabled`) |
+| `CANNOT_DISABLE_SELF` | 400 | `bad-request` | El `actorID` (extraído del token PASETO) coincide con el `:id` del path param — un admin no puede deshabilitar su propia cuenta |
+| `INTERNAL_ERROR` | 500 | `internal-error` | Error inesperado del servidor |
+
+> **Validación de auto-deshabilitación:** el usecase compara el `actorID` (extraído del token PASETO vía `extractActorID`) con el `userID` del path param. Si son iguales, retorna `CANNOT_DISABLE_SELF`.
 
 ---
 
-## Feature Limits — Usuario
+## Feature Limits (User) ✅
 
-CRUD de límites de feature por usuario. Cada límite mapea `(user_id, feature_key) → limit_value`.
+CRUD de límites de feature por usuario. Los límites controlan cuotas de uso por feature (ej. búsquedas por día, documentos subidos por mes).
 
-### Listar Límites de Usuario
+### GET /v1/dashboard/users/:id/feature-limits — Listar Límites
 
-```
-GET /v1/dashboard/users/:id/feature-limits
-```
+Lista todos los límites de feature configurados para un usuario específico.
 
-**Ejemplo:**
+**Permisos requeridos:** `users:read` (grupo base)
+
+**Path Params:**
+
+| Parámetro | Tipo | Requerido | Descripción |
+|-----------|------|-----------|-------------|
+| `id` | UUID | Sí | ID del usuario |
 
 ```bash
-curl -X GET "{base_url}/users/019d5439-cb43-716d-90b5-51dcbe980908/feature-limits" \
-  -H "Cookie: __Secure-access_token=v4.local.eyJ..."
+curl -X GET "http://localhost:8080/v1/dashboard/users/0193c8c6-1234-7abc-8def-0123456789ab/feature-limits" \
+  -H "Accept: application/json" \
+  -b cookies.txt -c cookies.txt
 ```
 
-**Response 200:**
+#### 200 OK
 
 ```json
 {
   "limits": [
     {
-      "feature_key": "projects",
-      "limit_value": 5,
-      "window": "month"
+      "feature_key": "daily_searches",
+      "limit_value": 50,
+      "window": "day"
     },
     {
-      "feature_key": "searches",
-      "limit_value": null,
-      "window": "day"
-    }
-  ]
-}
-```
-
-> **Semántica de `limit_value`:** `null` = ilimitado, `0` = bloqueado, `> 0` = cuota.
-
-### Crear/Actualizar Límite de Usuario
-
-```
-POST /v1/dashboard/users/:id/feature-limits
-```
-
-**Body:**
-
-| Campo | Tipo | Requerido | Descripción |
-|-------|------|-----------|-------------|
-| `feature_key` | string | Sí | Identificador del feature (ej. `"projects"`) |
-| `limit_value` | int o null | Sí | `null` = ilimitado, `0` = bloqueado, `>0` = cuota |
-| `window` | string | No (default: `"month"`) | Ventana: `"minute"`, `"hour"`, `"day"`, `"month"` |
-
-**Ejemplo:**
-
-```bash
-curl -X POST "{base_url}/users/019d5439-cb43-716d-90b5-51dcbe980908/feature-limits" \
-  -H "Content-Type: application/json" \
-  -H "Cookie: __Secure-access_token=v4.local.eyJ..." \
-  -d '{"feature_key":"projects","limit_value":10,"window":"month"}'
-```
-
-**Response 201:**
-
-```json
-{
-  "feature_key": "projects",
-  "limit_value": 10,
-  "window": "month"
-}
-```
-
-### Eliminar Límite de Usuario
-
-```
-DELETE /v1/dashboard/users/:id/feature-limits/:key
-```
-
-**Path Parameters:**
-
-| Campo | Tipo | Requerido | Descripción |
-|-------|------|-----------|-------------|
-| `id` | UUID v7 | Sí | ID del usuario |
-| `key` | string | Sí | Feature key a eliminar |
-
-**Response 204:** Sin body.
-
-#### Posibles Errores (Feature Limits Usuario)
-
-| Código | HTTP | Cuándo |
-|--------|------|--------|
-| `MISSING_PERMISSION` | 403 | Sin permiso `feature_limits:read` (GET) o `feature_limits:write` (POST/DELETE) |
-| `FEATURE_LIMIT_ALREADY_EXISTS` | 409 | Ya existe un límite para ese feature+window (POST) |
-| `FEATURE_LIMIT_NOT_FOUND` | 404 | Límite no encontrado (DELETE) |
-| `VALIDATION_ERROR` | 400 | Body malformado |
-
----
-
-## Feature Limits — Rol
-
-CRUD de defaults de feature por rol. Los defaults aplican a todos los usuarios con ese rol que no tengan un límite específico de usuario.
-
-### Listar Defaults de Rol
-
-```
-GET /v1/dashboard/roles/:id/feature-limits
-```
-
-**Ejemplo:**
-
-```bash
-curl -X GET "{base_url}/roles/019d5439-cb43-716d-90b5-51dcbe980909/feature-limits" \
-  -H "Cookie: __Secure-access_token=v4.local.eyJ..."
-```
-
-**Response 200:**
-
-```json
-{
-  "limits": [
-    {
-      "feature_key": "projects",
-      "limit_value": 3,
+      "feature_key": "monthly_documents",
+      "limit_value": 20,
       "window": "month"
     }
   ]
 }
 ```
 
-### Crear/Actualizar Default de Rol
+### POST /v1/dashboard/users/:id/feature-limits — Crear/Actualizar Límite
 
-```
-POST /v1/dashboard/roles/:id/feature-limits
-```
+Crea un nuevo límite de feature o actualiza uno existente para un usuario.
 
-**Body:** Igual que [Feature Limits Usuario](#crearactualizar-límite-de-usuario).
-
-**Ejemplo:**
-
-```bash
-curl -X POST "{base_url}/roles/019d5439-cb43-716d-90b5-51dcbe980909/feature-limits" \
-  -H "Content-Type: application/json" \
-  -H "Cookie: __Secure-access_token=v4.local.eyJ..." \
-  -d '{"feature_key":"projects","limit_value":5,"window":"month"}'
-```
-
-**Response 201:**
-
-```json
-{
-  "feature_key": "projects",
-  "limit_value": 5,
-  "window": "month"
-}
-```
-
-### Eliminar Default de Rol
-
-```
-DELETE /v1/dashboard/roles/:id/feature-limits/:key
-```
-
-**Response 204:** Sin body.
-
-> **Resolución de límite efectivo:** `GetEffectiveLimit(user, feature)` → verifica límite de usuario → si no existe, verifica default del rol → si no existe, ilimitado (0 no es bloqueo). Usado internamente por `FeatureLimitService.CanConsume()`.
-
----
-
-## Permission Overrides
-
-CRUD de overrides de permisos por usuario (grants y denies).
-
-### Listar Overrides
-
-```
-GET /v1/dashboard/users/:id/permission-overrides
-```
-
-**Ejemplo:**
-
-```bash
-curl -X GET "{base_url}/users/019d5439-cb43-716d-90b5-51dcbe980908/permission-overrides" \
-  -H "Cookie: __Secure-access_token=v4.local.eyJ..."
-```
-
-**Response 200:**
-
-```json
-{
-  "overrides": [
-    {
-      "id": "019d5439-cb43-716d-90b5-51dcbe980910",
-      "permission": "users:write",
-      "granted": true,
-      "reason": "Acceso temporal para moderación",
-      "expires_at": "2026-06-15T00:00:00Z",
-      "created_at": "2026-05-10T10:00:00Z",
-      "updated_at": "2026-05-10T10:00:00Z"
-    }
-  ]
-}
-```
-
-> **PO-SPEC-002:** Los overrides expirados se incluyen en la respuesta. El cliente o el `PermissionResolver` los filtra.
-
-### Crear Override
-
-```
-POST /v1/dashboard/users/:id/permission-overrides
-```
+**Permisos requeridos:** `users:read` (grupo base) + `feature_limits:write` (aditivo)
 
 **Body:**
 
 | Campo | Tipo | Requerido | Validación | Descripción |
 |-------|------|-----------|------------|-------------|
-| `permission_id` | UUID v7 | Sí | Debe existir en `permissions` | ID del permiso |
-| `granted` | bool | Sí | — | `true` = grant, `false` = deny |
-| `reason` | string | Sí | 1–500 caracteres, no vacío, no solo whitespace | Razón del override |
-| `expires_at` | ISO 8601 | No | No puede exceder 365 días para denies | Fecha de expiración |
+| `feature_key` | string | Sí | No vacío | Identificador del feature (ej. `daily_searches`) |
+| `limit_value` | *int | No | — | `nil` = ilimitado, `0` = bloqueado, `>0` = cuota |
+| `window` | string | No | — | Ventana de tiempo: `"minute"`, `"hour"`, `"day"`, `"month"` |
+
+```bash
+curl -X POST "http://localhost:8080/v1/dashboard/users/0193c8c6-1234-7abc-8def-0123456789ab/feature-limits" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json" \
+  -b cookies.txt -c cookies.txt \
+  -d '{"feature_key": "daily_searches", "limit_value": 100, "window": "day"}'
+```
+
+#### 201 Created — Límite nuevo
+
+Si el `feature_key` no existía para este usuario, se crea y retorna `201`.
+
+```json
+{
+  "feature_key": "daily_searches",
+  "limit_value": 100,
+  "window": "day"
+}
+```
+
+#### 200 OK — Límite actualizado
+
+Si el `feature_key` ya existía, se actualiza y retorna `200`.
+
+```json
+{
+  "feature_key": "daily_searches",
+  "limit_value": 100,
+  "window": "day"
+}
+```
+
+> **Nota:** El usecase verifica si PostgreSQL realizó un `INSERT` o un `UPDATE` (ej. vía `RowsAffected` + `ON CONFLICT`). El handler elige `201` o `200` según corresponda.
+
+### DELETE /v1/dashboard/users/:id/feature-limits/:key — Eliminar Límite
+
+Elimina un límite de feature de un usuario.
+
+**Permisos requeridos:** `users:read` (grupo base) + `feature_limits:write` (aditivo)
+
+**Path Params:**
+
+| Parámetro | Tipo | Requerido | Descripción |
+|-----------|------|-----------|-------------|
+| `id` | UUID | Sí | ID del usuario |
+| `key` | string | Sí | Feature key a eliminar |
+
+```bash
+curl -X DELETE "http://localhost:8080/v1/dashboard/users/0193c8c6-1234-7abc-8def-0123456789ab/feature-limits/daily_searches" \
+  -b cookies.txt -c cookies.txt
+```
+
+#### 204 No Content
+
+Sin cuerpo de respuesta.
+
+### Posibles Errores (User Limits)
+
+| Código | HTTP | Problem Type | Cuándo |
+|--------|------|-------------|--------|
+| `TOKEN_INVALID` | 401 | `unauthorized` | Cookie ausente, token inválido o expirado |
+| `TOKEN_EXPIRED` | 401 | `unauthorized` | Token PASETO expirado |
+| `NOT_AUTHENTICATED` | 401 | `unauthorized` | No hay token de acceso en la cookie |
+| `PERMISSION_DENIED` | 403 | `forbidden` | Falta `users:read` o `feature_limits:write` (en POST/DELETE) |
+| `USER_NOT_FOUND` | 404 | `not-found` | El `:id` no existe en la DB |
+| `INVALID_INPUT` | 400 | `invalid-input` | UUID inválido, `feature_key` faltante en POST |
+| `FEATURE_LIMIT_ALREADY_EXISTS` | 409 | `conflict` | POST con `feature_key` que ya existe para este usuario |
+| `FEATURE_LIMIT_NOT_FOUND` | 404 | `not-found` | DELETE con `:key` que no existe |
+| `NOT_IMPLEMENTED` | 500 | `internal-error` | Funcionalidad aún no implementada (reservado para features futuras) |
+| `INTERNAL_ERROR` | 500 | `internal-error` | Error inesperado del servidor |
+
+---
+
+## Document Verification
+
+Verificación administrativa de documentos (OCR, validación manual). Permite a un admin consultar el estado de verificación, aprobar/rechazar documentos, y disparar reprocesamiento OCR.
+
+### GET /v1/dashboard/documents/:id/verification — Consultar Verificación
+
+Obtiene el estado de verificación de un documento y su historial completo de cambios.
+
+**Permisos requeridos:** `users:read` (grupo base)
+
+#### Request
+
+```
+GET /v1/dashboard/documents/:id/verification
+```
+
+**Path Params:**
+
+| Parámetro | Tipo | Requerido | Descripción |
+|-----------|------|-----------|-------------|
+| `id` | UUID | Sí | ID del documento |
 
 **Ejemplo:**
 
 ```bash
-curl -X POST "{base_url}/users/019d5439-cb43-716d-90b5-51dcbe980908/permission-overrides" \
-  -H "Content-Type: application/json" \
-  -H "Cookie: __Secure-access_token=v4.local.eyJ..." \
-  -d '{"permission_id":"019d5439-cb43-716d-90b5-51dcbe980910","granted":false,"reason":"Abuso de borrado masivo","expires_at":"2026-08-01T00:00:00Z"}'
+curl -X GET "http://localhost:8080/v1/dashboard/documents/0193c8c6-1234-7abc-8def-0123456789ab/verification" \
+  -H "Accept: application/json" \
+  -b cookies.txt -c cookies.txt
 ```
 
-**Response 201:**
+#### Responses
+
+##### 200 OK
 
 ```json
 {
-  "id": "019d5439-cb43-716d-90b5-51dcbe980910",
-  "permission": "users:delete",
-  "granted": false,
-  "reason": "Abuso de borrado masivo",
-  "expires_at": "2026-08-01T00:00:00Z",
-  "created_at": "2026-05-13T12:00:00Z",
-  "updated_at": "2026-05-13T12:00:00Z"
+  "document_id": "0193c8c6-1234-7abc-8def-0123456789ab",
+  "status": "verified",
+  "verified_by": "0193c8c6-1234-7abc-8def-0123456789cd",
+  "verified_at": "2026-05-01T10:35:00Z",
+  "history": [
+    {
+      "previous_status": "pending",
+      "new_status": "verified",
+      "verified_by": "0193c8c6-1234-7abc-8def-0123456789cd",
+      "reason": "MRZ válido verificado",
+      "changed_at": "2026-05-01T10:35:00Z"
+    }
+  ]
 }
 ```
 
-> **Efectos:** La sesión cacheada del usuario se invalida (best-effort). Próximo request: cache miss → DB fallback → permisos recalculados con el nuevo override.
+**Campos de respuesta:**
 
-### Eliminar Override
+| Campo | Tipo | JSON key | Descripción |
+|-------|------|----------|-------------|
+| `DocumentID` | UUID | `document_id` | ID del documento |
+| `Status` | string | `status` | Estado actual: `pending`, `verified`, `rejected`, `manual_review`, `suspicious` |
+| `VerifiedBy` | *UUID | `verified_by` | Admin que verificó (omitzero si nunca fue verificado) |
+| `VerifiedAt` | *datetime | `verified_at` | Fecha de verificación (omitzero si nunca fue verificado) |
+| `History` | array | `history` | Historial completo de cambios de estado |
+
+**Campos de `history[]`:**
+
+| Campo | Tipo | JSON key | Descripción |
+|-------|------|----------|-------------|
+| `PreviousStatus` | string | `previous_status` | Estado anterior al cambio |
+| `NewStatus` | string | `new_status` | Nuevo estado aplicado |
+| `VerifiedBy` | UUID | `verified_by` | Admin que ejecutó el cambio |
+| `Reason` | string | `reason` | Motivo del cambio |
+| `ChangedAt` | datetime | `changed_at` | Timestamp del cambio (ISO 8601) |
+
+##### Posibles Errores
+
+| Código | HTTP | Problem Type | Cuándo |
+|--------|------|-------------|--------|
+| `TOKEN_INVALID` | 401 | `unauthorized` | Cookie ausente, token inválido o expirado |
+| `TOKEN_EXPIRED` | 401 | `unauthorized` | Token PASETO expirado |
+| `NOT_AUTHENTICATED` | 401 | `unauthorized` | No hay token de acceso en la cookie |
+| `PERMISSION_DENIED` | 403 | `forbidden` | El usuario no tiene `users:read` |
+| `DOCUMENT_NOT_FOUND` | 404 | `not-found` | El `:id` no corresponde a un documento existente |
+| `INVALID_INPUT` | 400 | `invalid-input` | El `:id` no es un UUID válido |
+| `INTERNAL_ERROR` | 500 | `internal-error` | Error inesperado del servidor |
+
+---
+
+### PATCH /v1/dashboard/documents/:id/verification — Actualizar Verificación
+
+Actualiza el estado de verificación de un documento. El admin puede aprobar, rechazar o marcar para revisión manual.
+
+**Permisos requeridos:** `users:read` (grupo base) + `users:write` (aditivo)
+
+#### Request
 
 ```
-DELETE /v1/dashboard/users/:id/permission-overrides/:overrideId
+PATCH /v1/dashboard/documents/:id/verification
 ```
 
-**Path Parameters:**
+**Path Params:**
 
-| Campo | Tipo | Requerido | Descripción |
-|-------|------|-----------|-------------|
-| `id` | UUID v7 | Sí | ID del usuario |
-| `overrideId` | UUID v7 | Sí | ID del override (permission_id) |
+| Parámetro | Tipo | Requerido | Descripción |
+|-----------|------|-----------|-------------|
+| `id` | UUID | Sí | ID del documento |
 
-**Response 204:** Sin body.
+**Body:**
 
-> **Efectos:** Override eliminado de DB. Sesión cacheada del usuario invalidada (best-effort).
+| Campo | Tipo | Requerido | Validación | Descripción |
+|-------|------|-----------|------------|-------------|
+| `status` | string | Sí | `verified`, `rejected`, `manual_review`, `suspicious` | Nuevo estado de verificación |
+| `reason` | string | No | Máximo 500 caracteres | Motivo del cambio |
 
-#### Posibles Errores (Permission Overrides)
+> **Nota:** `verified_by` se asigna automáticamente desde el `actorID` del token PASETO del admin autenticado. No se envía en el body.
 
-| Código | HTTP | Cuándo |
-|--------|------|--------|
-| `MISSING_PERMISSION` | 403 | Sin permiso `permissions:read` (GET) o `permissions:write` (POST/DELETE) |
-| `PERMISSION_OVERRIDE_ALREADY_EXISTS` | 409 | Ya existe un override para ese usuario+permiso |
-| `PERMISSION_OVERRIDE_NOT_FOUND` | 404 | Override no encontrado (DELETE) |
-| `INVALID_REASON` | 400 | Razón vacía, solo whitespace, o > 500 caracteres |
-| `INVALID_BLOCK_DURATION` | 400 | Deny con expiración > 365 días |
-| `VALIDATION_ERROR` | 400 | Body malformado o campos requeridos ausentes |
-| `INTERNAL_ERROR` | 500 | Error inesperado |
+**Ejemplo:**
+
+```bash
+curl -X PATCH "http://localhost:8080/v1/dashboard/documents/0193c8c6-1234-7abc-8def-0123456789ab/verification" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json" \
+  -b cookies.txt -c cookies.txt \
+  -d '{"status": "verified", "reason": "MRZ válido verificado"}'
+```
+
+#### Responses
+
+##### 200 OK
+
+```json
+{
+  "document_id": "0193c8c6-1234-7abc-8def-0123456789ab",
+  "status": "verified",
+  "message": "Verificación actualizada correctamente."
+}
+```
+
+**Campos de respuesta:**
+
+| Campo | Tipo | JSON key | Descripción |
+|-------|------|----------|-------------|
+| `DocumentID` | UUID | `document_id` | ID del documento |
+| `Status` | string | `status` | Nuevo estado aplicado |
+| `Message` | string | `message` | Mensaje de confirmación |
+
+##### Posibles Errores
+
+| Código | HTTP | Problem Type | Cuándo |
+|--------|------|-------------|--------|
+| `TOKEN_INVALID` | 401 | `unauthorized` | Cookie ausente, token inválido o expirado |
+| `TOKEN_EXPIRED` | 401 | `unauthorized` | Token PASETO expirado |
+| `NOT_AUTHENTICATED` | 401 | `unauthorized` | No hay token de acceso en la cookie |
+| `PERMISSION_DENIED` | 403 | `forbidden` | El usuario no tiene `users:read` + `users:write` |
+| `DOCUMENT_NOT_FOUND` | 404 | `not-found` | El `:id` no existe |
+| `INVALID_INPUT` | 400 | `invalid-input` | UUID inválido o `status` faltante |
+| `VALIDATION_ERROR` | 400 | `bad-request` | `status` no es un valor permitido |
+| `INTERNAL_ERROR` | 500 | `internal-error` | Error inesperado del servidor |
+
+---
+
+### POST /v1/dashboard/documents/:id/reprocess — Reprocesar Documento
+
+Re-ejecuta el pipeline OCR para un documento específico. Útil cuando el OCR falló o produjo datos incorrectos.
+
+**Permisos requeridos:** `users:read` (grupo base) + `users:write` (aditivo)
+
+#### Request
+
+```
+POST /v1/dashboard/documents/:id/reprocess
+```
+
+**Path Params:**
+
+| Parámetro | Tipo | Requerido | Descripción |
+|-----------|------|-----------|-------------|
+| `id` | UUID | Sí | ID del documento |
+
+**Ejemplo:**
+
+```bash
+curl -X POST "http://localhost:8080/v1/dashboard/documents/0193c8c6-1234-7abc-8def-0123456789ab/reprocess" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json" \
+  -b cookies.txt -c cookies.txt \
+  -d '{}'
+```
+
+#### Responses
+
+##### 202 Accepted
+
+```json
+{
+  "document_id": "0193c8c6-1234-7abc-8def-0123456789ab",
+  "status": "queued",
+  "message": "Reprocesamiento iniciado. El documento volverá a pasar por el pipeline OCR."
+}
+```
+
+**Campos de respuesta:**
+
+| Campo | Tipo | JSON key | Descripción |
+|-------|------|----------|-------------|
+| `DocumentID` | UUID | `document_id` | ID del documento |
+| `Status` | string | `status` | `queued` — encolado para reprocesamiento |
+| `Message` | string | `message` | Mensaje de confirmación |
+
+##### Posibles Errores
+
+| Código | HTTP | Problem Type | Cuándo |
+|--------|------|-------------|--------|
+| `TOKEN_INVALID` | 401 | `unauthorized` | Cookie ausente, token inválido o expirado |
+| `TOKEN_EXPIRED` | 401 | `unauthorized` | Token PASETO expirado |
+| `NOT_AUTHENTICATED` | 401 | `unauthorized` | No hay token de acceso en la cookie |
+| `PERMISSION_DENIED` | 403 | `forbidden` | El usuario no tiene `users:read` + `users:write` |
+| `DOCUMENT_NOT_FOUND` | 404 | `not-found` | El `:id` no existe |
+| `INVALID_INPUT` | 400 | `invalid-input` | UUID inválido |
+| `INTERNAL_ERROR` | 500 | `internal-error` | Error inesperado del servidor |
+
+---
+
+## Configuración CORS
+
+Configuración aplicada globalmente a todas las rutas (incluyendo `/v1/dashboard`). Definida en `internal/bootstrap/app.go:151-164`.
+
+| Configuración | Valor |
+|---------------|-------|
+| **Orígenes permitidos** | `https://proactrip.com` (prod) / `http://localhost:3000` (dev) |
+| **Credentials** | `true` |
+| **Métodos** | `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS` |
+| **Headers** | `Content-Type`, `Accept`, `Authorization`, `X-Request-Id`, `Idempotency-Key`, `X-Trace-Id` |
+| **Max Age** | 86400 segundos (24 horas) |
+
+> **NUNCA se usa wildcard (`*`).** `Access-Control-Allow-Origin: *` es incompatible con `Access-Control-Allow-Credentials: true`. El origen se determina dinámicamente vía `cfg.Frontend.GetURL()` según `SERVER_ENV`.
 
 ---
 
 ## Rate Limiting
 
-Los endpoints del dashboard están protegidos por rate limiting autenticado (basado en `user_id` extraído del PASETO). Ver [AUTH_API — Rate Limiting](./AUTH_API.md#rate-limiting) para detalles de la estrategia.
+Rate limiting implementado con DragonflyDB (compatible Redis) usando scripts Lua. Tres tiers, todos implementados.
+
+### Tiers
+
+| Tier | Límite | Key | Estado | Headers |
+|------|--------|-----|--------|---------|
+| **Global** | 100 req/min | IP del cliente | ✅ Implementado | `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset` |
+| **Authenticated** | 10 req/min | User UUID (extraído del PASETO) | ✅ Implementado | `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset` |
+| **Admin** | 30 req/min | User UUID | ✅ Implementado | `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset` |
+
+> **Nota sobre Tier 3 (Admin):** El tier de 30 req/min para administradores reemplaza al tier Authenticated en el grupo `/v1/dashboard`. Configurable vía `RATELIMIT_ADMIN_PER_MINUTE` (default: 30). Los administradores también pasan por el tier Global (100 req/min por IP).
+
+### Headers de Rate Limit
+
+| Header | Descripción |
+|--------|-------------|
+| `RateLimit-Limit` | Límite máximo de requests en la ventana |
+| `RateLimit-Remaining` | Requests restantes en la ventana actual |
+| `RateLimit-Reset` | Segundos hasta que se reinicie la ventana |
+| `Retry-After` | Solo en `429 Too Many Requests` — segundos para reintentar |
+
+### Respuesta 429 Too Many Requests
+
+```json
+{
+  "type": "https://api.proactrip.com/errors/rate-limit-exceeded",
+  "title": "Too Many Requests",
+  "status": 429,
+  "detail": "rate limit exceeded: 11/10, retry after 45s",
+  "instance": "/v1/dashboard/users",
+  "trace_id": "0193c8c6-9abc-7def-0123-456789abcdef"
+}
+```
 
 ---
 
 ## Cache
 
-### Session Cache (DragonflyDB)
+Los endpoints del dashboard **no emiten headers `Cache-Control`**. El comportamiento efectivo es `no-store, private` — los proxies y browsers no cachean ninguna respuesta del dashboard.
 
-| Aspecto | Detalle |
-|---------|---------|
-| Clave | `{auth}:session:{sessionID}` |
-| Tipo | Hash |
-| Campos | `permissions`, `status`, `token_version`, `schema_version` |
-| TTL | 5 minutos (sliding reset en cada request) |
-| Invalida en | disable, role change, override CRUD, logout |
-| Fallback | DB vía `PermissionResolver` (nunca bloquea requests) |
-
-### Cache-Control
-
-Endpoints del dashboard que retornan datos de usuario usan:
-
-```
-Cache-Control: no-store, private
-```
+| Endpoint | Cache-Control | Motivo |
+|----------|---------------|--------|
+| Todos (`/v1/dashboard/*`) | `no-store, private` (efectivo) | Sin middleware de caché — los datos administrativos son sensibles y cambian con frecuencia |
 
 ---
 
 ## Notas de Seguridad
 
-### Resolución de Permisos
+### Autenticación
+- **PASETO v4.local**: tokens simétricos con cifrado AEAD (XChaCha20-Poly1305).
+- **Cookies HttpOnly**: `__Secure-access_token` y `__Secure-refresh_token` no son accesibles desde JavaScript (previene XSS).
+- **SameSite=Lax**: protección contra CSRF en navegación cross-site. El prefijo `__Secure-` requiere `Secure` y HTTPS.
+- **Rotación silenciosa**: el middleware de auth rota el access token automáticamente en el último 25% de su TTL (900s → rota a los 675s).
 
-- **Pipeline:** `(rol_permissions ∪ active_grants) − active_denies`
-- **Deny siempre gana:** si un deny y un grant existen para el mismo permiso, el deny prevalece
-- **Overrides expirados:** filtrados en tiempo de resolución (`expires_at < NOW()`)
-- **Admin bypass:** usuarios con rol `admin` tienen acceso total (no pasan por `RequirePermission`)
+### Autorización
+- **Basada en permisos, no en roles**: el middleware `RequirePermission` verifica permisos individuales (`users:read`, `users:write`, etc.), no consulta si el usuario tiene rol `admin`.
+- **Admin como rol privilegiado**: el rol `admin` existe en base de datos como una agrupación de los 5 permisos. Cuando un admin se autentica, su token PASETO incluye todos los permisos, por lo que cualquier `RequirePermission` pasa. No hay un middleware `RequireRole("admin")`.
+- **Default deny**: cualquier request a `/v1/dashboard/*` sin los permisos requeridos es rechazado con `403`. Solo el rol `admin` posee estos permisos en la configuración actual.
+- **Granularidad futura**: los permisos individuales permitirán acceso parcial a otros roles en el futuro sin cambiar el middleware — solo se modifica la asignación de permisos en base de datos.
+- **Defense in depth**: los permisos se verifican tanto en el middleware (`RequirePermission`) como en el usecase (validación de dominio).
+- **Actor tracking**: el `actorID` se extrae del token PASETO en cada request de mutación. Se usa para la validación `CANNOT_DISABLE_SELF` (account status).
 
-### Invalidación de Sesiones
+### Headers de Seguridad
+El middleware `SecurityHeaders()` (aplicado globalmente en `app.go:167`) agrega:
+- `Content-Security-Policy`
+- `Strict-Transport-Security` (HSTS)
+- `X-Frame-Options`
+- `X-Content-Type-Options: nosniff`
+- `Referrer-Policy`
 
-| Evento | Mecanismo | Consistencia |
-|--------|-----------|-------------|
-| Deshabilitar cuenta | `token_version++` atómico + DEL cache | Inmediata |
-| Cambio de rol | `token_version++` + DEL cache | Inmediata |
-| CRUD de overrides | DEL cache del usuario (best-effort) | Eventual (lazy refresh) |
-| Override expirado | Filtrado en resolución | Inmediato |
+### Rate Limiting
+- **DragonflyDB Lua**: los contadores de rate limit se almacenan en DragonflyDB con scripts Lua atómicos.
+- **Doble capa**: cada request al dashboard pasa por Global (IP) + Authenticated (user UUID). Si cualquiera de los dos excede el límite, se devuelve `429`.
 
-Si el DEL de cache falla, `token_version` mismatch lo detecta en el próximo request → 401 → re-autenticación completa.
-
-### Prevención de Ataques
-
-| Amenaza | Mitigación |
-|---------|------------|
-| Escalación de privilegios | `RequirePermission` con verificación determinística (`slices.Contains`) |
-| Replay de tokens viejos | `token_version` check en cada request autenticado |
-| Falsificación de permisos | Permisos cacheados en DragonflyDB (server-side, no en el token) |
-| Race condition en disable | `UPDATE ... RETURNING token_version` atómico en DB |
-| Self-disable accidental | `ErrCannotDisableSelf` — no podés deshabilitar tu propia cuenta |
-| Deny bypass | Deny se aplica AL FINAL del pipeline, después de grants |
-
----
-
-## Paginación
-
-### Formato de Cursor
-
-Cursores opacos en base64: `{"o": offset}`. Ejemplo: `eyJvIjoyMH0=` → offset=20.
-
-### Meta Struct
-
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| `next_cursor` | string o null | Cursor para la página siguiente (null en última página) |
-| `prev_cursor` | string o null | Cursor para la página anterior (null en primera página) |
-| `has_next` | bool | `true` si hay más resultados |
-| `limit` | int | Tamaño de página usado en este request |
-
-### Ordenamiento
-
-`ORDER BY created_at DESC, id DESC` — determinístico y estable incluso con timestamps idénticos.
+### Trazabilidad
+- Cada respuesta (éxito o error) incluye `X-Trace-Id` (UUID v7).
+- Los errores RFC 9457 incluyen `trace_id` en el body JSON + `instance` con el path del endpoint.
+- W3C Trace Context (`traceparent`) generado por middleware de tracing.

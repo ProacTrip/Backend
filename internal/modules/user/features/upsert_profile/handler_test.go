@@ -1,7 +1,6 @@
 // Tests del usecase upsert_profile desde perspectiva del consumer.
 // UpsertProfile no tiene handler HTTP — es llamado internamente por el
-// consumer de eventos UserRegistered. Estos tests verifican el contrato
-// que el consumer espera (U-SPEC-011 excepción documentada).
+// consumer de eventos UserRegistered.
 package upsert_profile
 
 import (
@@ -45,10 +44,6 @@ func TestHandler_ConsumerCall_RegistrationEvent(t *testing.T) {
 
 	uc := NewUseCase(repo)
 
-	// Simula lo que el consumer hace:
-	//  1. Extrae user_id y email del evento UserRegistered
-	//  2. Extrae envPrefs del payload
-	//  3. Llama uc.Execute(...)
 	envPrefs := domain.EnvPrefs{
 		LanguageCode: "pt",
 		CurrencyCode: "BRL",
@@ -56,7 +51,7 @@ func TestHandler_ConsumerCall_RegistrationEvent(t *testing.T) {
 		TimezoneName: "America/Sao_Paulo",
 	}
 
-	if err := uc.Execute(t.Context(), userID, email, "", envPrefs); err != nil {
+	if err := uc.Execute(t.Context(), userID, email, "", "", envPrefs); err != nil {
 		t.Fatalf("consumer call failed: %v", err)
 	}
 
@@ -65,9 +60,6 @@ func TestHandler_ConsumerCall_RegistrationEvent(t *testing.T) {
 	}
 	if savedProfile.UserID != userID {
 		t.Errorf("UserID = %s, want %s", savedProfile.UserID, userID)
-	}
-	if savedProfile.TimezoneName != "America/Sao_Paulo" {
-		t.Errorf("TimezoneName = %q, want %q", savedProfile.TimezoneName, "America/Sao_Paulo")
 	}
 	if savedProfile.LanguageCode != "pt" {
 		t.Errorf("LanguageCode = %q, want %q", savedProfile.LanguageCode, "pt")
@@ -95,7 +87,7 @@ func TestHandler_ConsumerCall_LegacyEventNoEnv(t *testing.T) {
 	uc := NewUseCase(repo)
 
 	// Legacy event: no env fields
-	if err := uc.Execute(t.Context(), userID, "", ""); err != nil {
+	if err := uc.Execute(t.Context(), userID, "", "", ""); err != nil {
 		t.Fatalf("legacy event call failed: %v", err)
 	}
 
@@ -108,9 +100,6 @@ func TestHandler_ConsumerCall_LegacyEventNoEnv(t *testing.T) {
 	}
 	if savedProfile.LanguageCode != domain.DefaultLanguage {
 		t.Errorf("LanguageCode = %q, want default %q", savedProfile.LanguageCode, domain.DefaultLanguage)
-	}
-	if savedProfile.TimezoneName != domain.DefaultTimezone {
-		t.Errorf("TimezoneName = %q, want default %q", savedProfile.TimezoneName, domain.DefaultTimezone)
 	}
 }
 
@@ -131,11 +120,11 @@ func TestHandler_ConsumerCall_WithCache(t *testing.T) {
 		TimezoneName: "America/New_York",
 	}
 
-	if err := uc.Execute(t.Context(), userID, "", "", envPrefs); err != nil {
+	if err := uc.Execute(t.Context(), userID, "", "", "", envPrefs); err != nil {
 		t.Fatalf("consumer call with cache failed: %v", err)
 	}
 
-	// Verify cache populated (same verification pattern que el consumer usa en tests)
+	// Verify cache populated
 	key := "user:prefs:" + userID.String()
 	exists := rdb.Exists(t.Context(), key).Val()
 	if exists == 0 {

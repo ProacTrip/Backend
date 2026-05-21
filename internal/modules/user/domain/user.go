@@ -17,10 +17,9 @@ import (
 //   - Evento UserRegistered con EnvPrefs (detección de entorno)
 //   - Caso de uso UpsertProfile
 const (
-	DefaultTimezone  = "UTC"
-	DefaultLanguage  = "es"
-	DefaultCurrency  = "EUR"
-	DefaultRole      = "client"
+	DefaultLanguage = "es"
+	DefaultCurrency = "EUR"
+	DefaultRole     = "client"
 )
 
 // =============================================================================
@@ -57,17 +56,13 @@ type UserProfile struct {
 	DateOfBirth     *time.Time `json:"date_of_birth,omitzero"`
 	Gender          *Gender    `json:"gender,omitzero"`
 	Nationality     *string    `json:"nationality,omitzero"`
-	Phone           *string    `json:"phone,omitzero"`
-	PhoneVerified   bool       `json:"phone_verified"`
-	AvatarURL       *string    `json:"avatar_url,omitzero"`
-	CurrentLocation *string    `json:"current_location,omitzero"`
-	Bio             *string    `json:"bio,omitzero"`
-	TimezoneName    string     `json:"timezone_name"` // NOT NULL DEFAULT 'UTC'
-	LanguageCode    string     `json:"language_code"` // NOT NULL DEFAULT 'es'
-	CurrencyCode    string     `json:"currency_code"` // NOT NULL DEFAULT 'EUR'
-	Role            string              `json:"role,omitzero"` // "client" or "admin", default "client"
-	Status          UserProfileStatus    `json:"status,omitzero"` // default "active"
-	IsPublic        bool                 `json:"is_public"`     // NOT NULL DEFAULT FALSE
+	Phone        *string `json:"phone,omitzero"`
+	AvatarURL    *string `json:"avatar_url,omitzero"`
+	Bio          *string `json:"bio,omitzero"`
+	LanguageCode string  `json:"language_code"` // NOT NULL DEFAULT 'es'
+	CurrencyCode string  `json:"currency_code"` // NOT NULL DEFAULT 'EUR'
+	Role         string           `json:"role,omitzero"`  // "client" or "admin", default "client"
+	Status       UserProfileStatus `json:"status,omitzero"` // default "active"
 	CreatedAt       time.Time            `json:"created_at"`
 	UpdatedAt       time.Time            `json:"updated_at"`
 }
@@ -82,20 +77,15 @@ type UserProfile struct {
 func NewUserProfile(userID uuid.UUID, email string) *UserProfile {
 	now := time.Now()
 	return &UserProfile{
-		ID:            uuid.Must(uuid.NewV7()),
-		UserID:        userID,
-		Email:         email,
-		// Valores por defecto: usan DefaultTimezone/DefaultLanguage/DefaultCurrency.
-		// Son sobreescritos por EnvPrefs del evento de registro o por UpsertProfile.
-		TimezoneName:  DefaultTimezone,
-		LanguageCode:  DefaultLanguage,
-		CurrencyCode:  DefaultCurrency,
-		Role:          DefaultRole,
-		Status:        ProfileStatusActive,
-		IsPublic:      false,
-		PhoneVerified: false,
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		ID:           uuid.Must(uuid.NewV7()),
+		UserID:       userID,
+		Email:        email,
+		LanguageCode: DefaultLanguage,
+		CurrencyCode: DefaultCurrency,
+		Role:         DefaultRole,
+		Status:       ProfileStatusActive,
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
 }
 
@@ -115,26 +105,14 @@ func (p *UserProfile) SetPersonalInfo(dateOfBirth *time.Time, gender *Gender, na
 	p.UpdatedAt = time.Now()
 }
 
-// SetContact establece información de contacto
-func (p *UserProfile) SetContact(phone, location *string, phoneVerified bool) {
-	p.Phone = phone
-	p.CurrentLocation = location
-	p.PhoneVerified = phoneVerified
-	p.UpdatedAt = time.Now()
-}
-
-// SetPreferences establece preferencias
-func (p *UserProfile) SetPreferences(timezone, language, currency *string, isPublic bool) {
-	if timezone != nil {
-		p.TimezoneName = *timezone
-	}
+// SetPreferences establece preferencias de idioma y moneda.
+func (p *UserProfile) SetPreferences(language, currency *string) {
 	if language != nil {
 		p.LanguageCode = *language
 	}
 	if currency != nil {
 		p.CurrencyCode = *currency
 	}
-	p.IsPublic = isPublic
 	p.UpdatedAt = time.Now()
 }
 
@@ -169,11 +147,12 @@ func (p *UserProfile) FullName() string {
 // EnvPrefs holds environment-based preferences extracted from the user
 // registration event (language_code, currency_code, country_code, timezone_name).
 // All fields are optional — empty means "not provided, use defaults".
+// TimezoneName and CountryCode are used for cache only, not persisted to profile.
 type EnvPrefs struct {
 	LanguageCode string
 	CurrencyCode string
 	CountryCode  string // for cache only, not persisted to profile column
-	TimezoneName string
+	TimezoneName string // for cache only, not persisted to profile column
 }
 
 // HasAny returns true if at least one preference is non-empty.

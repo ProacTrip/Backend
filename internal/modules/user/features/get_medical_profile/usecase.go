@@ -43,15 +43,14 @@ type UseCaseDeps struct {
 	MedicalPendingRepo MedicalPendingCounter
 }
 
-// mapSourceToAPI traduce el enum de dominio MedicalSource al formato de API.
-// "profile" → "manual", "ocr" → "ocr", "nlp" → "nlp".
-func mapSourceToAPI(source domain.MedicalSource) string {
-	switch source {
-	case domain.MedicalSourceProfile:
-		return "manual"
-	default:
-		return string(source)
+// sourceDetailFromDomain convierte el MedicalSource simple del dominio
+// a MedicalSourceDetail para la API. "profile" → "manual", "ocr" → "ocr", "nlp" → "nlp".
+// document_id y confidence se dejan en nil para campos manuales.
+func sourceDetailFromDomain(source domain.MedicalSourceDetail) domain.MedicalSourceDetail {
+	if source.Type == string(domain.MedicalSourceProfile) {
+		source.Type = "manual"
 	}
+	return source
 }
 
 // UseCase implementa la obtención del perfil médico.
@@ -90,7 +89,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*MedicalProfileRes
 	data := make(map[string]*MedicalFieldEntry, len(mp.Data))
 	for key, field := range mp.Data {
 		entry := &MedicalFieldEntry{
-			Source:    mapSourceToAPI(field.Source),
+			Source:    sourceDetailFromDomain(field.Source),
 			UpdatedAt: formatTime(field.UpdatedAt),
 		}
 

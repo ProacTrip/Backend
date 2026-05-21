@@ -13,8 +13,7 @@ type Response struct {
 
 // UserResponse contiene los datos del usuario verificado
 type UserResponse struct {
-	ID            uuid.UUID `json:"id"`
-	Email         string    `json:"email"`
-	EmailVerified bool      `json:"email_verified"`
-	RoleName      string    `json:"role_name"`
+	ID       uuid.UUID `json:"id"`
+	Email    string    `json:"email"`
+	RoleName string    `json:"role_name"`
 }

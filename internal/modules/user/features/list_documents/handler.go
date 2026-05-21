@@ -3,12 +3,15 @@
 package list_documents
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/labstack/echo/v5"
 
 	sharedauth "github.com/ProacTrip/Backend/internal/shared/auth"
 	httperr "github.com/ProacTrip/Backend/internal/shared/http"
+
+	"github.com/ProacTrip/Backend/internal/modules/user/domain"
 )
 
 // Handler procesa GET /v1/user/documents.
@@ -25,9 +28,12 @@ func NewHandler(usecase *UseCase) *Handler {
 func (h *Handler) Handle(c *echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "no-store, private")
 
-	claims, err := echo.ContextGet[*sharedauth.AccessClaims](c, "user_claims")
+	// Usar el helper del package shared/auth que hace el type assertion
+	// internamente, evitando problemas de resolución de type alias
+	// entre packages distintos en Go 1.26.
+	claims, err := sharedauth.GetAccessClaims(c)
 	if err != nil {
-		return httperr.MapError(c, err)
+		return httperr.MapError(c, fmt.Errorf("extracting claims: %w", err))
 	}
 
 	statusFilter := c.QueryParam("status")
@@ -36,6 +42,12 @@ func (h *Handler) Handle(c *echo.Context) error {
 	docs, err := h.usecase.Execute(c.Request().Context(), claims.UserID.String(), statusFilter, docTypeFilter)
 	if err != nil {
 		return httperr.MapError(c, err)
+	}
+
+	// Garantizar que nunca se serialice nil — el usecase ya lo garantiza,
+	// pero esta guarda previene regresiones si el usecase cambia.
+	if docs == nil {
+		docs = []*domain.UserDocument{}
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{

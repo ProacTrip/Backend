@@ -66,7 +66,7 @@ func newUseCase(
 	rdb *redis.Client,
 ) *accountstatus.UseCase {
 	repo := &stubAccountStatusRepo{getByID: getByID, updateStatus: updateStatus}
-	return accountstatus.NewUseCase(repo, rdb)
+	return accountstatus.NewUseCase(repo, rdb, nil) // nil eventPublisher para tests
 }
 
 func newMiniRedis(t *testing.T) *redis.Client {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/ProacTrip/Backend/internal/modules/user/adapters/storage"
 	"github.com/ProacTrip/Backend/internal/modules/user/domain"
 )
 
@@ -79,12 +80,12 @@ func (uc *UseCase) Execute(ctx context.Context, documentID, userIDStr string) er
 	}
 
 	for _, prefix := range prefixes {
-		keys, listErr := uc.r2.ListObjects(ctx, "proactrip-secure", prefix)
+		keys, listErr := uc.r2.ListObjects(ctx, storage.SecureBucket(), prefix)
 		if listErr != nil {
 			continue
 		}
 		for _, key := range keys {
-			_ = uc.r2.Delete(ctx, "proactrip-secure", key)
+			_ = uc.r2.Delete(ctx, storage.SecureBucket(), key)
 		}
 	}
 

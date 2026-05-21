@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/ProacTrip/Backend/internal/modules/environment/domain"
@@ -19,16 +20,18 @@ type Client struct {
 	httpClient *http.Client
 }
 
-func NewClient(apiKey string) *Client {
+// NewClient crea un cliente OpenWeather con timeout HTTP configurable.
+// timeout es la duración máxima de cada petición HTTP al proveedor.
+func NewClient(apiKey string, timeout time.Duration) *Client {
 	return &Client{
 		apiKey: apiKey,
 		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout: timeout,
 		},
 	}
 }
 
-func (c *Client) GetCurrentWeather(ctx context.Context, lat, lon float64, lang string) (*domain.WeatherData, error) {
+func (c *Client) GetCurrentWeather(ctx context.Context, lat, lon float64, lang, units string) (*domain.WeatherData, error) {
 	if c.apiKey == "" {
 		return nil, nil
 	}
@@ -43,7 +46,7 @@ func (c *Client) GetCurrentWeather(ctx context.Context, lat, lon float64, lang s
 	q.Set("lon", fmt.Sprintf("%.6f", lon))
 	q.Set("exclude", "minutely,hourly,daily,alerts")
 	q.Set("appid", c.apiKey)
-	q.Set("units", "metric")
+	q.Set("units", units)
 	q.Set("lang", lang)
 	u.RawQuery = q.Encode()
 
@@ -60,7 +63,14 @@ func (c *Client) GetCurrentWeather(ctx context.Context, lat, lon float64, lang s
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return nil, fmt.Errorf("openweather returned HTTP %d: %s", resp.StatusCode, string(body))
+		bodyStr := strings.TrimSpace(string(body))
+		// HTTP 429 del proveedor externo → envolver con centinela ErrWeatherProviderRateLimited
+		// para que el usecase pueda detectarlo con errors.Is y decidir entre propagar (429)
+		// o degradar con gracia (weather null).
+		if resp.StatusCode == http.StatusTooManyRequests {
+			return nil, fmt.Errorf("%w: openweather HTTP 429: %s", domain.ErrWeatherProviderRateLimited, bodyStr)
+		}
+		return nil, fmt.Errorf("openweather returned HTTP %d: %s", resp.StatusCode, bodyStr)
 	}
 
 	var raw owOneCallResponse

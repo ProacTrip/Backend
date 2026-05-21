@@ -46,10 +46,10 @@ func (m *avatarMockRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.Use
 func (m *avatarMockRepo) Update(ctx context.Context, profile *domain.UserProfile) error {
 	return nil
 }
-func (m *avatarMockRepo) UpdateLocale(ctx context.Context, userID uuid.UUID, timezone, language, currency, currentLocation string) error {
+func (m *avatarMockRepo) UpdateLocale(ctx context.Context, userID uuid.UUID, language, currency string) error {
 	return nil
 }
-func (m *avatarMockRepo) UpdatePreferences(ctx context.Context, userID uuid.UUID, timezone, language, currency string, isPublic bool) error {
+func (m *avatarMockRepo) UpdatePreferences(ctx context.Context, userID uuid.UUID, language, currency string) error {
 	return nil
 }
 
@@ -81,7 +81,7 @@ func TestAvatarValidator_ProcesaAvatarCorrectamente(t *testing.T) {
 	userID := uuid.Must(uuid.NewV7())
 
 	// Crear el worker
-	worker := pipeline.NewAvatarValidator(rdb, repo)
+	worker := pipeline.NewAvatarValidator(rdb, repo, "")
 
 	if err := worker.Run(ctx); err != nil {
 		t.Fatalf("Run falló: %v", err)
@@ -143,7 +143,7 @@ func TestAvatarValidator_MensajeSinUserID_RechazaInmediato(t *testing.T) {
 	t.Cleanup(func() { rdb.Close() })
 
 	repo := newAvatarMockRepo()
-	worker := pipeline.NewAvatarValidator(rdb, repo)
+	worker := pipeline.NewAvatarValidator(rdb, repo, "")
 
 	if err := worker.Run(ctx); err != nil {
 		t.Fatalf("Run falló: %v", err)
@@ -187,7 +187,7 @@ func TestAvatarValidator_MensajeSinStorageKey_RechazaInmediato(t *testing.T) {
 	t.Cleanup(func() { rdb.Close() })
 
 	repo := newAvatarMockRepo()
-	worker := pipeline.NewAvatarValidator(rdb, repo)
+	worker := pipeline.NewAvatarValidator(rdb, repo, "")
 
 	if err := worker.Run(ctx); err != nil {
 		t.Fatalf("Run falló: %v", err)
@@ -229,7 +229,7 @@ func TestAvatarValidator_UserIDInvalido_RechazaInmediato(t *testing.T) {
 	t.Cleanup(func() { rdb.Close() })
 
 	repo := newAvatarMockRepo()
-	worker := pipeline.NewAvatarValidator(rdb, repo)
+	worker := pipeline.NewAvatarValidator(rdb, repo, "")
 
 	if err := worker.Run(ctx); err != nil {
 		t.Fatalf("Run falló: %v", err)
@@ -275,7 +275,7 @@ func TestAvatarValidator_FalloUpdateAvatar_QuedaEnPEL(t *testing.T) {
 	repo.updateErr = errors.New("database connection refused")
 
 	userID := uuid.Must(uuid.NewV7())
-	worker := pipeline.NewAvatarValidator(rdb, repo)
+	worker := pipeline.NewAvatarValidator(rdb, repo, "")
 
 	if err := worker.Run(ctx); err != nil {
 		t.Fatalf("Run falló: %v", err)
@@ -321,7 +321,7 @@ func TestAvatarValidator_NombreYEstado(t *testing.T) {
 	t.Cleanup(func() { rdb.Close() })
 
 	repo := newAvatarMockRepo()
-	worker := pipeline.NewAvatarValidator(rdb, repo)
+	worker := pipeline.NewAvatarValidator(rdb, repo, "")
 
 	// El nombre es fijo
 	if worker.Name() != "avatar-validator" {

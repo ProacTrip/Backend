@@ -52,6 +52,10 @@ func (m *ocrMockR2) Upload(ctx context.Context, bucket, key string, reader io.Re
 	return nil
 }
 
+func (m *ocrMockR2) GenerateDownloadURL(ctx context.Context, bucket, key string, expiry time.Duration) (string, error) {
+	return "https://r2.example.com/" + bucket + "/" + key, nil
+}
+
 type ocrMockDocRepo struct {
 	mu     sync.Mutex
 	docs   map[uuid.UUID]*domain.UserDocument
@@ -160,7 +164,7 @@ type ocrMockOCRService struct {
 	err       error
 }
 
-func (m *ocrMockOCRService) ExtractFromDocument(ctx context.Context, fileBytes []byte, mimeType string) (*domain.ExtractedData, error) {
+func (m *ocrMockOCRService) ExtractFromDocument(ctx context.Context, fileURL string) (*domain.ExtractedData, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -502,7 +506,7 @@ func TestOCRWorker_ConflictoMedico_CreaPendingUpdate(t *testing.T) {
 		Data: map[string]*domain.MedicalFieldValue{
 			"blood_type_enc": {
 				Value:     "Tys=", // base64("O+")
-				Source:    domain.MedicalSourceProfile,
+				Source:    domain.MedicalSourceDetail{Type: "manual"},
 				UpdatedAt: time.Now(),
 			},
 		},

@@ -37,7 +37,6 @@ type User struct {
 	FailedLoginAttempts int
 	LastLoginAt         *time.Time `json:"last_login_at,omitzero"`
 	LockedUntil         *time.Time `json:"locked_until,omitzero"`
-	MFAEnabled          bool
 	// TokenVersion se incrementa al deshabilitar la cuenta o cambiar el rol.
 	// Sirve para invalidar todas las sesiones activas del usuario.
 	// Los tokens emitidos con una versión anterior son rechazados.
@@ -61,7 +60,6 @@ func NewUser(email, passwordHash string, roleID uuid.UUID) *User {
 		Status:              StatusPendingVerification,
 		LoginCount:          0,
 		FailedLoginAttempts: 0,
-		MFAEnabled:          false,
 		CreatedAt:           now,
 		UpdatedAt:           now,
 	}

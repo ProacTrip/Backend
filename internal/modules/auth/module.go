@@ -20,13 +20,11 @@ import (
 	accountstatus "github.com/ProacTrip/Backend/internal/modules/auth/features/dashboard/account_status"
 	featurelimits "github.com/ProacTrip/Backend/internal/modules/auth/features/dashboard/feature_limits"
 	listusers "github.com/ProacTrip/Backend/internal/modules/auth/features/dashboard/list_users"
-	overrides "github.com/ProacTrip/Backend/internal/modules/auth/features/dashboard/permission_overrides"
 	userdetail "github.com/ProacTrip/Backend/internal/modules/auth/features/dashboard/user_detail"
 	"github.com/ProacTrip/Backend/internal/modules/auth/features/login"
 	"github.com/ProacTrip/Backend/internal/modules/auth/features/logout"
 	oauthorize "github.com/ProacTrip/Backend/internal/modules/auth/features/oauth/authorize"
 	oacallback "github.com/ProacTrip/Backend/internal/modules/auth/features/oauth/callback"
-	"github.com/ProacTrip/Backend/internal/modules/auth/features/me"
 	"github.com/ProacTrip/Backend/internal/modules/auth/features/register"
 	"github.com/ProacTrip/Backend/internal/modules/auth/features/resend_verification"
 	"github.com/ProacTrip/Backend/internal/modules/auth/features/verify_email"
@@ -63,7 +61,6 @@ type Module struct {
 	LoginHandler       *login.Handler
 	Logout             *logout.UseCase
 	LogoutHandler      *logout.Handler
-	MeHandler          *me.Handler
 
 	// OAuth Features
 	OAuthAuthorize        *oauthorize.UseCase
@@ -85,7 +82,6 @@ type Module struct {
 	UserDetailHandler          *userdetail.Handler
 	AccountStatusHandler       *accountstatus.Handler
 	FeatureLimitsHandler       *featurelimits.Handler
-	PermissionOverridesHandler *overrides.Handler
 
 	// Repositorios de dashboard (necesita DragonflyClient para invalidación de sesiones)
 	dragonflyClient *redis.Client
@@ -116,12 +112,6 @@ type Config struct {
 
 	// Event Bus
 	EventPublisher *eventbus.EventBus
-
-	// EnvResolver resolves currency/language/country/timezone from client IP.
-	// Nil-safe: when nil, registration proceeds without env defaults in the event.
-	// Implementation lives in the environment module; injected here to avoid
-	// auth → environment coupling.
-	EnvResolver register.EnvironmentResolver
 }
 
 // NewModule crea e inicializa el módulo Auth con todas sus dependencias
@@ -175,20 +165,19 @@ func NewModule(cfg Config) (*Module, error) {
 		Repo:           m.Repository,
 		VerifySvc:      m.VerificationService,
 		Hasher:         m.PasswordHasher,
-		TokenSvc:       m.TokenService,
 		EventPublisher: m.EventPublisher,
-		EnvResolver:    cfg.EnvResolver,
 	})
 	// Register Handler con soporte de idempotency (Dragonfly)
 	m.RegisterHandler = func() *register.Handler {
-		return register.NewHandlerWithIdempotency(m.Register, cfg.DragonflyClient, cfg.IsProduction, cfg.CookieDomain)
+		return register.NewHandlerWithIdempotency(m.Register, cfg.DragonflyClient)
 	}
 
 	// Verify Email
 	m.VerifyEmail = verify_email.NewUseCase(verify_email.UseCaseDeps{
-		VerifySvc: m.VerificationService,
-		Repo:      m.Repository,
-		TokenSvc:  m.TokenService,
+		VerifySvc:      m.VerificationService,
+		Repo:           m.Repository,
+		TokenSvc:       m.TokenService,
+		EventPublisher: m.EventPublisher,
 	})
 	m.VerifyEmailHandler = func() *verify_email.Handler {
 		return verify_email.NewHandler(m.VerifyEmail, cfg.IsProduction, cfg.CookieDomain)
@@ -208,10 +197,6 @@ func NewModule(cfg Config) (*Module, error) {
 		DragonflyDB: cfg.DragonflyClient,
 	})
 	m.LogoutHandler = logout.NewHandler(m.Logout, cfg.IsProduction, cfg.CookieDomain)
-
-	// Me (current user) — sin profile provider inicialmente.
-	// Se cablea después de que el user module esté inicializado vía WireUserProfile().
-	m.MeHandler = me.NewHandler(m.TokenService, m.Repository, nil)
 
 	// ========== OAUTH FEATURES ==========
 
@@ -242,13 +227,10 @@ func NewModule(cfg Config) (*Module, error) {
 
 	// Repositorios de dashboard
 	featureLimitRepo := postgres.NewFeatureLimitRepository(cfg.PostgresPool)
-	overrideRepo := postgres.NewPermissionOverridesRepository(cfg.PostgresPool)
-	overrideResolverRepo := postgres.NewPermissionOverrideResolverRepository(cfg.PostgresPool)
 
-	// PermissionResolver (servicio de dominio)
+	// PermissionResolver (servicio de dominio) — solo rol, sin overrides
 	m.PermissionResolver = services.NewPermissionResolver(
-		m.Repository.(interface { GetPermissionsByRoleID(context.Context, uuid.UUID) ([]string, error) }),
-		overrideResolverRepo,
+		m.Repository.(interface{ GetPermissionsByRoleID(context.Context, uuid.UUID) ([]string, error) }),
 	)
 
 	// FeatureLimitService
@@ -270,22 +252,20 @@ func NewModule(cfg Config) (*Module, error) {
 	m.UserDetailHandler = userdetail.NewHandler(userDetailUC)
 
 	// Account Status — AS-SPEC-003, AS-SPEC-005
+	// Inyecta EventPublisher para publicar session.invalidated en disable.
 	accountStatusUC := accountstatus.NewUseCase(
 		m.Repository.(interface {
 			GetByID(context.Context, uuid.UUID) (*domain.User, error)
 			UpdateStatus(context.Context, uuid.UUID, string) (int, error)
 		}),
 		cfg.DragonflyClient,
+		m.EventPublisher,
 	)
 	m.AccountStatusHandler = accountstatus.NewHandler(accountStatusUC)
 
 	// Feature Limits — FL-SPEC-001 through FL-SPEC-005
 	featureLimitsUC := featurelimits.NewUseCase(featureLimitRepo)
 	m.FeatureLimitsHandler = featurelimits.NewHandler(featureLimitsUC)
-
-	// Permission Overrides — PO-SPEC-001 through PO-SPEC-007
-	overridesUC := overrides.NewUseCase(overrideRepo, cfg.DragonflyClient)
-	m.PermissionOverridesHandler = overrides.NewHandler(overridesUC)
 
 	// Register domain error mappings (incluye nuevos mapeos de dashboard)
 	registerAuthErrorMappings()
@@ -295,7 +275,7 @@ func NewModule(cfg Config) (*Module, error) {
 			"register", "verify_email", "login", "logout",
 			"resend_verification", "oauth_authorize", "oauth_callback",
 			"dashboard:list_users", "dashboard:user_detail", "dashboard:account_status",
-			"dashboard:feature_limits", "dashboard:permission_overrides",
+			"dashboard:feature_limits",
 		})
 
 	return m, nil
@@ -330,23 +310,6 @@ func (m *Module) WireResendVerification(notifier resend_verification.Notificatio
 	})
 
 	m.ResendVerificationHandler = resend_verification.NewHandler(uc)
-}
-
-// =============================================================================
-// User Profile Wiring — Ports & Adapters
-// =============================================================================
-//
-// El adapter concreto (MeProfileAdapter) se define en bootstrap/app.go
-// (composition root) para evitar imports cross-module desde auth → user.
-// auth solo conoce me.UserProfileProvider (interfaz local definida en
-// auth/features/me/provider.go).
-
-// WireUserProfile inyecta el UserProfileProvider en el handler me.
-// Debe llamarse DESPUÉS de que el user module esté inicializado.
-// El adapter es creado en bootstrap/app.go y pasado como me.UserProfileProvider.
-func (m *Module) WireUserProfile(provider me.UserProfileProvider) {
-	m.MeHandler = me.NewHandler(m.TokenService, m.Repository, provider)
-	slog.Info("auth: user profile provider wired for /v1/auth/me")
 }
 
 // GeneratePasetoKey genera una clave PASETO aleatoria de 32 bytes
@@ -418,22 +381,6 @@ func registerAuthErrorMappings() {
 		case errors.Is(err, domain.ErrValidationError):
 			return serrors.ErrInvalidInput("Datos de entrada inválidos", err)
 
-		// MFA
-		case errors.Is(err, domain.ErrMFARequired):
-			return nil // MFA flow has its own handling — don't treat as error
-		case errors.Is(err, domain.ErrMFAInvalidCode), errors.Is(err, domain.ErrInvalidBackupCode), errors.Is(err, domain.ErrMFAInvalidRecoveryCode):
-			return serrors.ErrUnauthorized("Código MFA inválido", err)
-		case errors.Is(err, domain.ErrMFACodeExpired):
-			return serrors.ErrUnauthorized("Código MFA expirado. Solicita uno nuevo.", err)
-		case errors.Is(err, domain.ErrMFAAlreadyEnabled):
-			return serrors.ErrConflict("MFA ya está habilitado", err)
-		case errors.Is(err, domain.ErrMFAInvalidMethod):
-			return serrors.ErrBadRequest("Método MFA no configurado", err)
-		case errors.Is(err, domain.ErrMFANotEnabled):
-			return serrors.ErrBadRequest("MFA no habilitado para este usuario", err)
-		case errors.Is(err, domain.ErrMFARecoveryCodesExhausted):
-			return serrors.ErrBadRequest("Códigos de recuperación agotados", err)
-
 		// OAuth
 		case errors.Is(err, domain.ErrOAuthProviderNotFound):
 			return serrors.ErrBadRequest("Proveedor OAuth no soportado", err)
@@ -471,16 +418,6 @@ func registerAuthErrorMappings() {
 			return serrors.ErrConflict("Ya existe un límite para este feature", err)
 		case errors.Is(err, domain.ErrNotImplemented):
 			return serrors.ErrInternalError("Funcionalidad aún no implementada", err)
-
-		// Dashboard — Permission Overrides
-		case errors.Is(err, domain.ErrPermissionOverrideNotFound):
-			return serrors.ErrNotFound("Override de permiso no encontrado", err)
-		case errors.Is(err, domain.ErrPermissionOverrideAlreadyExists):
-			return serrors.ErrConflict("Ya existe un override para este permiso", err)
-		case errors.Is(err, domain.ErrInvalidBlockDuration):
-			return serrors.ErrBadRequest("La duración del bloqueo no puede exceder 365 días", err)
-		case errors.Is(err, domain.ErrInvalidReason):
-			return serrors.ErrBadRequest("La razón es requerida (1–500 caracteres)", err)
 
 		default:
 			return nil

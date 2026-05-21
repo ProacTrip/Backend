@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/ProacTrip/Backend/internal/modules/environment/domain"
@@ -144,40 +145,18 @@ func isRetryable(err error) bool {
 	errStr := err.Error()
 
 	// No reintentar errores de cliente
-	if containsAny(errStr, "invalid IP format", "rate limited") {
+	if strings.Contains(errStr, "invalid IP format") || strings.Contains(errStr, "rate limited") {
 		return false
 	}
 	// No reintentar errores de parse
-	if containsAny(errStr, "decode response") {
+	if strings.Contains(errStr, "decode response") {
 		return false
 	}
 	// Reintentar timeouts, 5xx, y errores de red
 	return true
 }
 
-func containsAny(s string, substrs ...string) bool {
-	for _, sub := range substrs {
-		if len(sub) > 0 && len(s) >= len(sub) {
-			// Búsqueda simple de substring
-			for i := 0; i <= len(s)-len(sub); i++ {
-				if s[i:i+len(sub)] == sub {
-					return true
-				}
-			}
-		}
-	}
-	return false
-}
-
-type ipQISP struct {
-	ASN string `json:"asn"`
-	Org string `json:"org"`
-	ISP string `json:"isp"`
-}
-
 type ipQueryResponse struct {
-	// ISP es capturado para uso futuro (analytics, logging).
-	ISP      ipQISP      `json:"isp"`
 	Location ipQLocation `json:"location"`
 }
 

@@ -21,15 +21,32 @@ const (
 	MedicalSourceNLP     MedicalSource = "nlp"     // extraído de conversación
 )
 
+// MedicalSourceDetail representa la trazabilidad completa del origen de un dato médico.
+// Alineado con USER_API.md: source sub-object con type, document_id, confidence.
+type MedicalSourceDetail struct {
+	Type       string   `json:"type"`                         // "manual", "ocr", "nlp"
+	DocumentID *string  `json:"document_id,omitzero"`         // ID del documento (UUID v7), null si manual
+	Confidence *float64 `json:"confidence,omitzero"`          // 0.0-1.0, null si manual
+}
+
+// SourceToDetail convierte un MedicalSource simple en MedicalSourceDetail.
+func SourceToDetail(source MedicalSource) MedicalSourceDetail {
+	detail := MedicalSourceDetail{Type: string(source)}
+	if source == MedicalSourceProfile {
+		detail.Type = "manual"
+	}
+	return detail
+}
+
 // =============================================================================
 // MedicalFieldValue — Valor de un campo médico con trazabilidad
 // =============================================================================
 
 // MedicalFieldValue representa un valor individual del perfil médico.
 type MedicalFieldValue struct {
-	Value     string        `json:"value"`
-	Source    MedicalSource `json:"source"`
-	UpdatedAt time.Time     `json:"updated_at"`
+	Value     string              `json:"value"`
+	Source    MedicalSourceDetail `json:"source"`
+	UpdatedAt time.Time           `json:"updated_at"`
 }
 
 // =============================================================================
@@ -62,7 +79,7 @@ func NewMedicalProfileV2(userID uuid.UUID) *MedicalProfileV2 {
 }
 
 // SetField establece o actualiza un campo médico.
-func (mp *MedicalProfileV2) SetField(fieldName, value string, source MedicalSource) {
+func (mp *MedicalProfileV2) SetField(fieldName, value string, source MedicalSourceDetail) {
 	mp.Data[fieldName] = &MedicalFieldValue{
 		Value:     value,
 		Source:    source,

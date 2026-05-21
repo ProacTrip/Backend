@@ -127,8 +127,8 @@ func TestUpdateMedicalProfile_HappyPath(t *testing.T) {
 	if btField.Value != "A+" {
 		t.Errorf("blood_type value = %s, se esperaba A+", btField.Value)
 	}
-	if btField.Source != domain.MedicalSourceProfile {
-		t.Errorf("blood_type source = %s, se esperaba profile", btField.Source)
+	if btField.Source.Type != "manual" {
+		t.Errorf("blood_type source = %s, se esperaba manual", btField.Source.Type)
 	}
 
 	// Verificar que allergies se guardó con _enc y encriptado

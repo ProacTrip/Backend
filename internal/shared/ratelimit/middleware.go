@@ -100,6 +100,32 @@ func ProviderRateLimitMiddleware(rl *RateLimiter, provider string) echo.Middlewa
 	}
 }
 
+// AdminRateLimitMiddleware aplica Tier 3 rate limit (30 req/min) para el dashboard admin.
+// Usa el user UUID como key, extraído por el extractor.
+// Límite configurable via RATELIMIT_ADMIN_PER_MINUTE.
+func AdminRateLimitMiddleware(rl *RateLimiter, extractor IdentifierFunc) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			userID, ok := extractor(c)
+			if !ok {
+				return next(c)
+			}
+
+			result, err := rl.AdminAllow(c.Request().Context(), userID)
+			if err != nil {
+				return fmt.Errorf("admin rate limit: %w", err)
+			}
+
+			setRateLimitHeaders(c, result)
+			if !result.Allowed {
+				return rateLimitExceeded(c, result)
+			}
+
+			return next(c)
+		}
+	}
+}
+
 func setRateLimitHeaders(c *echo.Context, result RateLimitResult) {
 	h := c.Response().Header()
 	h.Set("RateLimit-Limit", strconv.FormatInt(result.Limit, 10))

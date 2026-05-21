@@ -60,21 +60,30 @@ func (r *FeatureLimitRepository) GetUserLimits(ctx context.Context, userID uuid.
 
 // SetUserLimit crea o actualiza un límite de feature para un usuario.
 // Usa INSERT ... ON CONFLICT para UPSERT idempotente.
-func (r *FeatureLimitRepository) SetUserLimit(ctx context.Context, userID uuid.UUID, featureKey string, limitValue *int, window string) error {
+// Retorna isCreated=true si fue INSERT (no existía), false si fue UPDATE.
+func (r *FeatureLimitRepository) SetUserLimit(ctx context.Context, userID uuid.UUID, featureKey string, limitValue *int, window string) (bool, error) {
 	if window == "" {
 		window = "month" // default window
 	}
 
-	query := `INSERT INTO user_feature_limits (user_id, feature_key, "window", limit_value, created_at, updated_at)
-	          VALUES ($1, $2, $3, $4, NOW(), NOW())
-	          ON CONFLICT (user_id, feature_key, "window") DO UPDATE
-	          SET limit_value = EXCLUDED.limit_value, updated_at = NOW()`
+	// Usar CTE para detectar si fue INSERT o UPDATE
+	query := `WITH existing AS (
+		SELECT 1 FROM user_feature_limits
+		WHERE user_id = $1 AND feature_key = $2 AND "window" = $3
+	), upsert AS (
+		INSERT INTO user_feature_limits (user_id, feature_key, "window", limit_value, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, NOW(), NOW())
+		ON CONFLICT (user_id, feature_key, "window") DO UPDATE
+		SET limit_value = EXCLUDED.limit_value, updated_at = NOW()
+	)
+	SELECT EXISTS(SELECT 1 FROM existing) AS was_existing`
 
-	if _, err := r.pool.Exec(ctx, query, userID, featureKey, window, limitValue); err != nil {
-		return fmt.Errorf("set user limit: %w", err)
+	var wasExisting bool
+	if err := r.pool.QueryRow(ctx, query, userID, featureKey, window, limitValue).Scan(&wasExisting); err != nil {
+		return false, fmt.Errorf("set user limit: %w", err)
 	}
 
-	return nil
+	return !wasExisting, nil
 }
 
 // DeleteUserLimit elimina un límite de feature de un usuario.
@@ -84,71 +93,6 @@ func (r *FeatureLimitRepository) DeleteUserLimit(ctx context.Context, userID uui
 	ct, err := r.pool.Exec(ctx, query, userID, featureKey)
 	if err != nil {
 		return fmt.Errorf("delete user limit: %w", err)
-	}
-
-	if ct.RowsAffected() == 0 {
-		return domain.ErrFeatureLimitNotFound
-	}
-
-	return nil
-}
-
-// =============================================================================
-// Role Defaults CRUD
-// =============================================================================
-
-// GetRoleDefaults lista los defaults de feature para un rol.
-func (r *FeatureLimitRepository) GetRoleDefaults(ctx context.Context, roleID uuid.UUID) ([]featurelimits.FeatureLimitRow, error) {
-	query := `SELECT feature_key, limit_value, "window", created_at, updated_at
-	          FROM default_feature_limits WHERE role_id = $1 ORDER BY feature_key`
-
-	rows, err := r.pool.Query(ctx, query, roleID)
-	if err != nil {
-		return nil, fmt.Errorf("get role defaults: %w", err)
-	}
-	defer rows.Close()
-
-	var limits []featurelimits.FeatureLimitRow
-	for rows.Next() {
-		var l featurelimits.FeatureLimitRow
-		if scanErr := rows.Scan(&l.FeatureKey, &l.LimitValue, &l.Window, &l.CreatedAt, &l.UpdatedAt); scanErr != nil {
-			return nil, fmt.Errorf("scan role default: %w", scanErr)
-		}
-		limits = append(limits, l)
-	}
-
-	return limits, rows.Err()
-}
-
-// SetRoleDefault crea o actualiza un default de feature para un rol.
-func (r *FeatureLimitRepository) SetRoleDefault(ctx context.Context, roleID uuid.UUID, featureKey string, limitValue *int, window string) error {
-	if window == "" {
-		window = "month"
-	}
-
-	if limitValue == nil {
-		return fmt.Errorf("%w: role default requires a non-nil limit_value", domain.ErrInvalidInput)
-	}
-
-	query := `INSERT INTO default_feature_limits (role_id, feature_key, "window", limit_value, created_at, updated_at)
-	          VALUES ($1, $2, $3, $4, NOW(), NOW())
-	          ON CONFLICT (role_id, feature_key, "window") DO UPDATE
-	          SET limit_value = EXCLUDED.limit_value, updated_at = NOW()`
-
-	if _, err := r.pool.Exec(ctx, query, roleID, featureKey, window, *limitValue); err != nil {
-		return fmt.Errorf("set role default: %w", err)
-	}
-
-	return nil
-}
-
-// DeleteRoleDefault elimina un default de feature de un rol.
-func (r *FeatureLimitRepository) DeleteRoleDefault(ctx context.Context, roleID uuid.UUID, featureKey string) error {
-	query := `DELETE FROM default_feature_limits WHERE role_id = $1 AND feature_key = $2`
-
-	ct, err := r.pool.Exec(ctx, query, roleID, featureKey)
-	if err != nil {
-		return fmt.Errorf("delete role default: %w", err)
 	}
 
 	if ct.RowsAffected() == 0 {

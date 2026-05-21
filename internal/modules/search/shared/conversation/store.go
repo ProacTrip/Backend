@@ -1,18 +1,11 @@
 // conversation — conversation state persistence for AI search multi-turn sessions.
 //
-// DESIGN: Two-tier storage with event-driven PG persistence:
-//   1. Dragonfly Hash with HEXPIRE per field (10min TTL) — primary, low-latency store
-//      for all users (auth + anonymous). Each field expires independently.
-//   2. Dragonfly Streams event sourcing → async PostgreSQL writes via consumer.
-//      SaveConversation publishes "{events}:search.conversation.saved" and returns
-//      immediately. A separate ConversationConsumer reads from the stream and
-//      persists to PostgreSQL. This decouples the hot-path from PG latency.
-//      Anonymous users (UserID == "") do NOT trigger events.
+// DESIGN: Dragonfly-only storage:
+//   - Dragonfly Hash with HEXPIRE per field (10min TTL) — primary, low-latency store
+//     for all users (auth + anonymous). Each field expires independently.
 //
 // Key format: ai:conv:{conversationID}
 // Hash fields: id, user_id, messages, intent, results, turn_count, max_turns, created_at, expires_at
-//
-// Anonymous users are Dragonfly-only — no PG writes, no events published.
 package conversation
 
 import (
@@ -27,7 +20,6 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
-	"github.com/ProacTrip/Backend/internal/shared/eventbus"
 )
 
 // =============================================================================
@@ -60,7 +52,6 @@ func conversationKey(id string) string {
 
 // SaveConversation persists a ConversationState to Dragonfly.
 // Uses Hash with HEXPIRE per field for independent TTLs.
-// Auth users also trigger an async PG write via SaveConversationHistory.
 //
 // Returns ErrConversationStoreFailed on Dragonfly errors.
 func SaveConversation(ctx context.Context, rdb *redis.Client, conv *domain.ConversationState) error {
@@ -140,49 +131,6 @@ func SaveConversation(ctx context.Context, rdb *redis.Client, conv *domain.Conve
 			slog.String("error", err.Error()),
 		)
 		return fmt.Errorf("%w: save conversation: %w", ErrConversationStoreFailed, err)
-	}
-
-	// Publish event for async PG persistence via Dragonfly Streams.
-	// The ConversationConsumer picks this up and calls pgStore.SaveConversationHistory.
-	// Anonymous users (UserID == "") do NOT trigger events.
-	//
-	// FLAT PAYLOAD: go-redis XAdd requires all values to be marshalable as strings
-	// or basic types (int, string). Nested map[string]interface{} is NOT marshalable.
-	// We flatten all fields to the top level, matching the pattern in register/usecase.go.
-	if conv.UserID != "" && eventBus != nil {
-		messagesJSON, _ := json.Marshal(conv.Messages)
-		intentJSON, _ := json.Marshal(conv.Intent)
-
-		stream := eventbus.StreamName("search.conversation.saved")
-		// Flat payload — estructura alineada con auth.user.registered.
-		// timestamp: cuándo se creó la conversación (conv.CreatedAt), no time.Now()
-		//            para evitar drift entre creación y publicación.
-		// created_at: mismo dato en RFC3339 para legibilidad humana en debugging.
-		// event_version: 1 — incrementar al cambiar estructura del payload.
-		flatPayload := map[string]interface{}{
-			"event_type":      string(eventbus.ConversationSaved),
-			"event_version":   int64(1),
-			"aggregate_id":    conv.ID,
-			"timestamp":       conv.CreatedAt.UnixMilli(),
-			"conversation_id": conv.ID,
-			"user_id":         conv.UserID,
-			"messages":        string(messagesJSON),
-			"turn_count":      int64(conv.TurnCount),
-			"max_turns":       int64(conv.MaxTurns),
-			"created_at":      conv.CreatedAt.Format(time.RFC3339),
-		}
-		if len(intentJSON) > 0 {
-			flatPayload["intent"] = string(intentJSON)
-		}
-		if len(conv.Results) > 0 {
-			flatPayload["results"] = string(conv.Results)
-		}
-		if _, err := eventBus.Publish(context.WithoutCancel(ctx), stream, flatPayload); err != nil {
-			slog.ErrorContext(ctx, "failed to publish conversation saved event",
-				slog.String("conversation_id", conv.ID),
-				slog.String("error", err.Error()),
-			)
-		}
 	}
 
 	return nil
@@ -375,20 +323,4 @@ func parseConversationHash(fields map[string]string) (*domain.ConversationState,
 	)
 
 	return conv, nil
-}
-
-// =============================================================================
-// Event bus integration — event-driven PG persistence
-// =============================================================================
-
-// eventBus is wired by InitEventBus() during module initialization.
-// When set, SaveConversation publishes "{events}:search.conversation.saved" events
-// for authenticated users. The ConversationConsumer picks these up and calls
-// pgStore.SaveConversationHistory() asynchronously.
-var eventBus *eventbus.EventBus
-
-// InitEventBus wires the shared EventBus into the conversation package.
-// Called once during module initialization in module.go.
-func InitEventBus(eb *eventbus.EventBus) {
-	eventBus = eb
 }

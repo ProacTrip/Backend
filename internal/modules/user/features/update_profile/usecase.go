@@ -84,8 +84,21 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) error {
 		}
 	}
 
-	// 4. Merge command fields into existing profile (preserves TimezoneName,
-	//    LanguageCode, CurrencyCode, CurrentLocation, AvatarURL, etc.)
+	// 4. Validar language code (ISO 639, 2-5 caracteres)
+	if cmd.Language != nil {
+		if len(*cmd.Language) < 2 || len(*cmd.Language) > 5 {
+			return domain.ErrInvalidLanguageCode
+		}
+	}
+
+	// 5. Validar currency code (ISO 4217, 3 caracteres)
+	if cmd.Currency != nil {
+		if len(*cmd.Currency) != 3 {
+			return domain.ErrInvalidCurrencyCode
+		}
+	}
+
+	// 6. Merge command fields into existing profile
 	if cmd.FirstName != nil { existing.FirstName = cmd.FirstName }
 	if cmd.LastName != nil { existing.LastName = cmd.LastName }
 	if cmd.Gender != nil {
@@ -96,14 +109,15 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) error {
 	if cmd.Nationality != nil { existing.Nationality = cmd.Nationality }
 	if cmd.Phone != nil { existing.Phone = cmd.Phone }
 	if cmd.Bio != nil { existing.Bio = cmd.Bio }
-	if cmd.IsPublic != nil { existing.IsPublic = *cmd.IsPublic }
+	if cmd.Language != nil { existing.LanguageCode = *cmd.Language }
+	if cmd.Currency != nil { existing.CurrencyCode = *cmd.Currency }
 
-	// 5. Update en DB
+	// 7. Update en DB
 	if err := uc.profileRepo.Update(ctx, existing); err != nil {
 		return fmt.Errorf("update profile: %w", err)
 	}
 
-	// 6. Emitir evento (best-effort)
+	// 8. Emitir evento (best-effort)
 	if uc.eventPublisher != nil {
 		uc.wg.Go(func() {
 			bgCtx := context.WithoutCancel(ctx)

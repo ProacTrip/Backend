@@ -153,7 +153,7 @@ func TestDashboardIntegration_ListThenDisableThenUnauthorized(t *testing.T) {
 	listUsersUC := listusers.NewUseCase(repo)
 	listUsersHandler := listusers.NewHandler(listUsersUC)
 
-	accountStatusUC := accountstatus.NewUseCase(repo, nil) // nil rdb (sin cache en test)
+	accountStatusUC := accountstatus.NewUseCase(repo, nil, nil) // nil rdb + nil eventPublisher en test
 	accountStatusHandler := accountstatus.NewHandler(accountStatusUC)
 
 	userDetailUC := userdetail.NewUseCase(repo, resolver)
@@ -286,7 +286,7 @@ func TestDashboardErrorMappers(t *testing.T) {
 	repo := newMockDashboardRepo()
 	resolver := &mockPermissionResolver{}
 
-	accountStatusUC := accountstatus.NewUseCase(repo, nil)
+	accountStatusUC := accountstatus.NewUseCase(repo, nil, nil)
 	accountStatusHandler := accountstatus.NewHandler(accountStatusUC)
 
 	userDetailUC := userdetail.NewUseCase(repo, resolver)
@@ -409,8 +409,6 @@ func findStaffID(users map[uuid.UUID]*domain.User) uuid.UUID {
 }
 
 // Ensure unused import doesn't cause error
-var _ = errors.Is
-var _ = context.Background
 var _ = serrors.ErrBadRequest
 
 // init registra los mapeos de errores de dominio necesarios para los tests.

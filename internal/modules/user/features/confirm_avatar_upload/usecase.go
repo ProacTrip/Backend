@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/ProacTrip/Backend/internal/modules/user/adapters/storage"
 	"github.com/ProacTrip/Backend/internal/modules/user/domain"
 )
 
@@ -57,7 +58,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 	}
 
 	// 1. Verificar que el archivo existe en R2
-	exists, err := uc.storage.Exists(ctx, "proactrip-assets", cmd.StorageKey)
+	exists, err := uc.storage.Exists(ctx, storage.AssetsBucket(), cmd.StorageKey)
 	if err != nil {
 		return nil, fmt.Errorf("verificar existencia en R2: %w", err)
 	}

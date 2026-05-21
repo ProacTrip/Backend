@@ -12,11 +12,13 @@ import (
 type EventType string
 
 const (
-	UserRegistered     EventType = "user_registered"
-	TripCreated        EventType = "trip_created"
-	TripUpdated        EventType = "trip_updated"
-	TripDeleted        EventType = "trip_deleted"
-	ConversationSaved  EventType = "conversation_saved"
+	UserRegistered      EventType = "user_registered"
+	UserVerified        EventType = "user_verified"
+	TripCreated         EventType = "trip_created"
+	TripUpdated         EventType = "trip_updated"
+	TripDeleted         EventType = "trip_deleted"
+	ConversationSaved   EventType = "conversation_saved"
+	SessionInvalidated  EventType = "session.invalidated"
 )
 
 type Event struct {

@@ -106,7 +106,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*UpdateMedicalProf
 	if cmd.BloodType != nil {
 		existing.Data["blood_type"] = &domain.MedicalFieldValue{
 			Value:     *cmd.BloodType,
-			Source:    domain.MedicalSourceProfile,
+			Source:    domain.SourceToDetail(domain.MedicalSourceProfile),
 			UpdatedAt: now,
 		}
 		appliedFields = append(appliedFields, "blood_type")
@@ -138,7 +138,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*UpdateMedicalProf
 
 		existing.Data[fieldName+"_enc"] = &domain.MedicalFieldValue{
 			Value:     encodedValue,
-			Source:    domain.MedicalSourceProfile,
+			Source:    domain.SourceToDetail(domain.MedicalSourceProfile),
 			UpdatedAt: now,
 		}
 		appliedFields = append(appliedFields, fieldName)
@@ -176,7 +176,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*UpdateMedicalProf
 	}
 
 	return &UpdateMedicalProfileResponse{
-		Message:       "Perfil médico actualizado correctamente",
+		Message:       "Perfil médico actualizado correctamente.",
 		AppliedFields: appliedFields,
 	}, nil
 }

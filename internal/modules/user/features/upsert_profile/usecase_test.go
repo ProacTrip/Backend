@@ -1,6 +1,4 @@
 // Tests del usecase upsert_profile.
-// Cubre creación de perfil, actualización con EnvPrefs, defaults de entidades,
-// cache de prefs, y manejo de errores de repositorio.
 package upsert_profile
 
 import (
@@ -38,17 +36,11 @@ func (m *mockProfileRepo) GetByUserID(ctx context.Context, id uuid.UUID) (*domai
 	}
 	return nil, domain.ErrProfileNotFound
 }
-func (m *mockProfileRepo) GetByID(_ context.Context, _ uuid.UUID) (*domain.UserProfile, error) {
-	return nil, nil
-}
-func (m *mockProfileRepo) Update(_ context.Context, _ *domain.UserProfile) error    { return nil }
-func (m *mockProfileRepo) UpdateLocale(_ context.Context, _ uuid.UUID, _, _, _, _ string) error {
-	return nil
-}
-func (m *mockProfileRepo) UpdateAvatar(_ context.Context, _ uuid.UUID, _ string) error { return nil }
-func (m *mockProfileRepo) UpdatePreferences(_ context.Context, _ uuid.UUID, _, _, _ string, _ bool) error {
-	return nil
-}
+func (m *mockProfileRepo) GetByID(_ context.Context, _ uuid.UUID) (*domain.UserProfile, error) { return nil, nil }
+func (m *mockProfileRepo) Update(_ context.Context, _ *domain.UserProfile) error                { return nil }
+func (m *mockProfileRepo) UpdateLocale(_ context.Context, _ uuid.UUID, _, _ string) error       { return nil }
+func (m *mockProfileRepo) UpdateAvatar(_ context.Context, _ uuid.UUID, _ string) error          { return nil }
+func (m *mockProfileRepo) UpdatePreferences(_ context.Context, _ uuid.UUID, _, _ string) error  { return nil }
 
 type mockTravelPrefsRepo struct {
 	createFn func(ctx context.Context, prefs *domain.TravelPreferences) error
@@ -79,24 +71,6 @@ func (m *mockMedicalRepo) GetByUserID(_ context.Context, _ uuid.UUID) (*domain.M
 	return nil, nil
 }
 func (m *mockMedicalRepo) Update(_ context.Context, _ *domain.MedicalProfileV2) error { return nil }
-
-type mockNotifPrefsRepo struct {
-	upsertFn func(ctx context.Context, pref *domain.NotificationPreference) error
-}
-
-func (m *mockNotifPrefsRepo) Create(_ context.Context, _ *domain.NotificationPreference) error { return nil }
-func (m *mockNotifPrefsRepo) GetByUserID(_ context.Context, _ uuid.UUID) ([]*domain.NotificationPreference, error) {
-	return nil, nil
-}
-func (m *mockNotifPrefsRepo) Upsert(ctx context.Context, p *domain.NotificationPreference) error {
-	if m.upsertFn != nil {
-		return m.upsertFn(ctx, p)
-	}
-	return nil
-}
-func (m *mockNotifPrefsRepo) Delete(_ context.Context, _ uuid.UUID, _ domain.NotificationChannel, _ domain.NotificationType) error {
-	return nil
-}
 
 // =============================================================================
 // Helper: setup miniredis
@@ -135,7 +109,7 @@ func TestUpsertProfile_CreateNew(t *testing.T) {
 		},
 	})
 
-	if err := uc.Execute(t.Context(), userID, email, ""); err != nil {
+	if err := uc.Execute(t.Context(), userID, email, "", ""); err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
 	if !upsertCalled {
@@ -149,9 +123,6 @@ func TestUpsertProfile_CreateWithEnvPrefs(t *testing.T) {
 
 	uc := NewUseCase(&mockProfileRepo{
 		upsertProfileFn: func(_ context.Context, p *domain.UserProfile) error {
-			if p.TimezoneName != "Europe/Madrid" {
-				t.Errorf("TimezoneName = %q, want %q", p.TimezoneName, "Europe/Madrid")
-			}
 			if p.LanguageCode != "es" {
 				t.Errorf("LanguageCode = %q, want %q", p.LanguageCode, "es")
 			}
@@ -168,7 +139,7 @@ func TestUpsertProfile_CreateWithEnvPrefs(t *testing.T) {
 		TimezoneName: "Europe/Madrid",
 	}
 
-	if err := uc.Execute(t.Context(), userID, email, "", envPrefs); err != nil {
+	if err := uc.Execute(t.Context(), userID, email, "", "", envPrefs); err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
 }
@@ -180,7 +151,7 @@ func TestUpsertProfile_RepoError(t *testing.T) {
 		},
 	})
 
-	err := uc.Execute(t.Context(), uuid.Must(uuid.NewV7()), "", "")
+	err := uc.Execute(t.Context(), uuid.Must(uuid.NewV7()), "", "", "")
 	if err == nil {
 		t.Fatal("expected error on repo failure")
 	}
@@ -195,7 +166,7 @@ func TestUpsertProfile_PopulatesCache(t *testing.T) {
 	rdb, _ := setupMiniRedis(t)
 
 	uc := NewUseCaseWithCache(&mockProfileRepo{}, rdb)
-	if err := uc.Execute(t.Context(), userID, "", ""); err != nil {
+	if err := uc.Execute(t.Context(), userID, "", "", ""); err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
 
@@ -218,7 +189,7 @@ func TestUpsertProfile_PopulatesCache(t *testing.T) {
 func TestUpsertProfile_NoCacheWithoutRDB(t *testing.T) {
 	// Use constructor that doesn't set rdb
 	uc := NewUseCase(&mockProfileRepo{})
-	if err := uc.Execute(t.Context(), uuid.Must(uuid.NewV7()), "", ""); err != nil {
+	if err := uc.Execute(t.Context(), uuid.Must(uuid.NewV7()), "", "", ""); err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
 	// Should not panic — cache is optional
@@ -234,8 +205,6 @@ func TestUpsertProfile_CreatesAllDefaults(t *testing.T) {
 	var (
 		travelCreated  bool
 		medicalCreated bool
-		notifUp1Called bool
-		notifUp2Called bool
 	)
 
 	uc := NewUseCaseComplete(
@@ -252,21 +221,10 @@ func TestUpsertProfile_CreatesAllDefaults(t *testing.T) {
 				return nil
 			},
 		},
-		&mockNotifPrefsRepo{
-			upsertFn: func(_ context.Context, p *domain.NotificationPreference) error {
-				if p.NotificationType == domain.NotifTypeBookingConfirmation {
-					notifUp1Called = true
-				}
-				if p.NotificationType == domain.NotifTypeFlightReminder {
-					notifUp2Called = true
-				}
-				return nil
-			},
-		},
 		nil,
 	)
 
-	if err := uc.Execute(t.Context(), userID, "", ""); err != nil {
+	if err := uc.Execute(t.Context(), userID, "", "", ""); err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
 
@@ -275,12 +233,6 @@ func TestUpsertProfile_CreatesAllDefaults(t *testing.T) {
 	}
 	if !medicalCreated {
 		t.Error("medical profile default not created")
-	}
-	if !notifUp1Called {
-		t.Error("notification pref (booking) default not created")
-	}
-	if !notifUp2Called {
-		t.Error("notification pref (flight) default not created")
 	}
 }
 
@@ -296,12 +248,11 @@ func TestUpsertProfile_DefaultsGracefulOnError(t *testing.T) {
 			},
 		},
 		&mockMedicalRepo{},
-		&mockNotifPrefsRepo{},
 		nil,
 	)
 
 	// Should succeed — defaults are best-effort
-	if err := uc.Execute(t.Context(), userID, "", ""); err != nil {
+	if err := uc.Execute(t.Context(), userID, "", "", ""); err != nil {
 		t.Fatalf("Execute should succeed even when defaults fail: %v", err)
 	}
 }

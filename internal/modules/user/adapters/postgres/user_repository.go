@@ -46,29 +46,23 @@ func NewUserRepository(db *pgxpool.Pool) *UserRepository {
 // IMPORTANTE: Usa user_id como clave de conflicto (no id)
 // La migración tiene: id (PK auto-generado) y user_id (UNIQUE, FK al auth)
 func (r *UserRepository) UpsertProfile(ctx context.Context, profile *domain.UserProfile) error {
-	// El conflicto debe ser en user_id (UNIQUE), no en id (PK)
-	// Esto permite que el perfil se cree/actualice basado en el ID del usuario del dominio Auth
 	query := `
 		INSERT INTO user_profiles (
-			user_id, email, first_name, last_name, phone, phone_verified,
-			avatar_url, current_location, bio, timezone_name,
-			language_code, currency_code, role, status, is_public, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+			user_id, email, first_name, last_name, phone,
+			avatar_url, bio,
+			language_code, currency_code, role, status, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		ON CONFLICT (user_id) DO UPDATE SET
 			email = COALESCE(EXCLUDED.email, user_profiles.email),
 			first_name = COALESCE(EXCLUDED.first_name, user_profiles.first_name),
 			last_name = COALESCE(EXCLUDED.last_name, user_profiles.last_name),
 			phone = COALESCE(EXCLUDED.phone, user_profiles.phone),
-			phone_verified = EXCLUDED.phone_verified,
 			avatar_url = COALESCE(EXCLUDED.avatar_url, user_profiles.avatar_url),
-			current_location = COALESCE(EXCLUDED.current_location, user_profiles.current_location),
 			bio = COALESCE(EXCLUDED.bio, user_profiles.bio),
-			timezone_name = COALESCE(EXCLUDED.timezone_name, user_profiles.timezone_name),
 			language_code = COALESCE(EXCLUDED.language_code, user_profiles.language_code),
 			currency_code = COALESCE(EXCLUDED.currency_code, user_profiles.currency_code),
 			role = EXCLUDED.role,
 			status = EXCLUDED.status,
-			is_public = EXCLUDED.is_public,
 			updated_at = EXCLUDED.updated_at
 	`
 
@@ -78,16 +72,12 @@ func (r *UserRepository) UpsertProfile(ctx context.Context, profile *domain.User
 		profile.FirstName,
 		profile.LastName,
 		profile.Phone,
-		profile.PhoneVerified,
 		profile.AvatarURL,
-		profile.CurrentLocation,
 		profile.Bio,
-		profile.TimezoneName,
 		profile.LanguageCode,
 		profile.CurrencyCode,
 		profile.Role,
 		profile.Status,
-		profile.IsPublic,
 		profile.CreatedAt,
 		profile.UpdatedAt,
 	)
@@ -104,8 +94,8 @@ func (r *UserRepository) GetByUserID(ctx context.Context, userID uuid.UUID) (*do
 	query := `
 		SELECT up.id, up.user_id, up.email,
 		       up.first_name, up.last_name, up.date_of_birth, up.gender, up.nationality,
-		       up.phone, up.phone_verified, up.avatar_url, up.current_location, up.bio,
-		       up.timezone_name, up.language_code, up.currency_code, up.role, up.status, up.is_public,
+		       up.phone, up.avatar_url, up.bio,
+		       up.language_code, up.currency_code, up.role, up.status,
 		       up.created_at, up.updated_at
 		FROM user_profiles up
 		WHERE up.user_id = $1
@@ -125,16 +115,12 @@ func (r *UserRepository) GetByUserID(ctx context.Context, userID uuid.UUID) (*do
 		&gender,
 		&p.Nationality,
 		&p.Phone,
-		&p.PhoneVerified,
 		&p.AvatarURL,
-		&p.CurrentLocation,
 		&p.Bio,
-		&p.TimezoneName,
 		&p.LanguageCode,
 		&p.CurrencyCode,
 		&p.Role,
 		&p.Status,
-		&p.IsPublic,
 		&p.CreatedAt,
 		&p.UpdatedAt,
 	)
@@ -157,8 +143,8 @@ func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Use
 	query := `
 		SELECT up.id, up.user_id, up.email,
 		       up.first_name, up.last_name, up.date_of_birth, up.gender, up.nationality,
-		       up.phone, up.phone_verified, up.avatar_url, up.current_location, up.bio,
-		       up.timezone_name, up.language_code, up.currency_code, up.role, up.status, up.is_public,
+		       up.phone, up.avatar_url, up.bio,
+		       up.language_code, up.currency_code, up.role, up.status,
 		       up.created_at, up.updated_at
 		FROM user_profiles up
 		WHERE up.id = $1
@@ -178,16 +164,12 @@ func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Use
 		&gender,
 		&p.Nationality,
 		&p.Phone,
-		&p.PhoneVerified,
 		&p.AvatarURL,
-		&p.CurrentLocation,
 		&p.Bio,
-		&p.TimezoneName,
 		&p.LanguageCode,
 		&p.CurrencyCode,
 		&p.Role,
 		&p.Status,
-		&p.IsPublic,
 		&p.CreatedAt,
 		&p.UpdatedAt,
 	)
@@ -226,7 +208,6 @@ func (r *UserRepository) Update(ctx context.Context, profile *domain.UserProfile
 			nationality    = COALESCE($6, nationality),
 			phone          = COALESCE($7, phone),
 			bio            = COALESCE($8, bio),
-			is_public      = COALESCE($9, is_public),
 			updated_at     = NOW()
 		WHERE user_id = $1
 	`
@@ -240,7 +221,6 @@ func (r *UserRepository) Update(ctx context.Context, profile *domain.UserProfile
 		profile.Nationality,
 		profile.Phone,
 		profile.Bio,
-		profile.IsPublic,
 	)
 	if err != nil {
 		return fmt.Errorf("update profile: %w", err)
@@ -251,19 +231,17 @@ func (r *UserRepository) Update(ctx context.Context, profile *domain.UserProfile
 	return nil
 }
 
-// UpdateLocale actualiza timezone, language, currency y current_location.
-func (r *UserRepository) UpdateLocale(ctx context.Context, userID uuid.UUID, timezone, language, currency, currentLocation string) error {
+// UpdateLocale actualiza language y currency del perfil.
+func (r *UserRepository) UpdateLocale(ctx context.Context, userID uuid.UUID, language, currency string) error {
 	query := `
 		UPDATE user_profiles SET
-			timezone_name    = COALESCE(NULLIF($2, ''), timezone_name),
-			language_code    = COALESCE(NULLIF($3, ''), language_code),
-			currency_code    = COALESCE(NULLIF($4, ''), currency_code),
-			current_location = COALESCE(NULLIF($5, ''), current_location),
+			language_code    = COALESCE(NULLIF($2, ''), language_code),
+			currency_code    = COALESCE(NULLIF($3, ''), currency_code),
 			updated_at       = NOW()
 		WHERE user_id = $1
 	`
 
-	result, err := r.db.Exec(ctx, query, userID, timezone, language, currency, currentLocation)
+	result, err := r.db.Exec(ctx, query, userID, language, currency)
 	if err != nil {
 		return fmt.Errorf("update locale: %w", err)
 	}
@@ -274,7 +252,7 @@ func (r *UserRepository) UpdateLocale(ctx context.Context, userID uuid.UUID, tim
 }
 
 // =============================================================================
-// Actualizaciones (original UserRepository methods)
+// Actualizaciones
 // =============================================================================
 
 // UpdateAvatar actualiza el avatar
@@ -297,26 +275,7 @@ func (r *UserRepository) UpdateAvatar(ctx context.Context, userID uuid.UUID, ava
 	return nil
 }
 
-// UpdatePreferences actualiza las preferencias del perfil
-func (r *UserRepository) UpdatePreferences(ctx context.Context, userID uuid.UUID, timezone, language, currency string, isPublic bool) error {
-	query := `
-		UPDATE user_profiles
-		SET timezone_name = COALESCE(NULLIF($2, ''), timezone_name),
-		    language_code = COALESCE(NULLIF($3, ''), language_code),
-		    currency_code = COALESCE(NULLIF($4, ''), currency_code),
-		    is_public = $5,
-		    updated_at = NOW()
-		WHERE user_id = $1
-	`
-
-	result, err := r.db.Exec(ctx, query, userID, timezone, language, currency, isPublic)
-	if err != nil {
-		return fmt.Errorf("update preferences: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return domain.ErrProfileNotFound
-	}
-
-	return nil
+// UpdatePreferences actualiza language y currency del perfil.
+func (r *UserRepository) UpdatePreferences(ctx context.Context, userID uuid.UUID, language, currency string) error {
+	return r.UpdateLocale(ctx, userID, language, currency)
 }

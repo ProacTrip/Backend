@@ -64,14 +64,12 @@ func TestUpdateProfile_HappyPath(t *testing.T) {
 	firstName := "Juan"
 	lastName := "Pérez"
 	bio := "Viajero frecuente"
-	isPublic := true
 
 	cmd := Command{
 		UserID:    userID.String(),
 		FirstName: &firstName,
 		LastName:  &lastName,
 		Bio:       &bio,
-		IsPublic:  &isPublic,
 	}
 
 	called := false

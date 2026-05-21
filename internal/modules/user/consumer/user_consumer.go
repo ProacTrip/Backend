@@ -43,13 +43,12 @@ func NewUserEventConsumer(
 	repo domain.ProfileRepository,
 	travelRepo domain.TravelPrefsRepository,
 	medicalRepo domain.MedicalProfileRepository,
-	notifRepo domain.NotificationPrefsRepository,
 ) *UserEventConsumer {
 	return &UserEventConsumer{
 		rdb:  rdb,
 		repo: repo,
 		uc: upsert_profile.NewUseCaseComplete(
-			repo, travelRepo, medicalRepo, notifRepo, rdb,
+			repo, travelRepo, medicalRepo, rdb,
 		),
 		group:      "user-service",
 		consumer:   fmt.Sprintf("user-worker-%d", time.Now().UnixMilli()),

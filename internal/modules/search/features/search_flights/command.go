@@ -16,7 +16,6 @@ import (
 const (
 	TripTypeRoundTrip = "round_trip"
 	TripTypeOneWay    = "one_way"
-	TripTypeMultiCity = "multi_city"
 
 	TravelClassEconomy       = "economy"
 	TravelClassPremiumEconomy = "premium_economy"
@@ -43,7 +42,6 @@ const (
 var validTripTypes = map[string]bool{
 	TripTypeRoundTrip: true,
 	TripTypeOneWay:    true,
-	TripTypeMultiCity: true,
 }
 
 var validTravelClasses = map[string]bool{
@@ -80,7 +78,6 @@ type Command struct {
 	Arrival                string               `json:"arrival"`
 	OutboundDate           string               `json:"outbound_date"`
 	ReturnDate             string               `json:"return_date"`
-	Legs                   []MultiCityLegCmd    `json:"legs"`
 	Adults                 int                  `json:"adults"`
 	Children               int                  `json:"children"`
 	InfantsInSeat          int                  `json:"infants_in_seat"`
@@ -117,14 +114,6 @@ const (
 
 
 
-// MultiCityLegCmd is the input DTO for multi-city legs.
-type MultiCityLegCmd struct {
-	Departure string            `json:"departure"`
-	Arrival   string            `json:"arrival"`
-	Date      string            `json:"date"`
-	Times     *domain.TimeRange `json:"times,omitzero"`
-}
-
 // =============================================================================
 // Validación
 // =============================================================================
@@ -152,9 +141,6 @@ func (cmd *Command) Validate() error {
 		if cmd.ReturnDate == "" {
 			return fmt.Errorf("%w: return_date", domain.ErrMissingRequiredField)
 		}
-		if len(cmd.Legs) > 0 {
-			return fmt.Errorf("%w: legs no permitidos en round_trip", domain.ErrInvalidParameterRange)
-		}
 
 	case TripTypeOneWay:
 		if cmd.Departure == "" {
@@ -169,17 +155,7 @@ func (cmd *Command) Validate() error {
 		if cmd.ReturnDate != "" {
 			return fmt.Errorf("%w: return_date no permitido en one_way", domain.ErrInvalidParameterRange)
 		}
-		if len(cmd.Legs) > 0 {
-			return fmt.Errorf("%w: legs no permitidos en one_way", domain.ErrInvalidParameterRange)
-		}
 
-	case TripTypeMultiCity:
-		if len(cmd.Legs) == 0 {
-			return fmt.Errorf("%w: legs", domain.ErrMissingRequiredField)
-		}
-		if cmd.Departure != "" || cmd.Arrival != "" || cmd.OutboundDate != "" || cmd.ReturnDate != "" {
-			return fmt.Errorf("%w: departure/arrival/outbound_date/return_date no permitidos en multi_city", domain.ErrInvalidParameterRange)
-		}
 	}
 
 	if cmd.Adults < 1 {
@@ -308,20 +284,6 @@ func (cmd *Command) ToDomain() domain.FlightSearchRequest {
 
 	// Map LayoverDuration (already domain.LayoverRange)
 	req.LayoverDuration = cmd.LayoverDuration
-
-	// Map multi-city Legs
-	if len(cmd.Legs) > 0 {
-		req.Legs = make([]domain.MultiCityLeg, len(cmd.Legs))
-		for i, leg := range cmd.Legs {
-			dl := domain.MultiCityLeg{
-				Departure: leg.Departure,
-				Arrival:   leg.Arrival,
-				Date:      leg.Date,
-				Times:     leg.Times,
-			}
-			req.Legs[i] = dl
-		}
-	}
 
 	return req
 }

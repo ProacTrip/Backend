@@ -49,18 +49,6 @@ var (
 	ErrIdentityNotFound      = errors.New("IDENTITY_NOT_FOUND: identidad externa no encontrada")
 	ErrIdentityAlreadyExists = errors.New("IDENTITY_ALREADY_EXISTS: ya existe una identidad vinculada a este proveedor")
 
-	// MFA
-	ErrMFARequired               = errors.New("MFA_REQUIRED: se requiere autenticación multifactor")
-	ErrMFAInvalidCode            = errors.New("MFA_INVALID_CODE: código MFA inválido")
-	ErrMFANotEnabled             = errors.New("MFA_NOT_ENABLED: MFA no habilitado para este usuario")
-	ErrMFAAlreadyEnabled         = errors.New("MFA_ALREADY_ENABLED: MFA ya está habilitado")
-	ErrMFAInvalidMethod          = errors.New("MFA_INVALID_METHOD: método MFA no configurado para este usuario")
-	ErrMFARequiredCode           = errors.New("MFA_REQUIRED_CODE: código es requerido para este método")
-	ErrMFACodeExpired            = errors.New("MFA_CODE_EXPIRED: código MFA expirado o inválido")
-	ErrInvalidBackupCode         = errors.New("INVALID_BACKUP_CODE: código de respaldo inválido")
-	ErrMFAInvalidRecoveryCode    = errors.New("MFA_INVALID_RECOVERY_CODE: código de recuperación inválido")
-	ErrMFARecoveryCodesExhausted = errors.New("MFA_RECOVERY_CODES_EXHAUSTED: códigos de recuperación agotados")
-
 	// Validación
 	ErrInvalidEmail    = errors.New("INVALID_EMAIL: email con formato inválido")
 	ErrInvalidInput    = errors.New("INVALID_INPUT: datos de entrada inválidos")
@@ -71,9 +59,6 @@ var (
 	ErrPermissionNotFound         = errors.New("PERMISSION_NOT_FOUND: permiso no encontrado")
 	ErrPermissionDenied           = errors.New("PERMISSION_DENIED: permiso denegado")
 	ErrFeatureLimitNotFound       = errors.New("FEATURE_LIMIT_NOT_FOUND: límite de feature no encontrado")
-	ErrInvalidBlockDuration       = errors.New("INVALID_BLOCK_DURATION: duración del bloqueo inválida")
-	ErrInvalidReason              = errors.New("INVALID_REASON: razón requerida para la acción")
-	ErrPermissionOverrideNotFound = errors.New("PERMISSION_OVERRIDE_NOT_FOUND: override de permiso no encontrado")
 
 	// Dashboard — account status
 	ErrCannotDisableSelf = errors.New("CANNOT_DISABLE_SELF: no puedes deshabilitar tu propia cuenta")
@@ -81,7 +66,4 @@ var (
 	// Dashboard — feature limits
 	ErrFeatureLimitAlreadyExists = errors.New("FEATURE_LIMIT_ALREADY_EXISTS: ya existe un límite para este feature")
 	ErrNotImplemented            = errors.New("NOT_IMPLEMENTED: funcionalidad aún no implementada")
-
-	// Dashboard — permission overrides
-	ErrPermissionOverrideAlreadyExists = errors.New("PERMISSION_OVERRIDE_ALREADY_EXISTS: ya existe un override para este permiso")
 )

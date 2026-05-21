@@ -7,18 +7,17 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/ProacTrip/Backend/internal/modules/auth/adapters/token"
 	"github.com/ProacTrip/Backend/internal/modules/auth/adapters/verification"
 	"github.com/ProacTrip/Backend/internal/modules/auth/domain"
 )
 
 // =============================================================================
-// Mock types for UseCase tests (Task 2.2)
+// Mock types for UseCase tests
 // =============================================================================
 
 type mockUserRepo struct {
-	users     map[string]*domain.User // email → user
-	roles     map[string]*domain.Role // name → role
+	users     map[string]*domain.User
+	roles     map[string]*domain.Role
 	getByErr  error
 	createErr error
 	roleErr   error
@@ -34,7 +33,7 @@ func newMockUserRepo() *mockUserRepo {
 	}
 }
 
-func (m *mockUserRepo) GetByEmail(ctx context.Context, email string) (*domain.User, error) {
+func (m *mockUserRepo) GetByEmail(_ context.Context, email string) (*domain.User, error) {
 	if m.getByErr != nil {
 		return nil, m.getByErr
 	}
@@ -45,7 +44,7 @@ func (m *mockUserRepo) GetByEmail(ctx context.Context, email string) (*domain.Us
 	return u, nil
 }
 
-func (m *mockUserRepo) Create(ctx context.Context, user *domain.User) error {
+func (m *mockUserRepo) Create(_ context.Context, user *domain.User) error {
 	if m.createErr != nil {
 		return m.createErr
 	}
@@ -53,7 +52,7 @@ func (m *mockUserRepo) Create(ctx context.Context, user *domain.User) error {
 	return nil
 }
 
-func (m *mockUserRepo) GetRoleByName(ctx context.Context, name string) (*domain.Role, error) {
+func (m *mockUserRepo) GetRoleByName(_ context.Context, name string) (*domain.Role, error) {
 	if m.roleErr != nil {
 		return nil, m.roleErr
 	}
@@ -64,44 +63,27 @@ func (m *mockUserRepo) GetRoleByName(ctx context.Context, name string) (*domain.
 	return r, nil
 }
 
-// Remaining interface methods — unused in registration flow but required for compilation
-func (m *mockUserRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error) { return nil, nil }
-func (m *mockUserRepo) Update(ctx context.Context, user *domain.User) error            { return nil }
+func (m *mockUserRepo) GetByID(_ context.Context, _ uuid.UUID) (*domain.User, error) { return nil, nil }
+func (m *mockUserRepo) Update(_ context.Context, _ *domain.User) error               { return nil }
 
 type mockPasswordHasher struct{}
 
-func (m *mockPasswordHasher) Hash(password string) (string, error) {
-	return "hashed:" + password, nil
-}
-func (m *mockPasswordHasher) Verify(password, encoded string) (bool, error) {
-	return true, nil
-}
+func (m *mockPasswordHasher) Hash(password string) (string, error)  { return "hashed:" + password, nil }
+func (m *mockPasswordHasher) Verify(_, _ string) (bool, error)      { return true, nil }
 
 type mockVerificationService struct {
 	token string
 	err   error
 }
 
-func (m *mockVerificationService) GenerateToken(ctx context.Context, email string) (string, error) {
+func (m *mockVerificationService) GenerateToken(_ context.Context, _ string) (string, error) {
 	if m.err != nil {
 		return "", m.err
 	}
 	return m.token, nil
 }
-func (m *mockVerificationService) VerifyToken(ctx context.Context, token string) (*verification.TokenClaims, error) {
+func (m *mockVerificationService) VerifyToken(_ context.Context, _ string) (*verification.TokenClaims, error) {
 	return nil, nil
-}
-
-type mockTokenService struct {
-	pair *token.TokenPair
-	err  error
-}
-
-func (m *mockTokenService) GenerateTokenPair(userID uuid.UUID, email string, role string, roleID, sessionID uuid.UUID) (*token.TokenPair, error) {
-	if m.err != nil {
-		return nil, m.err
-	}
-	return m.pair, nil
 }
 
 type mockEventPublisher struct {
@@ -113,38 +95,32 @@ type publishedEvent struct {
 	payload map[string]any
 }
 
-func (m *mockEventPublisher) Publish(ctx context.Context, stream string, payload map[string]any) (string, error) {
+func (m *mockEventPublisher) Publish(_ context.Context, stream string, payload map[string]any) (string, error) {
 	m.published = append(m.published, publishedEvent{stream: stream, payload: payload})
 	return "msg-1", nil
 }
 
 // =============================================================================
-// Test: env resolver success — env fields in event payload
+// Test: flujo feliz — crea usuario, publica evento con campos de entorno vacíos.
+// El usecase ya no resuelve environment defaults — publica evento mínimo.
 // =============================================================================
 
-func TestUseCase_ResolvesEnvDefaultsAndIncludesInEvent(t *testing.T) {
+func TestUseCase_Execute_Success(t *testing.T) {
 	repo := newMockUserRepo()
 	publisher := &mockEventPublisher{}
-
-	resolver := &mockResolver{
-		currency:    "EUR",
-		language:    "es",
-		countryCode: "ES",
-		timezone:    "Europe/Madrid",
-	}
 
 	uc := NewUseCase(UseCaseDeps{
 		Repo:           repo,
 		VerifySvc:      &mockVerificationService{token: "verify-token-123"},
 		Hasher:         &mockPasswordHasher{},
-		TokenSvc: &mockTokenService{
-			pair: &token.TokenPair{AccessToken: "at", RefreshToken: "rt"},
-		},
 		EventPublisher: publisher,
-		EnvResolver:    resolver,
 	})
 
-	resp, err := uc.Execute(t.Context(), Command{Email: "test@example.com", Password: "password123"}, "203.0.113.42")
+	resp, err := uc.Execute(t.Context(), Command{
+		Email:     "test@example.com",
+		Password:  "Password123!",
+		FirstName: "Juan",
+	})
 	if err != nil {
 		t.Fatalf("Execute() unexpected error: %v", err)
 	}
@@ -157,157 +133,100 @@ func TestUseCase_ResolvesEnvDefaultsAndIncludesInEvent(t *testing.T) {
 	}
 
 	payload := publisher.published[0].payload
-	if payload["language_code"] != "es" {
-		t.Errorf("language_code = %q, want %q", payload["language_code"], "es")
+	if payload["email"] != "test@example.com" {
+		t.Errorf("email = %q, want %q", payload["email"], "test@example.com")
 	}
-	if payload["currency_code"] != "EUR" {
-		t.Errorf("currency_code = %q, want %q", payload["currency_code"], "EUR")
-	}
-	if payload["country_code"] != "ES" {
-		t.Errorf("country_code = %q, want %q", payload["country_code"], "ES")
-	}
-	if payload["timezone_name"] != "Europe/Madrid" {
-		t.Errorf("timezone_name = %q, want %q", payload["timezone_name"], "Europe/Madrid")
+	if payload["first_name"] != "Juan" {
+		t.Errorf("first_name = %q, want %q", payload["first_name"], "Juan")
 	}
 
-	// The event type and stream should be correct
-	if publisher.published[0].stream != "{events}:auth.user.registered" {
-		t.Errorf("stream = %q, want %q", publisher.published[0].stream, "{events}:auth.user.registered")
-	}
-	if payload["event_type"] != "user_registered" {
-		t.Errorf("event_type = %q, want %q", payload["event_type"], "user_registered")
-	}
-}
-
-// =============================================================================
-// Test: resolver error — env fields omitted, registration continues
-// =============================================================================
-
-func TestUseCase_ResolverError_ContinuesWithoutEnvFields(t *testing.T) {
-	repo := newMockUserRepo()
-	publisher := &mockEventPublisher{}
-
-	resolver := &mockResolver{
-		err: errors.New("geoip service unavailable"),
-	}
-
-	uc := NewUseCase(UseCaseDeps{
-		Repo:           repo,
-		VerifySvc:      &mockVerificationService{token: "verify-token-456"},
-		Hasher:         &mockPasswordHasher{},
-		TokenSvc: &mockTokenService{
-			pair: &token.TokenPair{AccessToken: "at", RefreshToken: "rt"},
-		},
-		EventPublisher: publisher,
-		EnvResolver:    resolver,
-	})
-
-	_, err := uc.Execute(t.Context(), Command{Email: "fail@example.com", Password: "password123"}, "127.0.0.1")
-	if err != nil {
-		t.Fatalf("Execute() should NOT fail on resolver error: %v", err)
-	}
-
-	if len(publisher.published) != 1 {
-		t.Fatalf("expected 1 published event, got %d", len(publisher.published))
-	}
-
-	payload := publisher.published[0].payload
-
-	// Core fields must exist
-	if payload["user_id"] == nil || payload["user_id"] == "" {
-		t.Error("user_id should be present")
-	}
-	if payload["email"] != "fail@example.com" {
-		t.Errorf("email = %q, want %q", payload["email"], "fail@example.com")
-	}
-
-	// Env fields must NOT be present when resolver failed
+	// Los campos de entorno no se incluyen — el user consumer los resuelve por su cuenta.
 	if _, ok := payload["language_code"]; ok {
-		t.Error("language_code should NOT be present when resolver fails")
+		t.Errorf("language_code should NOT be in event payload (resolved by user consumer)")
 	}
 	if _, ok := payload["currency_code"]; ok {
-		t.Error("currency_code should NOT be present when resolver fails")
-	}
-	if _, ok := payload["country_code"]; ok {
-		t.Error("country_code should NOT be present when resolver fails")
-	}
-	if _, ok := payload["timezone_name"]; ok {
-		t.Error("timezone_name should NOT be present when resolver fails")
-	}
-}
-
-// =============================================================================
-// Test: nil resolver — no panic, reg continues
-// =============================================================================
-
-func TestUseCase_NilResolver_NoPanic(t *testing.T) {
-	repo := newMockUserRepo()
-	publisher := &mockEventPublisher{}
-
-	uc := NewUseCase(UseCaseDeps{
-		Repo:           repo,
-		VerifySvc:      &mockVerificationService{token: "verify-token-789"},
-		Hasher:         &mockPasswordHasher{},
-		TokenSvc: &mockTokenService{
-			pair: &token.TokenPair{AccessToken: "at", RefreshToken: "rt"},
-		},
-		EventPublisher: publisher,
-		EnvResolver:    nil, // explicitly nil
-	})
-
-	_, err := uc.Execute(t.Context(), Command{Email: "nilres@example.com", Password: "password123"}, "127.0.0.1")
-	if err != nil {
-		t.Fatalf("Execute() should NOT panic or fail with nil resolver: %v", err)
+		t.Errorf("currency_code should NOT be in event payload")
 	}
 
-	if len(publisher.published) != 1 {
-		t.Fatalf("expected 1 published event even with nil resolver, got %d", len(publisher.published))
-	}
-
-	// No env fields expected
-	payload := publisher.published[0].payload
-	if _, ok := payload["language_code"]; ok {
-		t.Error("no env fields expected with nil resolver")
+	// Response contiene solo el mensaje (sin tokens ni cookies).
+	if resp.Message != "Registration successful. Please verify your email." {
+		t.Errorf("Message = %q", resp.Message)
 	}
 }
 
 // =============================================================================
-// Test: backward compat — without envIP (empty string), resolver not called
+// Test: email ya existe → ErrEmailAlreadyExists
 // =============================================================================
 
-func TestUseCase_EmptyEnvIP_ResolverNotCalled(t *testing.T) {
+func TestUseCase_EmailAlreadyExists(t *testing.T) {
 	repo := newMockUserRepo()
-	publisher := &mockEventPublisher{}
-
-	// This resolver will fail if called — proving it's not called
-	resolver := &mockResolver{
-		err: errors.New("should NOT be called"),
-	}
+	// Pre-populate the user
+	existingUser := domain.NewUser("exists@example.com", "hashed", uuid.Must(uuid.NewV7()))
+	repo.users["exists@example.com"] = existingUser
 
 	uc := NewUseCase(UseCaseDeps{
-		Repo:           repo,
-		VerifySvc:      &mockVerificationService{token: "vt-ip-empty"},
-		Hasher:         &mockPasswordHasher{},
-		TokenSvc: &mockTokenService{
-			pair: &token.TokenPair{AccessToken: "at", RefreshToken: "rt"},
-		},
-		EventPublisher: publisher,
-		EnvResolver:    resolver,
+		Repo:      repo,
+		VerifySvc: &mockVerificationService{token: "vt"},
+		Hasher:    &mockPasswordHasher{},
 	})
 
-	// Empty IP — resolver should NOT be called
-	_, err := uc.Execute(t.Context(), Command{Email: "emptyip@example.com", Password: "password123"}, "")
+	_, err := uc.Execute(t.Context(), Command{
+		Email:    "exists@example.com",
+		Password: "Password123!",
+	})
+	if err == nil {
+		t.Fatal("Execute() should return error for duplicate email")
+	}
+	if err != domain.ErrEmailAlreadyExists {
+		t.Errorf("error = %v, want ErrEmailAlreadyExists", err)
+	}
+}
+
+// =============================================================================
+// Test: repo error → propagado
+// =============================================================================
+
+func TestUseCase_RepoError(t *testing.T) {
+	repo := newMockUserRepo()
+	repo.getByErr = errors.New("db connection failed")
+
+	uc := NewUseCase(UseCaseDeps{
+		Repo:      repo,
+		VerifySvc: &mockVerificationService{token: "vt"},
+		Hasher:    &mockPasswordHasher{},
+	})
+
+	_, err := uc.Execute(t.Context(), Command{
+		Email:    "error@example.com",
+		Password: "Password123!",
+	})
+	if err == nil {
+		t.Fatal("Execute() should return error when repo fails")
+	}
+}
+
+// =============================================================================
+// Test: nil event publisher → no panic, registro exitoso
+// =============================================================================
+
+func TestUseCase_NilPublisher_NoPanic(t *testing.T) {
+	repo := newMockUserRepo()
+
+	uc := NewUseCase(UseCaseDeps{
+		Repo:      repo,
+		VerifySvc: &mockVerificationService{token: "vt-nil-pub"},
+		Hasher:    &mockPasswordHasher{},
+		// EventPublisher: nil — explícitamente nil
+	})
+
+	resp, err := uc.Execute(t.Context(), Command{
+		Email:    "nilpub@example.com",
+		Password: "Password123!",
+	})
 	if err != nil {
-		t.Fatalf("Execute() with empty IP should succeed: %v", err)
+		t.Fatalf("Execute() should NOT fail with nil publisher: %v", err)
 	}
-
-	if len(publisher.published) != 1 {
-		t.Fatalf("expected 1 published event, got %d", len(publisher.published))
-	}
-
-	// No env fields when IP is empty (resolver not called)
-	payload := publisher.published[0].payload
-	if _, ok := payload["language_code"]; ok {
-		t.Error("no env fields expected when IP is empty")
+	if resp == nil {
+		t.Fatal("Execute() returned nil response")
 	}
 }

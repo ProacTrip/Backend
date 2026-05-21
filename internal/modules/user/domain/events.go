@@ -96,24 +96,6 @@ func NewMedicalProfileUpdated(userID uuid.UUID) *MedicalProfileUpdated {
 func (e *MedicalProfileUpdated) EventType() string { return "MedicalProfileUpdated" }
 
 // =============================================================================
-// NotificationPreferencesUpdated
-// =============================================================================
-
-type NotificationPreferencesUpdated struct {
-	UserID     uuid.UUID `json:"user_id"`
-	OccurredAt time.Time `json:"occurred_at"`
-}
-
-func NewNotificationPreferencesUpdated(userID uuid.UUID) *NotificationPreferencesUpdated {
-	return &NotificationPreferencesUpdated{
-		UserID:     userID,
-		OccurredAt: time.Now(),
-	}
-}
-
-func (e *NotificationPreferencesUpdated) EventType() string { return "NotificationPreferencesUpdated" }
-
-// =============================================================================
 // Document Events — Pipeline de procesamiento de documentos
 // =============================================================================
 

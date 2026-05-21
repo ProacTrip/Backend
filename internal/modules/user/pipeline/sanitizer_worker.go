@@ -19,8 +19,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/ProacTrip/Backend/internal/modules/user/adapters/storage"
 	"github.com/ProacTrip/Backend/internal/modules/user/domain"
 	"github.com/ProacTrip/Backend/internal/shared/eventbus"
+	"github.com/ProacTrip/Backend/internal/shared/sse"
 )
 
 // =============================================================================
@@ -183,13 +185,13 @@ func (s *SanitizerWorker) processMessage(ctx context.Context, msg redis.XMessage
 	}
 
 	// 2. Publicar SSE: sanitizing
-	s.publishSSEEvent(ctx, docID, "processing", map[string]interface{}{
+	s.publishSSEEvent(ctx, doc.UserID, docID, "processing", map[string]interface{}{
 		"sub_state": "sanitizing",
 		"message":   "Sanitizando archivo...",
 	})
 
 	// 3. Descargar raw de R2
-	reader, err := s.r2.Download(ctx, "proactrip-secure", storageKey)
+	reader, err := s.r2.Download(ctx, storage.SecureBucket(), storageKey)
 	if err != nil {
 		slog.Error("doc sanitizer: download raw file failed", "doc_id", docID, "key", storageKey, "error", err)
 		return // No XACK — reintentar
@@ -227,7 +229,7 @@ func (s *SanitizerWorker) processMessage(ctx context.Context, msg redis.XMessage
 	//
 	// 6. Subir archivo sanitizado a R2/processed/
 	cleanContentType := mimeType
-	if err := s.r2.Upload(ctx, "proactrip-secure", processedKey,
+	if err := s.r2.Upload(ctx, storage.SecureBucket(), processedKey,
 		bytes.NewReader(cleanBytes), int64(len(cleanBytes)), cleanContentType); err != nil {
 		slog.Error("doc sanitizer: upload processed file failed", "doc_id", docID, "error", err)
 		return
@@ -244,7 +246,7 @@ func (s *SanitizerWorker) processMessage(ctx context.Context, msg redis.XMessage
 	}
 
 	// 8. Publicar SSE: sanitizing completo → camino a OCR
-	s.publishSSEEvent(ctx, docID, "processing", map[string]interface{}{
+	s.publishSSEEvent(ctx, doc.UserID, docID, "processing", map[string]interface{}{
 		"sub_state": "ocr_processing",
 		"message":   "Enviando a OCR...",
 	})
@@ -384,8 +386,10 @@ func extForMime(mime string) string {
 	}
 }
 
-// publishSSEEvent publica un evento SSE en el stream doc:events:{id}.
-func (s *SanitizerWorker) publishSSEEvent(ctx context.Context, docID uuid.UUID, event string, data map[string]interface{}) {
+// publishSSEEvent publica un evento SSE en el stream doc:events:{id}
+// y también en el SSE Hub para consumidores conectados vía HTTP.
+func (s *SanitizerWorker) publishSSEEvent(ctx context.Context, userID, docID uuid.UUID, event string, data map[string]interface{}) {
+	// Redis stream (existing — kept for other consumers)
 	stream := fmt.Sprintf("{events}:doc:events:%s", docID.String())
 
 	payload := map[string]interface{}{
@@ -403,6 +407,12 @@ func (s *SanitizerWorker) publishSSEEvent(ctx context.Context, docID uuid.UUID, 
 	}).Result(); err != nil {
 		slog.Warn("doc sanitizer: publish SSE event failed", "doc_id", docID, "event", event, "error", err)
 	}
+
+	// SSE Hub (new — for HTTP EventSource connections)
+	sse.GetHub().Publish(userID, sse.Event{
+		Type: "doc." + event,
+		Data: payload,
+	})
 }
 
 // =============================================================================

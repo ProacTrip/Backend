@@ -8,5 +8,6 @@ type Response struct {
 	UploadURL  string    `json:"upload_url"`
 	StorageKey string    `json:"storage_key"`
 	ExpiresAt  time.Time `json:"expires_at"`
+	EventsURL  string    `json:"events_url"`
 	Message    string    `json:"message"`
 }

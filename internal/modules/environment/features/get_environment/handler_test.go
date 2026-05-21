@@ -3,6 +3,7 @@ package get_environment
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -146,9 +147,9 @@ func TestHandler_ExtractLanguage(t *testing.T) {
 		wantLang       string
 	}{
 		{
-			name:           "sin header Accept-Language → en",
+		name:          "sin header Accept-Language → es",
 			acceptLanguage: "",
-			wantLang:       "en",
+			wantLang:       "es",
 		},
 		{
 			name:           "es-AR → es",
@@ -224,7 +225,7 @@ func TestHandler_HTTP_ErrorScenarios(t *testing.T) {
 					},
 				}
 				weatherMock := &mockWeatherProvider{
-					getFn: func(ctx context.Context, lat, lon float64, lang string) (*domain.WeatherData, error) {
+					getFn: func(ctx context.Context, lat, lon float64, lang, units string) (*domain.WeatherData, error) {
 						return makeMockWeatherData(), nil
 					},
 				}
@@ -238,7 +239,7 @@ func TestHandler_HTTP_ErrorScenarios(t *testing.T) {
 					WeatherProvider:  weatherMock,
 					Cache:            cacheMock,
 					RateLimiter:      nil,
-					CacheTTL:         10 * time.Minute,
+					WeatherCacheTTL:         10 * time.Minute,
 				})
 			},
 			wantStatus: http.StatusOK,
@@ -268,7 +269,7 @@ func TestHandler_HTTP_ErrorScenarios(t *testing.T) {
 					},
 				}
 				weatherMock := &mockWeatherProvider{
-					getFn: func(ctx context.Context, lat, lon float64, lang string) (*domain.WeatherData, error) {
+					getFn: func(ctx context.Context, lat, lon float64, lang, units string) (*domain.WeatherData, error) {
 						return nil, nil // sin datos de clima
 					},
 				}
@@ -282,7 +283,7 @@ func TestHandler_HTTP_ErrorScenarios(t *testing.T) {
 					WeatherProvider:  weatherMock,
 					Cache:            cacheMock,
 					RateLimiter:      nil,
-					CacheTTL:         10 * time.Minute,
+					WeatherCacheTTL:         10 * time.Minute,
 				})
 			},
 			wantStatus: http.StatusOK,
@@ -333,7 +334,7 @@ func TestHandler_HTTP_ErrorScenarios(t *testing.T) {
 				return NewUseCase(UseCaseDeps{
 					LocationProvider: locMock,
 					RateLimiter:      nil,
-					CacheTTL:         10 * time.Minute,
+					WeatherCacheTTL:         10 * time.Minute,
 				})
 			},
 			wantStatus:   http.StatusBadGateway,
@@ -354,8 +355,8 @@ func TestHandler_HTTP_ErrorScenarios(t *testing.T) {
 					},
 				}
 				weatherMock := &mockWeatherProvider{
-					getFn: func(ctx context.Context, lat, lon float64, lang string) (*domain.WeatherData, error) {
-						return nil, errors.New("HTTP 429: too many requests")
+					getFn: func(ctx context.Context, lat, lon float64, lang, units string) (*domain.WeatherData, error) {
+						return nil, fmt.Errorf("%w: openweather HTTP 429: rate limit exceeded", domain.ErrWeatherProviderRateLimited)
 					},
 				}
 				cacheMock := &mockCache{
@@ -368,11 +369,19 @@ func TestHandler_HTTP_ErrorScenarios(t *testing.T) {
 					WeatherProvider:  weatherMock,
 					Cache:            cacheMock,
 					RateLimiter:      nil,
-					CacheTTL:         10 * time.Minute,
+					WeatherCacheTTL:         10 * time.Minute,
 				})
 			},
 			wantStatus:   http.StatusTooManyRequests,
 			wantContains: "límite",
+			checkHeaders: func(t *testing.T, rec *httptest.ResponseRecorder) {
+				t.Helper()
+				// Verificar Content-Type RFC 9457 Problem Details
+				ct := rec.Header().Get("Content-Type")
+				if !strings.Contains(ct, "application/problem+json") {
+					t.Errorf("Content-Type = %q, esperaba application/problem+json", ct)
+				}
+			},
 		},
 		{
 			name:    "error de ubicación no mapeado → 500 (fallback genérico)",
@@ -386,7 +395,7 @@ func TestHandler_HTTP_ErrorScenarios(t *testing.T) {
 				return NewUseCase(UseCaseDeps{
 					LocationProvider: locMock,
 					RateLimiter:      nil,
-					CacheTTL:         10 * time.Minute,
+					WeatherCacheTTL:         10 * time.Minute,
 				})
 			},
 			wantStatus:   http.StatusBadGateway, // wrapped as ErrLocationProvider
@@ -411,7 +420,7 @@ func TestHandler_HTTP_ErrorScenarios(t *testing.T) {
 					},
 				}
 				weatherMock := &mockWeatherProvider{
-					getFn: func(ctx context.Context, lat, lon float64, lang string) (*domain.WeatherData, error) {
+					getFn: func(ctx context.Context, lat, lon float64, lang, units string) (*domain.WeatherData, error) {
 						return makeMockWeatherData(), nil
 					},
 				}
@@ -425,7 +434,7 @@ func TestHandler_HTTP_ErrorScenarios(t *testing.T) {
 					WeatherProvider:  weatherMock,
 					Cache:            cacheMock,
 					RateLimiter:      nil,
-					CacheTTL:         10 * time.Minute,
+					WeatherCacheTTL:         10 * time.Minute,
 				})
 			},
 			wantStatus: http.StatusOK,

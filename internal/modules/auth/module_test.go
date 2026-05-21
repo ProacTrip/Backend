@@ -74,17 +74,6 @@ func TestRegisterAuthErrorMappings_MapeaErroresDominioAHTTP(t *testing.T) {
 		{name: "ErrInvalidInput", err: domain.ErrInvalidInput, wantStatus: 400},
 		{name: "ErrValidationError", err: domain.ErrValidationError, wantStatus: 400},
 
-		// MFA — ErrMFARequired retorna nil (MFA tiene su propio flujo)
-		{name: "ErrMFARequired", err: domain.ErrMFARequired, wantNil: true},
-		{name: "ErrMFAInvalidCode", err: domain.ErrMFAInvalidCode, wantStatus: 401},
-		{name: "ErrMFACodeExpired", err: domain.ErrMFACodeExpired, wantStatus: 401},
-		{name: "ErrMFAAlreadyEnabled", err: domain.ErrMFAAlreadyEnabled, wantStatus: 409},
-		{name: "ErrMFAInvalidMethod", err: domain.ErrMFAInvalidMethod, wantStatus: 400},
-		{name: "ErrMFANotEnabled", err: domain.ErrMFANotEnabled, wantStatus: 400},
-		{name: "ErrInvalidBackupCode", err: domain.ErrInvalidBackupCode, wantStatus: 401},
-		{name: "ErrMFAInvalidRecoveryCode", err: domain.ErrMFAInvalidRecoveryCode, wantStatus: 401},
-		{name: "ErrMFARecoveryCodesExhausted", err: domain.ErrMFARecoveryCodesExhausted, wantStatus: 400},
-
 		// OAuth
 		{name: "ErrOAuthProviderNotFound", err: domain.ErrOAuthProviderNotFound, wantStatus: 400},
 		{name: "ErrOAuthCodeMissing", err: domain.ErrOAuthCodeMissing, wantStatus: 400},

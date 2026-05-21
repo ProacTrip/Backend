@@ -60,6 +60,40 @@ func NewTripCreatedEvent(tripID, userID string) Event {
 	}
 }
 
+// NewUserVerifiedEvent crea un evento de email verificado.
+// Incluye los defaults de entorno (languageCode, currencyCode, countryCode, timezoneName)
+// para que el consumer del user module los persista como preferencias iniciales del perfil.
+// Los campos de entorno son opcionales: solo se incluyen cuando no están vacíos.
+func NewUserVerifiedEvent(userID, email, languageCode, currencyCode, countryCode, timezoneName, clientIP string) Event {
+	payload := map[string]interface{}{
+		"user_id": userID,
+		"email":   email,
+	}
+
+	if languageCode != "" {
+		payload["language_code"] = languageCode
+	}
+	if currencyCode != "" {
+		payload["currency_code"] = currencyCode
+	}
+	if countryCode != "" {
+		payload["country_code"] = countryCode
+	}
+	if timezoneName != "" {
+		payload["timezone_name"] = timezoneName
+	}
+	if clientIP != "" {
+		payload["client_ip"] = clientIP
+	}
+
+	return Event{
+		EventType:   UserVerified,
+		AggregateID: userID,
+		Timestamp:   time.Now().UnixMilli(),
+		Payload:     payload,
+	}
+}
+
 // NewTripUpdatedEvent creates a trip_updated domain event.
 func NewTripUpdatedEvent(tripID, userID string) Event {
 	return Event{
@@ -82,6 +116,21 @@ func NewTripDeletedEvent(tripID, userID string) Event {
 		Payload: map[string]interface{}{
 			"trip_id": tripID,
 			"user_id": userID,
+		},
+	}
+}
+
+// NewSessionInvalidatedEvent crea un evento session.invalidated cuando un admin
+// deshabilita la cuenta de un usuario. El session manager lo consume para
+// invalidar todas las sesiones activas del usuario afectado.
+func NewSessionInvalidatedEvent(userID, invalidatedBy string) Event {
+	return Event{
+		EventType:   SessionInvalidated,
+		AggregateID: userID,
+		Timestamp:   time.Now().UnixMilli(),
+		Payload: map[string]interface{}{
+			"user_id":        userID,
+			"invalidated_by": invalidatedBy,
 		},
 	}
 }

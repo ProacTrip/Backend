@@ -102,6 +102,10 @@ func (rl *RateLimiter) AnonymousAllow(ctx context.Context, cookieID string) (Rat
 	return rl.Allow(ctx, "anon:"+cookieID, rl.cfg.AnonymousPerMinute, 60)
 }
 
+func (rl *RateLimiter) AdminAllow(ctx context.Context, userID string) (RateLimitResult, error) {
+	return rl.Allow(ctx, "admin:"+userID, rl.cfg.AdminPerMinute, 60)
+}
+
 func (rl *RateLimiter) ProviderAllow(ctx context.Context, provider string) (RateLimitResult, error) {
 	pl, ok := rl.cfg.Providers[provider]
 	if !ok {

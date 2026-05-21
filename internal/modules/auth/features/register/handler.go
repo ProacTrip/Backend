@@ -4,45 +4,42 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
+	"github.com/ProacTrip/Backend/internal/modules/auth/domain"
 	httperr "github.com/ProacTrip/Backend/internal/shared/http"
-	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 	"github.com/redis/go-redis/v9"
 )
 
 // Handler HTTP para registro de usuarios.
-// Valida input, maneja idempotencia via Dragonfly y setea cookies en producción.
+// Valida input, maneja idempotencia via Dragonfly. No emite cookies.
 
 // IdempotencyConfig configuración para manejo de idempotencia
 type IdempotencyConfig struct {
 	RedisClient *redis.Client
-	TTL         time.Duration // Default: 24h
+	TTL         time.Duration // Por defecto: 24h
 }
 
 type Handler struct {
 	usecase           *UseCase
 	idempotencyConfig *IdempotencyConfig
-	isProduction      bool
-	cookieDomain      string
 }
 
 func NewHandler(usecase *UseCase) *Handler {
-	return &Handler{usecase: usecase, idempotencyConfig: nil, isProduction: false}
+	return &Handler{usecase: usecase, idempotencyConfig: nil}
 }
 
 // NewHandlerWithIdempotency crea handler con soporte de idempotencia
-func NewHandlerWithIdempotency(usecase *UseCase, rdb *redis.Client, isProduction bool, cookieDomain string) *Handler {
+func NewHandlerWithIdempotency(usecase *UseCase, rdb *redis.Client) *Handler {
 	return &Handler{
 		usecase: usecase,
 		idempotencyConfig: &IdempotencyConfig{
 			RedisClient: rdb,
 			TTL:         24 * time.Hour,
 		},
-		isProduction: isProduction,
-		cookieDomain: cookieDomain,
 	}
 }
 
@@ -50,11 +47,10 @@ func NewHandlerWithIdempotency(usecase *UseCase, rdb *redis.Client, isProduction
 func (h *Handler) Handle(c *echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "no-store, private")
 
-	envIP := c.RealIP()
-
+	// Validar que Idempotency-Key esté presente — requerido según spec.
 	idempotencyKey := c.Request().Header.Get("Idempotency-Key")
 	if idempotencyKey == "" {
-		idempotencyKey = uuid.Must(uuid.NewV7()).String()
+		return httperr.MapError(c, fmt.Errorf("%w: el header Idempotency-Key es requerido", domain.ErrInvalidInput))
 	}
 
 	if h.idempotencyConfig != nil {
@@ -74,19 +70,12 @@ func (h *Handler) Handle(c *echo.Context) error {
 		return httperr.MapError(c, err)
 	}
 
-	resp, err := h.usecase.Execute(c.Request().Context(), cmd, envIP)
+	resp, err := h.usecase.Execute(c.Request().Context(), cmd)
 	if err != nil {
 		return httperr.MapError(c, err)
 	}
 
-	if resp.AccessToken != "" && resp.RefreshToken != "" {
-		if h.isProduction {
-			httperr.SetAuthCookiesFromTokens(c, resp.AccessToken, resp.RefreshToken, h.cookieDomain)
-		} else {
-			httperr.SetAuthCookiesDev(c, resp.AccessToken, resp.RefreshToken)
-		}
-	}
-
+	// Sin cookies — el registro no crea sesión.
 	if err := c.JSON(http.StatusCreated, resp); err != nil {
 		return err
 	}
@@ -102,7 +91,7 @@ func (h *Handler) Handle(c *echo.Context) error {
 	return nil
 }
 
-// getCachedResponse retrieves cached response from Dragonfly
+// getCachedResponse recupera la respuesta cacheada desde Dragonfly
 func (h *Handler) getCachedResponse(ctx context.Context, key string) (map[string]any, error) {
 	if h.idempotencyConfig == nil || h.idempotencyConfig.RedisClient == nil {
 		return nil, errors.New("idempotency not configured")
@@ -116,7 +105,7 @@ func (h *Handler) getCachedResponse(ctx context.Context, key string) (map[string
 		return nil, err
 	}
 
-	// Parse JSON string back to map
+	// Parsear JSON a map
 	var result map[string]any
 	if err := json.Unmarshal([]byte(val), &result); err != nil {
 		return nil, err
@@ -125,7 +114,7 @@ func (h *Handler) getCachedResponse(ctx context.Context, key string) (map[string
 	return result, nil
 }
 
-// cacheResponse stores full response in Dragonfly (fire and forget)
+// cacheResponse almacena la respuesta completa en Dragonfly (fire and forget)
 func (h *Handler) cacheResponse(ctx context.Context, key string, response *Response) {
 	if h.idempotencyConfig == nil || h.idempotencyConfig.RedisClient == nil {
 		return
@@ -143,6 +132,6 @@ func (h *Handler) cacheResponse(ctx context.Context, key string, response *Respo
 	).Err()
 
 	if err != nil {
-		// Log but don't fail - idempotency is best-effort
+		// Log pero no fallar — la idempotencia es best-effort
 	}
 }

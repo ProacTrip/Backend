@@ -14,44 +14,34 @@ import (
 	serrors "github.com/ProacTrip/Backend/internal/shared/errors"
 	"github.com/labstack/echo/v5"
 
+	"github.com/ProacTrip/Backend/internal/config"
+
 	"github.com/ProacTrip/Backend/internal/modules/user/adapters/encryption"
-	"github.com/ProacTrip/Backend/internal/modules/user/adapters/hash"
 	deepseekocr "github.com/ProacTrip/Backend/internal/modules/user/adapters/ocr/deepseek"
 	"github.com/ProacTrip/Backend/internal/modules/user/adapters/postgres"
 	"github.com/ProacTrip/Backend/internal/modules/user/adapters/storage"
 	"github.com/ProacTrip/Backend/internal/modules/user/consumer"
 	"github.com/ProacTrip/Backend/internal/modules/user/domain"
-	"github.com/ProacTrip/Backend/internal/modules/user/features/add_favorite"
 	"github.com/ProacTrip/Backend/internal/modules/user/features/confirm_avatar_upload"
-	"github.com/ProacTrip/Backend/internal/modules/user/features/create_saved_search"
 	"github.com/ProacTrip/Backend/internal/modules/user/features/delete_document"
-	"github.com/ProacTrip/Backend/internal/modules/user/features/delete_favorite"
-	"github.com/ProacTrip/Backend/internal/modules/user/features/delete_saved_search"
-	"github.com/ProacTrip/Backend/internal/modules/user/features/document_events"
 	"github.com/ProacTrip/Backend/internal/modules/user/features/document_types"
-	"github.com/ProacTrip/Backend/internal/modules/user/features/download_document"
 	"github.com/ProacTrip/Backend/internal/modules/user/features/get_document"
+	"github.com/ProacTrip/Backend/internal/modules/user/features/get_document_download_url"
+	"github.com/ProacTrip/Backend/internal/modules/user/features/get_medical_conflict"
 	"github.com/ProacTrip/Backend/internal/modules/user/features/get_medical_profile"
 	"github.com/ProacTrip/Backend/internal/modules/user/features/get_profile"
+	"github.com/ProacTrip/Backend/internal/modules/user/features/get_travel_preferences"
 	"github.com/ProacTrip/Backend/internal/modules/user/features/list_documents"
-	"github.com/ProacTrip/Backend/internal/modules/user/features/list_favorites"
-	"github.com/ProacTrip/Backend/internal/modules/user/features/list_pending_medical"
-	"github.com/ProacTrip/Backend/internal/modules/user/features/list_saved_searches"
-	"github.com/ProacTrip/Backend/internal/modules/user/features/resolve_medical_pending"
-	"github.com/ProacTrip/Backend/internal/modules/user/features/toggle_alert"
-	"github.com/ProacTrip/Backend/internal/modules/user/features/update_locale"
+	"github.com/ProacTrip/Backend/internal/modules/user/features/list_medical_conflicts"
+	"github.com/ProacTrip/Backend/internal/modules/user/features/resolve_medical_conflict"
 	"github.com/ProacTrip/Backend/internal/modules/user/features/update_medical_profile"
-	"github.com/ProacTrip/Backend/internal/modules/user/features/update_notif_prefs"
 	"github.com/ProacTrip/Backend/internal/modules/user/features/update_profile"
-	"github.com/ProacTrip/Backend/internal/modules/user/features/update_saved_search"
 	"github.com/ProacTrip/Backend/internal/modules/user/features/update_travel_prefs"
 	"github.com/ProacTrip/Backend/internal/modules/user/features/upload_avatar"
 	"github.com/ProacTrip/Backend/internal/modules/user/features/upload_document"
 	"github.com/ProacTrip/Backend/internal/modules/user/features/upsert_profile"
-	"github.com/ProacTrip/Backend/internal/modules/user/features/verify_document"
 	"github.com/ProacTrip/Backend/internal/modules/user/pipeline"
 	"github.com/ProacTrip/Backend/internal/shared/eventbus"
-	"github.com/ProacTrip/Backend/internal/shared/middleware"
 	"github.com/ProacTrip/Backend/internal/shared/ratelimit"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
@@ -62,7 +52,6 @@ type Module struct {
 	// Repositorios (implementaciones de dominio)
 	profileRepo        domain.ProfileRepository
 	travelPrefsRepo    domain.TravelPrefsRepository
-	notifPrefsRepo     domain.NotificationPrefsRepository
 	medicalProfileRepo domain.MedicalProfileRepository
 	medicalPendingRepo domain.MedicalPendingUpdateRepository
 
@@ -75,17 +64,17 @@ type Module struct {
 	upsertProfileUseCase *upsert_profile.UseCase
 
 	// Handlers (Phase 2)
-	getProfileHandler        *get_profile.Handler
-	updateProfileHandler     *update_profile.Handler
-	updateLocaleHandler      *update_locale.Handler
-	updateTravelPrefsHandler *update_travel_prefs.Handler
-	updateNotifPrefsHandler  *update_notif_prefs.Handler
+	getProfileHandler         *get_profile.Handler
+	updateProfileHandler      *update_profile.Handler
+	updateTravelPrefsHandler  *update_travel_prefs.Handler
+	getTravelPrefsHandler     *get_travel_preferences.Handler
 
 	// Handlers (Phase 3 — Medical)
-	getMedicalProfileHandler     *get_medical_profile.Handler
-	updateMedicalProfileHandler  *update_medical_profile.Handler
-	listPendingMedicalHandler    *list_pending_medical.Handler
-	resolveMedicalPendingHandler *resolve_medical_pending.Handler
+	getMedicalProfileHandler      *get_medical_profile.Handler
+	updateMedicalProfileHandler   *update_medical_profile.Handler
+	listMedicalConflictsHandler   *list_medical_conflicts.Handler
+	getMedicalConflictHandler     *get_medical_conflict.Handler
+	resolveMedicalConflictHandler *resolve_medical_conflict.Handler
 
 	// Handlers (Phase 4 — Avatar)
 	uploadAvatarHandler       *upload_avatar.Handler
@@ -93,10 +82,6 @@ type Module struct {
 
 	// Repositorios (Phase 5 — Documentos)
 	documentRepo *postgres.DocumentRepository
-
-	// Repositorios (Phase 6 — Búsquedas y Favoritos)
-	savedSearchRepo *postgres.SavedSearchRepository
-	favoriteRepo    *postgres.FavoriteRepository
 
 	// Servicio OCR (Phase 5)
 	ocrService domain.OCRService
@@ -106,20 +91,8 @@ type Module struct {
 	documentTypesHandler     *document_types.Handler
 	listDocumentsHandler     *list_documents.Handler
 	getDocumentHandler       *get_document.Handler
-	downloadDocumentHandler  *download_document.Handler
+	downloadDocURLHandler    *get_document_download_url.Handler
 	deleteDocumentHandler    *delete_document.Handler
-	verifyDocumentHandler    *verify_document.Handler
-	documentEventsHandler    *document_events.Handler
-
-	// Handlers (Phase 6 — Búsquedas Guardadas y Favoritos)
-	createSavedSearchHandler *create_saved_search.Handler
-	listSavedSearchesHandler *list_saved_searches.Handler
-	updateSavedSearchHandler *update_saved_search.Handler
-	deleteSavedSearchHandler *delete_saved_search.Handler
-	toggleAlertHandler       *toggle_alert.Handler
-	addFavoriteHandler       *add_favorite.Handler
-	listFavoritesHandler     *list_favorites.Handler
-	deleteFavoriteHandler    *delete_favorite.Handler
 
 	// Pipelines (Phase 4 — Avatar)
 	avatarValidator *pipeline.AvatarValidator
@@ -145,14 +118,8 @@ type Config struct {
 	EventBus      *eventbus.EventBus
 	EncryptionKey []byte // 32 bytes para ChaCha20-Poly1305
 	R2Storage     *storage.R2Storage
-	OCRAPIKey     string // API key para DeepSeek OCR (opcional: sin key, OCR no disponible)
+	OCRConfig     config.AIOCRConfig // Configuración del servicio OCR (modelo, API key, base URL)
 	RateLimiter   *ratelimit.RateLimiter // opcional — rate limiting para uploads
-}
-
-// SavedSearchRepo expone el repositorio de búsquedas guardadas.
-// Accedido por user/adapters/search_resolver.go vía bootstrap.
-func (m *Module) SavedSearchRepo() *postgres.SavedSearchRepository {
-	return m.savedSearchRepo
 }
 
 // ProfileRepo expone el repositorio de perfiles de usuario.
@@ -185,7 +152,6 @@ func NewModule(cfg Config) (*Module, error) {
 
 	// 2. Inicializar repos de apoyo
 	m.travelPrefsRepo = postgres.NewTravelPrefsRepository(cfg.PostgresPool)
-	m.notifPrefsRepo = postgres.NewNotificationPrefsRepository(cfg.PostgresPool)
 
 	// 3. Inicializar repositorios médicos (Phase 3)
 	m.medicalProfileRepo = postgres.NewMedicalProfileRepository(cfg.PostgresPool)
@@ -214,14 +180,12 @@ func NewModule(cfg Config) (*Module, error) {
 	// when UserRegistered event arrives.
 	m.eventConsumer = consumer.NewUserEventConsumer(
 		cfg.RedisClient, profileRepo,
-		m.travelPrefsRepo, m.medicalProfileRepo, m.notifPrefsRepo,
+		m.travelPrefsRepo, m.medicalProfileRepo,
 	)
 
 	// 8. Inicializar Features (Phase 2)
 	getProfileUC := get_profile.NewUseCase(get_profile.UseCaseDeps{
-		ProfileRepo:    m.profileRepo,
-		TravelPrefsRepo: m.travelPrefsRepo,
-		NotifPrefsRepo:  m.notifPrefsRepo,
+		ProfileRepo: m.profileRepo,
 	})
 	m.getProfileHandler = get_profile.NewHandler(getProfileUC)
 
@@ -231,24 +195,16 @@ func NewModule(cfg Config) (*Module, error) {
 	})
 	m.updateProfileHandler = update_profile.NewHandler(updateProfileUC)
 
-	updateLocaleUC := update_locale.NewUseCase(update_locale.UseCaseDeps{
-		ProfileRepo:    m.profileRepo,
-		EventPublisher: cfg.EventBus,
-		RedisClient:    cfg.RedisClient,
-	})
-	m.updateLocaleHandler = update_locale.NewHandler(updateLocaleUC)
-
 	updateTravelPrefsUC := update_travel_prefs.NewUseCase(update_travel_prefs.UseCaseDeps{
 		TravelPrefsRepo: m.travelPrefsRepo,
 		EventPublisher:  cfg.EventBus,
 	})
 	m.updateTravelPrefsHandler = update_travel_prefs.NewHandler(updateTravelPrefsUC)
 
-	updateNotifPrefsUC := update_notif_prefs.NewUseCase(update_notif_prefs.UseCaseDeps{
-		NotifPrefsRepo: m.notifPrefsRepo,
-		EventPublisher: cfg.EventBus,
+	getTravelPrefsUC := get_travel_preferences.NewUseCase(get_travel_preferences.UseCaseDeps{
+		TravelPrefsRepo: m.travelPrefsRepo,
 	})
-	m.updateNotifPrefsHandler = update_notif_prefs.NewHandler(updateNotifPrefsUC)
+	m.getTravelPrefsHandler = get_travel_preferences.NewHandler(getTravelPrefsUC)
 
 	// 9. Inicializar Features Médicas (Phase 3)
 	if m.encryptionService != nil {
@@ -266,19 +222,24 @@ func NewModule(cfg Config) (*Module, error) {
 		})
 		m.updateMedicalProfileHandler = update_medical_profile.NewHandler(updateMedicalProfileUC)
 
-		resolveMedicalPendingUC := resolve_medical_pending.NewUseCase(resolve_medical_pending.UseCaseDeps{
+		resolveMedicalConflictUC := resolve_medical_conflict.NewUseCase(resolve_medical_conflict.UseCaseDeps{
 			MedicalPendingRepo: m.medicalPendingRepo,
 			MedicalProfileRepo: m.medicalProfileRepo,
 			EncryptionService:  m.encryptionService,
 			EventPublisher:     cfg.EventBus,
 		})
-		m.resolveMedicalPendingHandler = resolve_medical_pending.NewHandler(resolveMedicalPendingUC)
+		m.resolveMedicalConflictHandler = resolve_medical_conflict.NewHandler(resolveMedicalConflictUC)
+
+		getMedicalConflictUC := get_medical_conflict.NewUseCase(get_medical_conflict.UseCaseDeps{
+			MedicalPendingRepo: m.medicalPendingRepo,
+		})
+		m.getMedicalConflictHandler = get_medical_conflict.NewHandler(getMedicalConflictUC)
 	}
 
-	listPendingMedicalUC := list_pending_medical.NewUseCase(list_pending_medical.UseCaseDeps{
+	listMedicalConflictsUC := list_medical_conflicts.NewUseCase(list_medical_conflicts.UseCaseDeps{
 		MedicalPendingRepo: m.medicalPendingRepo,
 	})
-	m.listPendingMedicalHandler = list_pending_medical.NewHandler(listPendingMedicalUC)
+	m.listMedicalConflictsHandler = list_medical_conflicts.NewHandler(listMedicalConflictsUC)
 
 	// 10. Inicializar Features de Avatar (Phase 4)
 	if m.r2Storage != nil && cfg.EventBus != nil {
@@ -305,8 +266,12 @@ func NewModule(cfg Config) (*Module, error) {
 	m.documentRepo = docRepo
 
 	// 12. Inicializar OCR service (Phase 5)
-	if cfg.OCRAPIKey != "" {
-		m.ocrService = deepseekocr.NewOCRClient(cfg.OCRAPIKey)
+	if cfg.OCRConfig.APIKey != "" {
+		m.ocrService = deepseekocr.NewOCRClient(
+			cfg.OCRConfig.APIKey,
+			deepseekocr.WithBaseURL(cfg.OCRConfig.BaseURL),
+			deepseekocr.WithModel(cfg.OCRConfig.Model),
+		)
 	}
 
 	// 13. Inicializar Features de Documentos (Phase 5)
@@ -342,13 +307,13 @@ func NewModule(cfg Config) (*Module, error) {
 	})
 	m.getDocumentHandler = get_document.NewHandler(getDocUC)
 
-	// Download Document
+	// Download Document URL — genera URL prefirmada
 	if m.r2Storage != nil {
-		downloadDocUC := download_document.NewUseCase(download_document.UseCaseDeps{
+		downloadDocURLUC := get_document_download_url.NewUseCase(get_document_download_url.UseCaseDeps{
 			DocRepo: docRepo,
 			Storage: m.r2Storage,
 		})
-		m.downloadDocumentHandler = download_document.NewHandler(downloadDocUC)
+		m.downloadDocURLHandler = get_document_download_url.NewHandler(downloadDocURLUC)
 	}
 
 	// Delete Document
@@ -360,71 +325,7 @@ func NewModule(cfg Config) (*Module, error) {
 		m.deleteDocumentHandler = delete_document.NewHandler(deleteDocUC)
 	}
 
-	// Verify Document (admin only)
-	verifyDocUC := verify_document.NewUseCase(verify_document.UseCaseDeps{
-		DocRepo:   docRepo,
-		Dragonfly: cfg.RedisClient,
-	})
-	m.verifyDocumentHandler = verify_document.NewHandler(verifyDocUC)
-
-	// Document Events (SSE)
-	m.documentEventsHandler = document_events.NewHandler(docRepo, cfg.RedisClient)
-
-	// 14. Inicializar Repositorios de Búsquedas y Favoritos (Phase 6)
-	searchRepo := postgres.NewSavedSearchRepository(cfg.PostgresPool)
-	m.savedSearchRepo = searchRepo
-
-	favRepo := postgres.NewFavoriteRepository(cfg.PostgresPool)
-	m.favoriteRepo = favRepo
-
-	// Hash Service (blake3) para deduplicación de búsquedas guardadas
-	hashSvc := hash.NewBlake3Service()
-
-	// 15. Inicializar Features de Búsquedas Guardadas (Phase 6)
-	createSavedSearchUC := create_saved_search.NewUseCase(create_saved_search.UseCaseDeps{
-		SavedSearchRepo: searchRepo,
-		HashService:     hashSvc,
-	})
-	m.createSavedSearchHandler = create_saved_search.NewHandler(createSavedSearchUC)
-
-	listSavedSearchesUC := list_saved_searches.NewUseCase(list_saved_searches.UseCaseDeps{
-		SavedSearchRepo: searchRepo,
-	})
-	m.listSavedSearchesHandler = list_saved_searches.NewHandler(listSavedSearchesUC)
-
-	updateSavedSearchUC := update_saved_search.NewUseCase(update_saved_search.UseCaseDeps{
-		SavedSearchRepo: searchRepo,
-		HashService:     hashSvc,
-	})
-	m.updateSavedSearchHandler = update_saved_search.NewHandler(updateSavedSearchUC)
-
-	deleteSavedSearchUC := delete_saved_search.NewUseCase(delete_saved_search.UseCaseDeps{
-		SavedSearchRepo: searchRepo,
-	})
-	m.deleteSavedSearchHandler = delete_saved_search.NewHandler(deleteSavedSearchUC)
-
-	toggleAlertUC := toggle_alert.NewUseCase(toggle_alert.UseCaseDeps{
-		SavedSearchRepo: searchRepo,
-	})
-	m.toggleAlertHandler = toggle_alert.NewHandler(toggleAlertUC)
-
-	// 16. Inicializar Features de Favoritos (Phase 6)
-	addFavoriteUC := add_favorite.NewUseCase(add_favorite.UseCaseDeps{
-		FavoriteRepo: favRepo,
-	})
-	m.addFavoriteHandler = add_favorite.NewHandler(addFavoriteUC)
-
-	listFavoritesUC := list_favorites.NewUseCase(list_favorites.UseCaseDeps{
-		FavoriteRepo: favRepo,
-	})
-	m.listFavoritesHandler = list_favorites.NewHandler(listFavoritesUC)
-
-	deleteFavoriteUC := delete_favorite.NewUseCase(delete_favorite.UseCaseDeps{
-		FavoriteRepo: favRepo,
-	})
-	m.deleteFavoriteHandler = delete_favorite.NewHandler(deleteFavoriteUC)
-
-	// 17. Inicializar Document Pipelines (Phase 5)
+	// 14. Inicializar Document Pipelines (Phase 5)
 	if cfg.RedisClient != nil && docRepo != nil {
 		// Validator Worker
 		m.validatorWorker = pipeline.NewValidatorWorker(cfg.RedisClient, docRepo, m.r2Storage)
@@ -448,22 +349,18 @@ func NewModule(cfg Config) (*Module, error) {
 		}
 	}
 
-	// 18. Registrar mapeos de errores de dominio
+	// 15. Registrar mapeos de errores de dominio
 	registerUserErrorMappings()
 
 	slog.Info("User module initialized",
 		"features", []string{
-			"upsert_profile", "get_profile", "update_profile", "update_locale",
-			"update_travel_prefs", "update_notif_prefs",
+			"upsert_profile", "get_profile", "update_profile",
+			"update_travel_prefs", "get_travel_preferences",
 			"get_medical_profile", "update_medical_profile",
-			"list_pending_medical", "resolve_medical_pending",
+			"list_medical_conflicts", "get_medical_conflict", "resolve_medical_conflict",
 			"upload_avatar", "confirm_avatar_upload",
 			"upload_document", "document_types", "list_documents",
-			"get_document", "download_document", "delete_document",
-			"verify_document", "document_events",
-			"create_saved_search", "list_saved_searches", "update_saved_search",
-			"delete_saved_search", "toggle_alert",
-			"add_favorite", "list_favorites", "delete_favorite",
+			"get_document", "get_document_download_url", "delete_document",
 		},
 		"consumer", "user-event-consumer",
 		"pipelines", []string{
@@ -478,85 +375,62 @@ func NewModule(cfg Config) (*Module, error) {
 // authMW es el middleware de autenticación (cookie-based).
 // publicG es el grupo sin middleware de auth para rutas públicas.
 func (m *Module) RegisterRoutes(g *echo.Group, publicG *echo.Group, authMW echo.MiddlewareFunc) {
+	_ = authMW // auth ya se aplica a nivel de grupo en bootstrap/app.go
+
 	// Phase 2
-	g.GET("/profile", m.getProfileHandler.Handle, authMW)
-	g.PUT("/profile", m.updateProfileHandler.Handle, authMW)
-	g.PUT("/profile/locale", m.updateLocaleHandler.Handle, authMW)
-	g.PUT("/profile/travel-preferences", m.updateTravelPrefsHandler.Handle, authMW)
-	g.PUT("/profile/notifications", m.updateNotifPrefsHandler.Handle, authMW)
+	g.GET("/profile", m.getProfileHandler.Handle)
+	g.PATCH("/profile", m.updateProfileHandler.Handle)
+	g.PATCH("/profile/travel-preferences", m.updateTravelPrefsHandler.Handle)
+
+	// GET travel preferences
+	if m.getTravelPrefsHandler != nil {
+		g.GET("/profile/travel-preferences", m.getTravelPrefsHandler.Handle)
+	}
 
 	// Phase 3 — Medical
 	// GetMedicalProfile y UpdateMedicalProfile requieren encriptación
 	if m.getMedicalProfileHandler != nil {
-		g.GET("/profile/medical", m.getMedicalProfileHandler.Handle, authMW)
-		g.PUT("/profile/medical", m.updateMedicalProfileHandler.Handle, authMW)
-		g.POST("/profile/medical/pending/resolve", m.resolveMedicalPendingHandler.Handle, authMW)
+		g.GET("/profile/medical", m.getMedicalProfileHandler.Handle)
+		g.PATCH("/profile/medical", m.updateMedicalProfileHandler.Handle)
 	}
-	// ListPendingMedicalHandler NO requiere encriptación — gate independiente
-	if m.listPendingMedicalHandler != nil {
-		g.GET("/profile/medical/pending", m.listPendingMedicalHandler.Handle, authMW)
+	// Medical conflicts — requiere encriptación para resolve, no para list/get
+	if m.getMedicalConflictHandler != nil {
+		g.GET("/profile/medical-conflicts/:conflict_id", m.getMedicalConflictHandler.Handle)
+		g.POST("/profile/medical-conflicts/:conflict_id/resolve", m.resolveMedicalConflictHandler.Handle)
+	}
+	// ListMedicalConflictsHandler NO requiere encriptación — gate independiente
+	if m.listMedicalConflictsHandler != nil {
+		g.GET("/profile/medical-conflicts", m.listMedicalConflictsHandler.Handle)
 	}
 
 	// Phase 4 — Avatar
 	if m.uploadAvatarHandler != nil {
-		g.POST("/profile/avatar", m.uploadAvatarHandler.Handle, authMW)
+		g.POST("/profile/avatar", m.uploadAvatarHandler.Handle)
 	}
 	if m.confirmAvatarUploadHandler != nil {
-		g.POST("/profile/avatar/confirm", m.confirmAvatarUploadHandler.Handle, authMW)
+		g.POST("/profile/avatar/confirm", m.confirmAvatarUploadHandler.Handle)
 	}
 
 	// Phase 5 — Documentos
-	// GET /documents/types — público, sin auth
+	// GET /profile/documents/types — público, sin auth
 	if m.documentTypesHandler != nil {
-		publicG.GET("/documents/types", m.documentTypesHandler.Handle)
+		publicG.GET("/profile/documents/types", m.documentTypesHandler.Handle)
 	}
 	// Resto de endpoints de documentos requieren auth
 	if m.uploadDocumentHandler != nil {
-		g.POST("/documents", m.uploadDocumentHandler.Handle, authMW)
+		g.POST("/profile/documents", m.uploadDocumentHandler.Handle)
 	}
 	if m.listDocumentsHandler != nil {
-		g.GET("/documents", m.listDocumentsHandler.Handle, authMW)
+		g.GET("/profile/documents", m.listDocumentsHandler.Handle)
 	}
 	if m.getDocumentHandler != nil {
-		g.GET("/documents/:document_id", m.getDocumentHandler.Handle, authMW)
+		g.GET("/profile/documents/:document_id", m.getDocumentHandler.Handle)
 	}
-	if m.downloadDocumentHandler != nil {
-		g.GET("/documents/:document_id/download", m.downloadDocumentHandler.Handle, authMW)
+	if m.downloadDocURLHandler != nil {
+		g.GET("/profile/documents/:document_id/download-url", m.downloadDocURLHandler.Handle)
 	}
 	if m.deleteDocumentHandler != nil {
-		g.DELETE("/documents/:document_id", m.deleteDocumentHandler.Handle, authMW)
-	}
-	if m.verifyDocumentHandler != nil {
-		g.PUT("/documents/:document_id/verify", m.verifyDocumentHandler.Handle, authMW, middleware.RequireAdmin())
-	}
-	if m.documentEventsHandler != nil {
-		g.GET("/documents/:document_id/events", m.documentEventsHandler.Handle, authMW)
-	}
-
-	// Phase 6 — Búsquedas Guardadas y Favoritos
-	if m.createSavedSearchHandler != nil {
-		g.POST("/saved-searches", m.createSavedSearchHandler.Handle, authMW)
-	}
-	if m.listSavedSearchesHandler != nil {
-		g.GET("/saved-searches", m.listSavedSearchesHandler.Handle, authMW)
-	}
-	if m.updateSavedSearchHandler != nil {
-		g.PUT("/saved-searches/:search_id", m.updateSavedSearchHandler.Handle, authMW)
-	}
-	if m.deleteSavedSearchHandler != nil {
-		g.DELETE("/saved-searches/:search_id", m.deleteSavedSearchHandler.Handle, authMW)
-	}
-	if m.toggleAlertHandler != nil {
-		g.PUT("/saved-searches/:search_id/alert", m.toggleAlertHandler.Handle, authMW)
-	}
-	if m.addFavoriteHandler != nil {
-		g.POST("/favorites", m.addFavoriteHandler.Handle, authMW)
-	}
-	if m.listFavoritesHandler != nil {
-		g.GET("/favorites", m.listFavoritesHandler.Handle, authMW)
-	}
-	if m.deleteFavoriteHandler != nil {
-		g.DELETE("/favorites/:favorite_id", m.deleteFavoriteHandler.Handle, authMW)
+		g.DELETE("/profile/documents/:document_id", m.deleteDocumentHandler.Handle)
 	}
 }
 
@@ -658,8 +532,6 @@ func registerUserErrorMappings() {
 			return serrors.ErrNotFound("Perfil médico no encontrado", err)
 		case errors.Is(err, domain.ErrTravelPrefsNotFound):
 			return serrors.ErrNotFound("Preferencias de viaje no encontradas", err)
-		case errors.Is(err, domain.ErrNotifPrefsNotFound):
-			return serrors.ErrNotFound("Preferencias de notificación no encontradas", err)
 
 		case errors.Is(err, domain.ErrInvalidGender):
 			return serrors.ErrBadRequest("Género inválido. Valores permitidos: male, female, non_binary, prefer_not_to_say", err)
@@ -677,10 +549,6 @@ func registerUserErrorMappings() {
 			return serrors.ErrBadRequest("Clase de cabina inválida. Valores permitidos: economy, premium_economy, business, first", err)
 		case errors.Is(err, domain.ErrInvalidSeatPreference):
 			return serrors.ErrBadRequest("Preferencia de asiento inválida. Valores permitidos: window, aisle, middle, no_preference", err)
-		case errors.Is(err, domain.ErrInvalidChannel):
-			return serrors.ErrBadRequest("Canal de notificación inválido. Valores permitidos: email, sms, websocket", err)
-		case errors.Is(err, domain.ErrInvalidNotificationType):
-			return serrors.ErrBadRequest("Tipo de notificación inválido. Valores permitidos: booking_confirmation, flight_reminder, promotional", err)
 		case errors.Is(err, domain.ErrInvalidBloodType):
 			return serrors.ErrBadRequest("Tipo de sangre inválido", err)
 
@@ -708,18 +576,6 @@ func registerUserErrorMappings() {
 			return serrors.ErrConflict("El documento ya fue subido previamente", err)
 		case errors.Is(err, domain.ErrRateLimitExceeded):
 			return serrors.ErrTooManyRequests("Límite de subidas por minuto excedido. Intente nuevamente en 60 segundos.", err)
-
-		case errors.Is(err, domain.ErrSearchNotFound):
-			return serrors.ErrNotFound("Búsqueda guardada no encontrada", err)
-		case errors.Is(err, domain.ErrDuplicateSavedSearch):
-			return serrors.ErrConflict("Ya existe una búsqueda idéntica guardada", err)
-
-		case errors.Is(err, domain.ErrFavoriteNotFound):
-			return serrors.ErrNotFound("Favorito no encontrado", err)
-		case errors.Is(err, domain.ErrDuplicateFavorite):
-			return serrors.ErrConflict("El favorito ya existe para esta entidad", err)
-		case errors.Is(err, domain.ErrInvalidFavoriteEntityType):
-			return serrors.ErrBadRequest("Tipo de entidad favorita inválido. Valores permitidos: hotel, flight, activity", err)
 
 		case errors.Is(err, domain.ErrPendingUpdateNotFound):
 			return serrors.ErrNotFound("Actualización pendiente no encontrada", err)

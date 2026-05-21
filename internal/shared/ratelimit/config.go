@@ -19,6 +19,7 @@ type RateLimitConfig struct {
 	GlobalPerMinute        int
 	AuthenticatedPerMinute int
 	AnonymousPerMinute     int
+	AdminPerMinute         int
 	Providers              map[string]ProviderLimit
 }
 
@@ -36,6 +37,7 @@ func DefaultConfig() *RateLimitConfig {
 		GlobalPerMinute:        100,
 		AuthenticatedPerMinute: 10,
 		AnonymousPerMinute:     5,
+		AdminPerMinute:         30,
 		Providers:              maps.Clone(DefaultProviderLimits),
 	}
 }
@@ -51,6 +53,9 @@ func LoadRateLimitConfig() *RateLimitConfig {
 	}
 	if v := getEnvInt("RATELIMIT_ANON_PER_MINUTE"); v > 0 {
 		cfg.AnonymousPerMinute = v
+	}
+	if v := getEnvInt("RATELIMIT_ADMIN_PER_MINUTE"); v > 0 {
+		cfg.AdminPerMinute = v
 	}
 
 	// Scan env vars once — overrides defaults AND discovers new providers.

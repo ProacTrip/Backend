@@ -12,7 +12,7 @@ import (
 	"github.com/ProacTrip/Backend/internal/modules/environment/adapters/openweather"
 	"github.com/ProacTrip/Backend/internal/modules/environment/domain"
 	"github.com/ProacTrip/Backend/internal/modules/environment/features/get_environment"
-	"github.com/ProacTrip/Backend/internal/modules/environment/features/shared"
+	"github.com/ProacTrip/Backend/internal/modules/environment/adapters/resolver"
 	serrors "github.com/ProacTrip/Backend/internal/shared/errors"
 	"github.com/ProacTrip/Backend/internal/shared/ratelimit"
 )
@@ -23,7 +23,7 @@ type Module struct {
 	// EnvironmentResolver adapta el proveedor de geo-IP para el caso de uso
 	// de registro del módulo auth (resuelve moneda/idioma/país/timezone desde IP).
 	// Exportado para que bootstrap lo inyecte en la configuración del módulo auth.
-	EnvironmentResolver *shared.EnvironmentResolverAdapter
+	EnvironmentResolver *resolver.EnvironmentResolverAdapter
 
 	// wg contabiliza las goroutines fire-and-forget (escrituras asíncronas en caché).
 	// Expuesto para que bootstrap llame a wg.Wait() durante el graceful shutdown.
@@ -33,6 +33,7 @@ type Module struct {
 type Config struct {
 	OpenWeatherAPIKey   string
 	OpenWeatherCacheTTL time.Duration
+	OpenWeatherTimeout  time.Duration
 	IpQueryBaseURL      string
 	Cache               get_environment.Cache
 	RateLimiter         *ratelimit.RateLimiter
@@ -72,7 +73,10 @@ func NewModule(cfg Config) *Module {
 	var wg sync.WaitGroup
 
 	ipQueryClient := ipquery.NewClient(cfg.IpQueryBaseURL, ipQueryTimeout, ipQueryMaxRetries)
-	openWeatherClient := openweather.NewClient(cfg.OpenWeatherAPIKey)
+	if cfg.OpenWeatherTimeout <= 0 {
+		cfg.OpenWeatherTimeout = 10 * time.Second
+	}
+	openWeatherClient := openweather.NewClient(cfg.OpenWeatherAPIKey, cfg.OpenWeatherTimeout)
 
 	if cfg.RateLimiter == nil {
 		slog.Warn("Módulo environment: RateLimiter es nil — rate limiting deshabilitado para clima (usando noop)")
@@ -85,21 +89,22 @@ func NewModule(cfg Config) *Module {
 	}
 
 	getEnvironmentUC := get_environment.NewUseCase(get_environment.UseCaseDeps{
-		LocationProvider:   ipQueryClient,
-		WeatherProvider:    openWeatherClient,
-		Cache:              cfg.Cache,
-		RateLimiter:        cfg.RateLimiter,
-		CacheTTL:           cfg.OpenWeatherCacheTTL,
-		DefaultCountryCode: defaultCountryCode,
-		DefaultCurrency:    defaultCurrency,
-		WG:                 &wg,
+		LocationProvider:    ipQueryClient,
+		WeatherProvider:     openWeatherClient,
+		Cache:               cfg.Cache,
+		RateLimiter:         cfg.RateLimiter,
+		WeatherCacheTTL:     cfg.OpenWeatherCacheTTL,
+		IpQueryCacheTTL:     24 * time.Hour,
+		DefaultCountryCode:  defaultCountryCode,
+		DefaultCurrency:     defaultCurrency,
+		WG:                  &wg,
 	})
 
 	getEnvironmentHandler := get_environment.NewHandler(getEnvironmentUC)
 
 	// Crear el adaptador resolver para el wiring del registro en auth.
 	// El adaptador usa el mismo cliente IP query (sin llamadas HTTP extra).
-	resolverAdapter := shared.NewEnvironmentResolverAdapter(ipQueryClient)
+	resolverAdapter := resolver.NewEnvironmentResolverAdapter(ipQueryClient)
 
 	// Registrar mapeos de errores de dominio → HTTP RFC 9457
 	registerEnvironmentErrors()

@@ -18,9 +18,9 @@ type ProfileRepository interface {
 	GetByUserID(ctx context.Context, userID uuid.UUID) (*UserProfile, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*UserProfile, error)
 	Update(ctx context.Context, profile *UserProfile) error
-	UpdateLocale(ctx context.Context, userID uuid.UUID, timezone, language, currency, currentLocation string) error
+	UpdateLocale(ctx context.Context, userID uuid.UUID, language, currency string) error
 	UpdateAvatar(ctx context.Context, userID uuid.UUID, avatarURL string) error
-	UpdatePreferences(ctx context.Context, userID uuid.UUID, timezone, language, currency string, isPublic bool) error
+	UpdatePreferences(ctx context.Context, userID uuid.UUID, language, currency string) error
 }
 
 // =============================================================================
@@ -52,18 +52,8 @@ type MedicalPendingUpdateRepository interface {
 	GetByUserID(ctx context.Context, userID uuid.UUID) ([]*MedicalPendingUpdate, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*MedicalPendingUpdate, error)
 	Resolve(ctx context.Context, id uuid.UUID, status MedicalPendingUpdateStatus) error
+	ListByUserID(ctx context.Context, userID uuid.UUID, status *MedicalPendingUpdateStatus) ([]*MedicalPendingUpdate, error)
 	CountPending(ctx context.Context, userID uuid.UUID) (int, error)
-}
-
-// =============================================================================
-// NotificationPrefsRepository — Preferencias de notificación
-// =============================================================================
-
-type NotificationPrefsRepository interface {
-	Create(ctx context.Context, pref *NotificationPreference) error
-	GetByUserID(ctx context.Context, userID uuid.UUID) ([]*NotificationPreference, error)
-	Upsert(ctx context.Context, pref *NotificationPreference) error
-	Delete(ctx context.Context, userID uuid.UUID, channel NotificationChannel, notifType NotificationType) error
 }
 
 // =============================================================================
@@ -77,30 +67,6 @@ type DocumentRepository interface {
 	Update(ctx context.Context, doc *UserDocument) error
 	Delete(ctx context.Context, id uuid.UUID) error
 	GetTypes(ctx context.Context) ([]DocumentType, error)
-}
-
-// =============================================================================
-// SavedSearchRepository — Búsquedas guardadas
-// =============================================================================
-
-type SavedSearchRepository interface {
-	Create(ctx context.Context, search *SavedSearch) error
-	GetByUserID(ctx context.Context, userID uuid.UUID) ([]*SavedSearch, error)
-	GetByHash(ctx context.Context, userID uuid.UUID, searchHash string) (*SavedSearch, error)
-	GetByID(ctx context.Context, id uuid.UUID) (*SavedSearch, error)
-	Update(ctx context.Context, search *SavedSearch) error
-	Delete(ctx context.Context, id uuid.UUID) error
-	SetAlertEnabled(ctx context.Context, id uuid.UUID, enabled bool) error
-}
-
-// =============================================================================
-// FavoriteRepository — Favoritos de usuario
-// =============================================================================
-
-type FavoriteRepository interface {
-	Create(ctx context.Context, fav *Favorite) error
-	GetByUserID(ctx context.Context, userID uuid.UUID) ([]*Favorite, error)
-	Delete(ctx context.Context, id uuid.UUID) error
 }
 
 // =============================================================================

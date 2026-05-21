@@ -44,11 +44,11 @@ func TestStorageKeyHelpers(t *testing.T) {
 }
 
 func TestBucketConstants(t *testing.T) {
-	if BucketSecure != "proactrip-secure" {
-		t.Errorf("BucketSecure = %s, se esperaba proactrip-secure", BucketSecure)
+	if SecureBucket() != "proactrip-secure" {
+		t.Errorf("SecureBucket = %s, se esperaba proactrip-secure", SecureBucket())
 	}
-	if BucketAssets != "proactrip-assets" {
-		t.Errorf("BucketAssets = %s, se esperaba proactrip-assets", BucketAssets)
+	if AssetsBucket() != "proactrip-assets" {
+		t.Errorf("AssetsBucket = %s, se esperaba proactrip-assets", AssetsBucket())
 	}
 }
 

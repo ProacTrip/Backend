@@ -38,7 +38,6 @@ type FlightSearchRequest struct {
 	Arrival                 string         `json:"arrival,omitzero"`
 	OutboundDate            string         `json:"outbound_date,omitzero"`
 	ReturnDate              string         `json:"return_date,omitzero"`
-	Legs                    []MultiCityLeg `json:"legs,omitzero"`
 	Adults                  int            `json:"adults,omitzero"`
 	Children                int            `json:"children,omitzero"`
 	InfantsInSeat           int            `json:"infants_in_seat,omitzero"`
@@ -80,14 +79,6 @@ type TimeRange struct {
 type LayoverRange struct {
 	MinMinutes int `json:"min_minutes"`
 	MaxMinutes int `json:"max_minutes"`
-}
-
-// MultiCityLeg representa un tramo en una búsqueda multi-ciudad.
-type MultiCityLeg struct {
-	Departure string     `json:"departure"`
-	Arrival   string     `json:"arrival"`
-	Date      string     `json:"date"`
-	Times     *TimeRange `json:"times,omitzero"`
 }
 
 // =============================================================================

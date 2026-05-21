@@ -13,7 +13,7 @@ import (
 type Command struct {
 	Email     string `json:"email"`
 	Password  string `json:"password"`
-	FirstName string `json:"first_name,omitempty"` // Opcional: se pasa al perfil y al email de verificación
+	FirstName string `json:"first_name"` // Requerido: se pasa al perfil y al email de verificación
 }
 
 // Validate valida los campos del comando de registro.
@@ -25,6 +25,12 @@ func (c *Command) Validate() error {
 	}
 	if _, err := mail.ParseAddress(c.Email); err != nil {
 		return fmt.Errorf("%w: invalid email format", domain.ErrInvalidEmail)
+	}
+	if c.FirstName == "" {
+		return fmt.Errorf("%w: first_name is required", domain.ErrInvalidInput)
+	}
+	if len(c.FirstName) > 100 {
+		return fmt.Errorf("%w: first_name must be at most 100 characters", domain.ErrInvalidInput)
 	}
 	if c.Password == "" {
 		return fmt.Errorf("%w: password is required", domain.ErrInvalidInput)
@@ -69,10 +75,8 @@ func validatePasswordFormat(password string) error {
 
 // =============================================================================
 // Response - DTO de salida del registro
-// Según AUTH_API.md: solo message en JSON, tokens van en cookies
+// Según AUTH_API.md: solo message en JSON, sin tokens ni cookies.
 
 type Response struct {
-	Message      string `json:"message"`
-	AccessToken  string `json:"-"` // Para Set-Cookie, no en JSON
-	RefreshToken string `json:"-"` // Para Set-Cookie, no en JSON
+	Message string `json:"message"`
 }

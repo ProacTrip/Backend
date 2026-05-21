@@ -1,4 +1,4 @@
-// Handler HTTP para PUT /v1/user/profile/travel-preferences.
+// Handler HTTP para PATCH /v1/user/profile/travel-preferences.
 package update_travel_prefs
 
 import (
@@ -39,5 +39,5 @@ func (h *Handler) Handle(c *echo.Context) error {
 		return httperr.MapError(c, err)
 	}
 
-	return c.JSON(http.StatusOK, map[string]string{"message": "Preferencias de viaje actualizadas correctamente"})
+	return c.JSON(http.StatusOK, map[string]string{"message": "Preferencias de viaje actualizadas correctamente."})
 }

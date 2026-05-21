@@ -15,6 +15,7 @@ type WeatherData struct {
 }
 
 // WeatherProvider es el puerto para obtener el clima actual de una ubicación.
+// units determina la unidad de temperatura: "metric" (Celsius) o "imperial" (Fahrenheit).
 type WeatherProvider interface {
-	GetCurrentWeather(ctx context.Context, lat, lon float64, lang string) (*WeatherData, error)
+	GetCurrentWeather(ctx context.Context, lat, lon float64, lang, units string) (*WeatherData, error)
 }

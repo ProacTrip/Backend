@@ -25,7 +25,6 @@ type UseCase struct {
 	repo        domain.ProfileRepository
 	travelRepo  domain.TravelPrefsRepository
 	medicalRepo domain.MedicalProfileRepository
-	notifRepo   domain.NotificationPrefsRepository
 	rdb         *redis.Client // optional — for populating profile prefs cache
 }
 
@@ -40,20 +39,18 @@ func NewUseCaseWithCache(repo domain.ProfileRepository, rdb *redis.Client) *UseC
 }
 
 // NewUseCaseComplete creates a UseCase that populates all related tables
-// (travel prefs, medical profile, notification prefs) on profile creation.
+// (travel prefs, medical profile) on profile creation.
 // Repos may be nil for backward compat — defaults are skipped silently.
 func NewUseCaseComplete(
 	repo domain.ProfileRepository,
 	travelRepo domain.TravelPrefsRepository,
 	medicalRepo domain.MedicalProfileRepository,
-	notifRepo domain.NotificationPrefsRepository,
 	rdb *redis.Client,
 ) *UseCase {
 	return &UseCase{
 		repo:        repo,
 		travelRepo:  travelRepo,
 		medicalRepo: medicalRepo,
-		notifRepo:   notifRepo,
 		rdb:         rdb,
 	}
 }
@@ -78,14 +75,12 @@ func (uc *UseCase) Execute(ctx context.Context, userID uuid.UUID, email string, 
 		profile.SetAvatar(new(avatarURL))
 	}
 
-	// Override with environment prefs if provided
+	// Override with environment prefs if provided (language and currency only)
 	if len(envPrefs) > 0 && envPrefs[0].HasAny() {
 		prefs := envPrefs[0]
 		profile.SetPreferences(
-			new(prefs.TimezoneName),
 			new(prefs.LanguageCode),
 			new(prefs.CurrencyCode),
-			false,
 		)
 	}
 
@@ -127,23 +122,6 @@ func (uc *UseCase) createDefaults(ctx context.Context, userID uuid.UUID) {
 			)
 		}
 	}
-
-	if uc.notifRepo != nil {
-		np1 := domain.NewNotificationPreference(userID, domain.NotifChannelEmail, domain.NotifTypeBookingConfirmation)
-		if err := uc.notifRepo.Upsert(ctx, np1); err != nil {
-			slog.WarnContext(ctx, "create notif pref default failed",
-				slog.String("user_id", userID.String()),
-				slog.String("error", err.Error()),
-			)
-		}
-		np2 := domain.NewNotificationPreference(userID, domain.NotifChannelEmail, domain.NotifTypeFlightReminder)
-		if err := uc.notifRepo.Upsert(ctx, np2); err != nil {
-			slog.WarnContext(ctx, "create notif pref default failed",
-				slog.String("user_id", userID.String()),
-				slog.String("error", err.Error()),
-			)
-		}
-	}
 }
 
 // populatePrefsCache stores profile preferences in Dragonfly for future search
@@ -160,8 +138,7 @@ func (uc *UseCase) populatePrefsCache(ctx context.Context, userID uuid.UUID, pro
 	if err := sharedUser.SetProfilePrefs(bgCtx, uc.rdb, userID.String(), &sharedUser.Prefs{
 		Currency: profile.CurrencyCode,
 		Language: profile.LanguageCode,
-		// country_code not stored in profile — cache reads it from registration event
-		Timezone: profile.TimezoneName,
+		// country_code and timezone not stored in profile — cache reads them from registration event
 	}); err != nil {
 		slog.WarnContext(bgCtx, "populate profile prefs cache failed",
 			slog.String("user_id", userID.String()),
@@ -201,7 +178,7 @@ func (uc *UseCase) SetAvatar(ctx context.Context, userID uuid.UUID, avatarURL st
 	return uc.repo.UpdateAvatar(ctx, userID, avatarURL)
 }
 
-// UpdatePreferences actualiza las preferencias del perfil
-func (uc *UseCase) UpdatePreferences(ctx context.Context, userID uuid.UUID, timezone, language, currency string, isPublic bool) error {
-	return uc.repo.UpdatePreferences(ctx, userID, timezone, language, currency, isPublic)
+// UpdatePreferences actualiza las preferencias del perfil (language y currency).
+func (uc *UseCase) UpdatePreferences(ctx context.Context, userID uuid.UUID, language, currency string) error {
+	return uc.repo.UpdatePreferences(ctx, userID, language, currency)
 }

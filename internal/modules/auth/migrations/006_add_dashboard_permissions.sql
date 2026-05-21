@@ -1,5 +1,13 @@
 -- +migrate Up
--- Add dashboard permissions that were defined in code but never seeded
+-- =============================================================================
+-- MIGRACIÓN 006: Permisos del dashboard de administración
+-- =============================================================================
+-- Agrega los permisos para las features del dashboard que se definieron
+-- en código pero no estaban en la migración inicial (001):
+--   feature_limits — ver y gestionar límites de features por usuario/rol
+--   permissions    — ver y gestionar permisos RBAC
+-- Ambos se asignan automáticamente al rol admin.
+-- =============================================================================
 
 INSERT INTO permissions(resource, action, description) VALUES
     ('feature_limits', 'read', 'Ver límites de features'),
@@ -21,6 +29,7 @@ WHERE r.name = 'admin'
   );
 
 -- +migrate Down
+-- Revierte: quita los permisos del admin y los elimina del catálogo.
 DELETE FROM role_permissions rp
 USING roles r, permissions p
 WHERE rp.role_id = r.id 

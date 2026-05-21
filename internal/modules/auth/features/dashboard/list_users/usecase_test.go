@@ -218,9 +218,9 @@ func TestValidate_InvalidStatus(t *testing.T) {
 	}
 }
 
-// TestValidate_AllValidStatuses accepts every status in the CHECK constraint.
+// TestValidate_AllValidStatuses accepts only the 3 public status values.
 func TestValidate_AllValidStatuses(t *testing.T) {
-	validStatuses := []string{"active", "inactive", "suspended", "pending_verification", "locked", "disabled"}
+	validStatuses := []string{"unverified", "active", "disabled"}
 	for _, s := range validStatuses {
 		t.Run("status="+s, func(t *testing.T) {
 			cmd := listusers.Command{Status: s, Limit: 10}

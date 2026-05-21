@@ -4,9 +4,6 @@
 //	GET    /v1/dashboard/users/:id/feature-limits
 //	POST   /v1/dashboard/users/:id/feature-limits
 //	DELETE /v1/dashboard/users/:id/feature-limits/:key
-//	GET    /v1/dashboard/roles/:id/feature-limits
-//	POST   /v1/dashboard/roles/:id/feature-limits
-//	DELETE /v1/dashboard/roles/:id/feature-limits/:key
 package feature_limits
 
 import (
@@ -81,11 +78,16 @@ func (h *Handler) HandleSetUserLimit(c *echo.Context) error {
 		LimitValue: body.LimitValue,
 		Window:     body.Window,
 	}
-	resp, err := h.usecase.SetUserLimit(c.Request().Context(), cmd)
+	resp, isCreated, err := h.usecase.SetUserLimit(c.Request().Context(), cmd)
 	if err != nil {
 		return httperr.MapError(c, err)
 	}
-	return c.JSON(http.StatusCreated, resp)
+
+	statusCode := http.StatusOK
+	if isCreated {
+		statusCode = http.StatusCreated
+	}
+	return c.JSON(statusCode, resp)
 }
 
 // HandleDeleteUserLimit elimina un límite de feature de un usuario.
@@ -103,72 +105,6 @@ func (h *Handler) HandleDeleteUserLimit(c *echo.Context) error {
 		FeatureKey: featureKey,
 	}
 	if delErr := h.usecase.DeleteUserLimit(c.Request().Context(), cmd); delErr != nil {
-		return httperr.MapError(c, delErr)
-	}
-	return c.NoContent(http.StatusNoContent)
-}
-
-// =============================================================================
-// Role Defaults Handlers
-// =============================================================================
-
-// HandleGetRoleDefaults lista los defaults de feature de un rol.
-// Route: GET /v1/dashboard/roles/:id/feature-limits
-func (h *Handler) HandleGetRoleDefaults(c *echo.Context) error {
-	roleID, err := echo.PathParam[uuid.UUID](c, "id")
-	if err != nil {
-		return httperr.MapError(c, err)
-	}
-
-	cmd := GetRoleDefaultsCommand{RoleID: roleID}
-	resp, err := h.usecase.GetRoleDefaults(c.Request().Context(), cmd)
-	if err != nil {
-		return httperr.MapError(c, err)
-	}
-	return c.JSON(http.StatusOK, resp)
-}
-
-// HandleSetRoleDefault crea o actualiza un default de feature para un rol.
-// Route: POST /v1/dashboard/roles/:id/feature-limits
-func (h *Handler) HandleSetRoleDefault(c *echo.Context) error {
-	roleID, err := echo.PathParam[uuid.UUID](c, "id")
-	if err != nil {
-		return httperr.MapError(c, err)
-	}
-
-	var body limitRequestBody
-	if bindErr := c.Bind(&body); bindErr != nil {
-		return httperr.MapError(c, bindErr)
-	}
-
-	cmd := SetRoleDefaultCommand{
-		RoleID:     roleID,
-		FeatureKey: body.FeatureKey,
-		LimitValue: body.LimitValue,
-		Window:     body.Window,
-	}
-	resp, err := h.usecase.SetRoleDefault(c.Request().Context(), cmd)
-	if err != nil {
-		return httperr.MapError(c, err)
-	}
-	return c.JSON(http.StatusCreated, resp)
-}
-
-// HandleDeleteRoleDefault elimina un default de feature de un rol.
-// Route: DELETE /v1/dashboard/roles/:id/feature-limits/:key
-func (h *Handler) HandleDeleteRoleDefault(c *echo.Context) error {
-	roleID, err := echo.PathParam[uuid.UUID](c, "id")
-	if err != nil {
-		return httperr.MapError(c, err)
-	}
-
-	featureKey := c.Param("key")
-
-	cmd := DeleteRoleDefaultCommand{
-		RoleID:     roleID,
-		FeatureKey: featureKey,
-	}
-	if delErr := h.usecase.DeleteRoleDefault(c.Request().Context(), cmd); delErr != nil {
 		return httperr.MapError(c, delErr)
 	}
 	return c.NoContent(http.StatusNoContent)

@@ -1,7 +1,6 @@
 package register
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -10,7 +9,6 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/ProacTrip/Backend/internal/modules/auth/adapters/token"
 	"github.com/ProacTrip/Backend/internal/modules/auth/domain"
 	serrors "github.com/ProacTrip/Backend/internal/shared/errors"
 )
@@ -36,38 +34,30 @@ func init() {
 }
 
 // =============================================================================
-// Test: handler captures IP from c.RealIP() and passes it to usecase.Execute()
-// Verifies that envIP reaches the EnvironmentResolver.ResolveDefaults call.
+// Test: handler acepta petición válida y retorna 201 Created.
+// El usecase ya no resuelve environment defaults — el evento se publica
+// con campos de entorno vacíos. El user consumer los resuelve por su cuenta.
 // =============================================================================
 
-func TestHandler_PassesRealIPToUseCase(t *testing.T) {
+func TestHandler_ValidRequest_ReturnsCreated(t *testing.T) {
 	e := echo.New()
 
 	repo := newMockUserRepo()
 	publisher := &mockEventPublisher{}
 
-	// resolverSpy records the IP it received — proving the handler passed it correctly
-	resolverSpy := &resolverSpy{
-		currency:    "ARS",
-		language:    "es",
-		countryCode: "AR",
-		timezone:    "America/Argentina/Buenos_Aires",
-	}
-
 	uc := NewUseCase(UseCaseDeps{
 		Repo:           repo,
-		VerifySvc:      &mockVerificationService{token: "vt-realip"},
+		VerifySvc:      &mockVerificationService{token: "vt-valid"},
 		Hasher:         &mockPasswordHasher{},
-		TokenSvc:       &mockTokenService{pair: &token.TokenPair{AccessToken: "at", RefreshToken: "rt"}},
 		EventPublisher: publisher,
-		EnvResolver:    resolverSpy,
 	})
 
 	handler := NewHandler(uc)
 
-	body := `{"email":"realip@test.com","password":"Password123!"}`
+	body := `{"email":"valid@test.com","password":"Password123!","first_name":"Juan"}`
 	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	req.Header.Set("Idempotency-Key", "019d5439-cb43-716d-90b5-51dcbe980908")
 	req.RemoteAddr = "203.0.113.42:54321"
 
 	rec := httptest.NewRecorder()
@@ -78,63 +68,37 @@ func TestHandler_PassesRealIPToUseCase(t *testing.T) {
 		t.Fatalf("Handle() unexpected error: %v", err)
 	}
 
-	// Verify the resolver received the correct client IP
-	if !resolverSpy.called {
-		t.Fatal("EnvironmentResolver.ResolveDefaults was not called")
-	}
-	if resolverSpy.lastIP != "203.0.113.42" {
-		t.Errorf("resolver received IP %q, want %q", resolverSpy.lastIP, "203.0.113.42")
+	if rec.Code != http.StatusCreated {
+		t.Errorf("status code = %d, want %d. Body: %s", rec.Code, http.StatusCreated, rec.Body.String())
 	}
 
-	// Verify env fields are in the published event payload
+	// Verify event was published
 	if len(publisher.published) != 1 {
 		t.Fatalf("expected 1 published event, got %d", len(publisher.published))
-	}
-	payload := publisher.published[0].payload
-	if payload["language_code"] != "es" {
-		t.Errorf("language_code = %q, want %q", payload["language_code"], "es")
-	}
-	if payload["currency_code"] != "ARS" {
-		t.Errorf("currency_code = %q, want %q", payload["currency_code"], "ARS")
-	}
-	if payload["country_code"] != "AR" {
-		t.Errorf("country_code = %q, want %q", payload["country_code"], "AR")
-	}
-	if payload["timezone_name"] != "America/Argentina/Buenos_Aires" {
-		t.Errorf("timezone_name = %q, want %q", payload["timezone_name"], "America/Argentina/Buenos_Aires")
-	}
-
-	if rec.Code != http.StatusCreated {
-		t.Errorf("status code = %d, want %d", rec.Code, http.StatusCreated)
 	}
 }
 
 // =============================================================================
-// Test: handler with missing body returns validation error
-// (regression — IP capture doesn't break existing validation flow)
+// Test: handler rechaza petición sin Idempotency-Key.
 // =============================================================================
 
-func TestHandler_MissingBody_ReturnsError(t *testing.T) {
+func TestHandler_MissingIdempotencyKey_ReturnsError(t *testing.T) {
 	e := echo.New()
 
 	repo := newMockUserRepo()
-	publisher := &mockEventPublisher{}
-	resolverSpy := &resolverSpy{}
 
 	uc := NewUseCase(UseCaseDeps{
-		Repo:           repo,
-		VerifySvc:      &mockVerificationService{token: "vt"},
-		Hasher:         &mockPasswordHasher{},
-		TokenSvc:       &mockTokenService{pair: &token.TokenPair{AccessToken: "at", RefreshToken: "rt"}},
-		EventPublisher: publisher,
-		EnvResolver:    resolverSpy,
+		Repo:      repo,
+		VerifySvc: &mockVerificationService{token: "vt"},
+		Hasher:    &mockPasswordHasher{},
 	})
 
 	handler := NewHandler(uc)
 
-	req := httptest.NewRequest(http.MethodPost, "/register", nil)
+	body := `{"email":"noidem@test.com","password":"Password123!"}`
+	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	req.RemoteAddr = "198.51.100.1:12345"
+	// Sin Idempotency-Key header
 
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
@@ -142,87 +106,46 @@ func TestHandler_MissingBody_ReturnsError(t *testing.T) {
 	err := handler.Handle(c)
 
 	// MapError handles the error internally (writes to response, returns nil)
-	// The handler returns nil but the response has the error status code
 	if err != nil {
 		t.Logf("Handle returned error (also valid): %v", err)
 	}
 
-	// Verify the response status code is a client error (4xx)
 	if rec.Code < 400 || rec.Code >= 500 {
-		t.Errorf("expected 4xx status for validation error, got %d", rec.Code)
+		t.Errorf("expected 4xx status for missing Idempotency-Key, got %d. Body: %s", rec.Code, rec.Body.String())
 	}
 }
 
 // =============================================================================
-// Test: handler with IPv6 address
+// Test: handler con body malformado (JSON inválido).
 // =============================================================================
 
-func TestHandler_IPv6Address_PassedCorrectly(t *testing.T) {
+func TestHandler_InvalidJSON_ReturnsError(t *testing.T) {
 	e := echo.New()
 
 	repo := newMockUserRepo()
-	publisher := &mockEventPublisher{}
-	resolverSpy := &resolverSpy{
-		currency:    "EUR",
-		language:    "en",
-		countryCode: "DE",
-		timezone:    "Europe/Berlin",
-	}
 
 	uc := NewUseCase(UseCaseDeps{
-		Repo:           repo,
-		VerifySvc:      &mockVerificationService{token: "vt-ipv6"},
-		Hasher:         &mockPasswordHasher{},
-		TokenSvc:       &mockTokenService{pair: &token.TokenPair{AccessToken: "at", RefreshToken: "rt"}},
-		EventPublisher: publisher,
-		EnvResolver:    resolverSpy,
+		Repo:      repo,
+		VerifySvc: &mockVerificationService{token: "vt"},
+		Hasher:    &mockPasswordHasher{},
 	})
 
 	handler := NewHandler(uc)
 
-	body := `{"email":"ipv6@test.com","password":"Password123!"}`
-	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(`{invalid json`))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	req.RemoteAddr = "[2001:db8::1]:54321"
+	req.Header.Set("Idempotency-Key", "019d5439-cb43-716d-90b5-51dcbe980908")
 
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
 	err := handler.Handle(c)
+
 	if err != nil {
-		t.Fatalf("Handle() unexpected error: %v", err)
+		t.Logf("Handle returned error (also valid): %v", err)
 	}
 
-	if !resolverSpy.called {
-		t.Fatal("EnvironmentResolver.ResolveDefaults was not called")
-	}
-	if resolverSpy.lastIP != "2001:db8::1" {
-		t.Errorf("resolver received IP %q, want %q", resolverSpy.lastIP, "2001:db8::1")
+	if rec.Code < 400 || rec.Code >= 500 {
+		t.Errorf("expected 4xx status for invalid JSON, got %d. Body: %s", rec.Code, rec.Body.String())
 	}
 }
-
-// =============================================================================
-// resolverSpy — mock EnvironmentResolver that records the IP argument
-// =============================================================================
-
-type resolverSpy struct {
-	called      bool
-	lastIP      string
-	currency    string
-	language    string
-	countryCode string
-	timezone    string
-	err         error
-}
-
-func (r *resolverSpy) ResolveDefaults(ctx context.Context, ip string) (currency, language, countryCode, timezone string, err error) {
-	r.called = true
-	r.lastIP = ip
-	if r.err != nil {
-		return "", "", "", "", r.err
-	}
-	return r.currency, r.language, r.countryCode, r.timezone, nil
-}
-
-// compile-time interface check
-var _ EnvironmentResolver = (*resolverSpy)(nil)

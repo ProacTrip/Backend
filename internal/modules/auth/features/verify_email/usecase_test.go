@@ -13,7 +13,7 @@ import (
 )
 
 // =============================================================================
-// Mocks para tests del usecase de verify_email (T1.6)
+// Mocks para tests del usecase de verify_email
 // =============================================================================
 
 type mockVerificationService struct {
@@ -47,11 +47,8 @@ func (m *mockUserRepo) Update(_ context.Context, _ *domain.User) error {
 	return m.updateErr
 }
 
-// Stubs para métodos no utilizados del UserRepository
-func (m *mockUserRepo) GetByID(_ context.Context, _ uuid.UUID) (*domain.User, error) {
-	return nil, nil
-}
-func (m *mockUserRepo) Create(_ context.Context, _ *domain.User) error { return nil }
+func (m *mockUserRepo) GetByID(_ context.Context, _ uuid.UUID) (*domain.User, error) { return nil, nil }
+func (m *mockUserRepo) Create(_ context.Context, _ *domain.User) error                { return nil }
 func (m *mockUserRepo) GetRoleByName(_ context.Context, _ string) (*domain.Role, error) {
 	return nil, nil
 }
@@ -104,10 +101,8 @@ func defaultTokenPair() *token.TokenPair {
 // Tests
 // =============================================================================
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Escenario 1: token_valido — flujo feliz: verifica token, busca usuario,
+// Escenario 1: token válido — flujo feliz: verifica token, busca usuario,
 // marca como verificado, actualiza repo y genera tokens.
-// ─────────────────────────────────────────────────────────────────────────────
 
 func TestExecute_TokenValido_FlujoCompletoExitoso(t *testing.T) {
 	verifySvc := &mockVerificationService{
@@ -124,7 +119,7 @@ func TestExecute_TokenValido_FlujoCompletoExitoso(t *testing.T) {
 
 	uc := newVerifyEmailUseCase(verifySvc, repo, tokenSvc)
 
-	resp, err := uc.Execute(t.Context(), Command{Token: "valid-verification-token"})
+	resp, err := uc.Execute(t.Context(), Command{Token: "valid-verification-token"}, "es")
 	if err != nil {
 		t.Fatalf("Execute() error inesperado: %v", err)
 	}
@@ -150,22 +145,17 @@ func TestExecute_TokenValido_FlujoCompletoExitoso(t *testing.T) {
 		t.Errorf("RefreshToken = %q, se esperaba %q", resp.RefreshToken, "refresh-token-xyz")
 	}
 
-	// Respuesta del usuario
+	// Respuesta del usuario (campos según UserResponse actual: ID, Email, RoleName)
 	if resp.User.Email != "test@example.com" {
 		t.Errorf("User.Email = %q, se esperaba %q", resp.User.Email, "test@example.com")
-	}
-	if !resp.User.EmailVerified {
-		t.Error("User.EmailVerified = false en respuesta, se esperaba true")
 	}
 	if resp.User.RoleName != "client" {
 		t.Errorf("User.RoleName = %q, se esperaba %q", resp.User.RoleName, "client")
 	}
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Escenario 2: token_expirado — el servicio de verificación retorna error.
+// Escenario 2: token expirado — el servicio de verificación retorna error.
 // El usecase envuelve como ErrTokenInvalid.
-// ─────────────────────────────────────────────────────────────────────────────
 
 func TestExecute_TokenExpirado_RetornaErrTokenInvalid(t *testing.T) {
 	verifySvc := &mockVerificationService{
@@ -177,7 +167,7 @@ func TestExecute_TokenExpirado_RetornaErrTokenInvalid(t *testing.T) {
 
 	uc := newVerifyEmailUseCase(verifySvc, repo, tokenSvc)
 
-	_, err := uc.Execute(t.Context(), Command{Token: "token-expirado"})
+	_, err := uc.Execute(t.Context(), Command{Token: "token-expirado"}, "es")
 	if err == nil {
 		t.Fatal("Execute() debería retornar error para token expirado")
 	}
@@ -186,9 +176,7 @@ func TestExecute_TokenExpirado_RetornaErrTokenInvalid(t *testing.T) {
 	}
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Escenario 3: usuario_no_encontrado — GetByEmail retorna ErrUserNotFound.
-// ─────────────────────────────────────────────────────────────────────────────
+// Escenario 3: usuario no encontrado — GetByEmail retorna ErrUserNotFound.
 
 func TestExecute_UsuarioNoEncontrado_RetornaErrUserNotFound(t *testing.T) {
 	verifySvc := &mockVerificationService{
@@ -203,7 +191,7 @@ func TestExecute_UsuarioNoEncontrado_RetornaErrUserNotFound(t *testing.T) {
 
 	uc := newVerifyEmailUseCase(verifySvc, repo, tokenSvc)
 
-	_, err := uc.Execute(t.Context(), Command{Token: "valid-token"})
+	_, err := uc.Execute(t.Context(), Command{Token: "valid-token"}, "es")
 	if err == nil {
 		t.Fatal("Execute() debería retornar error para usuario no encontrado")
 	}
@@ -212,11 +200,8 @@ func TestExecute_UsuarioNoEncontrado_RetornaErrUserNotFound(t *testing.T) {
 	}
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Escenario 4: ya_verificado — el email ya está verificado. El usecase tiene
-// early-return: saltea VerifyEmail() y Update() cuando EmailVerified ya es true,
-// generando directamente los tokens de sesión.
-// ─────────────────────────────────────────────────────────────────────────────
+// Escenario 4: ya verificado — el email ya está verificado. El usecase tiene
+// early-return: saltea VerifyEmail() y Update(), generando directamente los tokens.
 
 func TestExecute_YaVerificado_FlujoIdempotenteExitoso(t *testing.T) {
 	verifySvc := &mockVerificationService{
@@ -232,7 +217,7 @@ func TestExecute_YaVerificado_FlujoIdempotenteExitoso(t *testing.T) {
 
 	uc := newVerifyEmailUseCase(verifySvc, repo, tokenSvc)
 
-	resp, err := uc.Execute(t.Context(), Command{Token: "valid-token"})
+	resp, err := uc.Execute(t.Context(), Command{Token: "valid-token"}, "es")
 	if err != nil {
 		t.Fatalf("Execute() error inesperado para usuario ya verificado: %v", err)
 	}
@@ -256,8 +241,5 @@ func TestExecute_YaVerificado_FlujoIdempotenteExitoso(t *testing.T) {
 	// Tokens generados correctamente
 	if resp.AccessToken == "" || resp.RefreshToken == "" {
 		t.Error("tokens deberían haberse generado incluso para usuario ya verificado")
-	}
-	if resp.User.EmailVerified != true {
-		t.Error("User.EmailVerified en respuesta debería ser true")
 	}
 }

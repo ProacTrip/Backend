@@ -27,6 +27,17 @@ const (
 	OCRStatusFailed        OCRStatus = "failed"
 )
 
+// DocumentVerificationStatus representa el estado de verificación de un documento.
+type DocumentVerificationStatus string
+
+const (
+	VerificationStatusUnverified   DocumentVerificationStatus = "unverified"
+	VerificationStatusVerified     DocumentVerificationStatus = "verified"
+	VerificationStatusRejected     DocumentVerificationStatus = "rejected"
+	VerificationStatusManualReview DocumentVerificationStatus = "manual_review"
+	VerificationStatusSuspicious   DocumentVerificationStatus = "suspicious"
+)
+
 // =============================================================================
 // DocumentType — Catálogo de tipos de documento (read-only)
 // =============================================================================
@@ -52,14 +63,15 @@ type DocumentType struct {
 
 // UserDocument representa un documento subido por el usuario.
 // Alineado con la migración user_documents.
+// Note: verified_at/verified_by removed — verification now lives in DASHBOARD module.
 type UserDocument struct {
-	ID             uuid.UUID       `json:"id"`
-	UserID         uuid.UUID       `json:"user_id"`
-	DocumentTypeID uuid.UUID       `json:"document_type_id"`
-	FileName       string          `json:"file_name"`
-	FileSize       *int            `json:"file_size,omitzero"`
-	MimeType       *string         `json:"mime_type,omitzero"`
-	StorageKey     string          `json:"storage_key"`
+	ID             uuid.UUID `json:"id"`
+	UserID         uuid.UUID `json:"user_id"`
+	DocumentTypeID uuid.UUID `json:"document_type_id"`
+	FileName       string    `json:"file_name"`
+	FileSize       *int      `json:"file_size,omitzero"`
+	MimeType       *string   `json:"mime_type,omitzero"`
+	StorageKey     string    `json:"storage_key"`
 
 	// Pipeline V3: validación asíncrona
 	DetectedMimeType  *string `json:"detected_mime_type,omitzero"`
@@ -67,12 +79,11 @@ type UserDocument struct {
 	DocumentType      *string `json:"document_type,omitzero"` // categoría detectada
 	FailureReason     *string `json:"failure_reason,omitzero"`
 
-	IsVerified  bool        `json:"is_verified"`
-	VerifiedAt  *time.Time  `json:"verified_at,omitzero"`
-	VerifiedBy  *uuid.UUID  `json:"verified_by,omitzero"`
-	OCRStatus   OCRStatus   `json:"ocr_status"`
-	OCRData     json.RawMessage `json:"ocr_data,omitzero"`
-	OCRConfidence *float64  `json:"ocr_confidence,omitzero"`
+	VerificationStatus DocumentVerificationStatus `json:"verification_status,omitzero"`
+
+	OCRStatus     OCRStatus       `json:"ocr_status"`
+	OCRData       json.RawMessage `json:"ocr_data,omitzero"`
+	OCRConfidence *float64        `json:"ocr_confidence,omitzero"`
 	ExtractedData json.RawMessage `json:"extracted_data,omitzero"`
 
 	// Integración con perfil médico
@@ -92,16 +103,16 @@ type UserDocument struct {
 func NewUserDocument(userID, docTypeID uuid.UUID, fileName, storageKey, mimeType string) *UserDocument {
 	now := time.Now()
 	return &UserDocument{
-		ID:             uuid.Must(uuid.NewV7()),
-		UserID:         userID,
-		DocumentTypeID: docTypeID,
-		FileName:       fileName,
-		StorageKey:     storageKey,
-		MimeType:       &mimeType,
-		OCRStatus:      OCRStatusQueued,
-		IsVerified:     false,
-		CreatedAt:      now,
-		UpdatedAt:      now,
+		ID:                 uuid.Must(uuid.NewV7()),
+		UserID:             userID,
+		DocumentTypeID:     docTypeID,
+		FileName:           fileName,
+		StorageKey:         storageKey,
+		MimeType:           &mimeType,
+		OCRStatus:          OCRStatusQueued,
+		VerificationStatus: VerificationStatusUnverified,
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}
 }
 
@@ -125,13 +136,4 @@ func (d *UserDocument) MarkOCRCompleted(ocrData json.RawMessage, confidence floa
 	d.OCRData = ocrData
 	d.OCRConfidence = &confidence
 	d.UpdatedAt = time.Now()
-}
-
-// MarkVerified marca el documento como verificado por un admin.
-func (d *UserDocument) MarkVerified(verifiedBy uuid.UUID) {
-	d.IsVerified = true
-	d.VerifiedBy = &verifiedBy
-	now := time.Now()
-	d.VerifiedAt = &now
-	d.UpdatedAt = now
 }

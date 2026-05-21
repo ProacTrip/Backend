@@ -33,7 +33,6 @@ type UserDetailResponse struct {
 	RoleID        uuid.UUID  `json:"role_id"`
 	RoleName      string     `json:"role_name"`
 	EmailVerified bool       `json:"email_verified"`
-	MFAEnabled    bool       `json:"mfa_enabled"`
 	LoginCount    int        `json:"login_count"`
 	LastLoginAt   *time.Time `json:"last_login_at,omitzero"`
 	CreatedAt     time.Time  `json:"created_at"`

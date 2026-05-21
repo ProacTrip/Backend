@@ -32,7 +32,6 @@ import (
 	"github.com/ProacTrip/Backend/internal/modules/auth/domain"
 	"github.com/ProacTrip/Backend/internal/modules/auth/domain/services"
 	sessionpkg "github.com/ProacTrip/Backend/internal/shared/session"
-	serrors "github.com/ProacTrip/Backend/internal/shared/errors"
 	sharedhttp "github.com/ProacTrip/Backend/internal/shared/http"
 )
 
@@ -90,7 +89,7 @@ type AuthMiddleware struct {
 func NewAuthMiddleware(cfg AuthConfig) *AuthMiddleware {
 	mode := os.Getenv("AUTHZ_ENFORCE_MODE")
 	if mode == "" {
-		mode = "observe" // PR 2: observe por defecto, sin bloqueo
+		mode = "dashboard" // fuerza auth en /v1/user/* y /v1/dashboard/*
 	}
 	return &AuthMiddleware{config: cfg, enforceMode: mode}
 }
@@ -110,9 +109,7 @@ func (m *AuthMiddleware) Handle(next echo.HandlerFunc) echo.HandlerFunc {
 			// Sin cookies: si el path requiere enforce, devolver 401.
 			// Si no (observe mode), pasar el request sin claims.
 			if m.shouldEnforce(c.Request().URL.Path) {
-				return c.JSON(http.StatusUnauthorized, serrors.ErrUnauthorized(
-					"Autenticación requerida", nil,
-				).WithInstance(c.Request().URL.Path))
+				return echo.NewHTTPError(http.StatusUnauthorized, "Autenticación requerida")
 			}
 			return next(c)
 		}
@@ -123,9 +120,6 @@ func (m *AuthMiddleware) Handle(next echo.HandlerFunc) echo.HandlerFunc {
 			if err == nil {
 				// Pipeline de autorización para access token válido
 				if pipelineErr := m.runAccessPipeline(c, claims); pipelineErr != nil {
-					if errors.Is(pipelineErr, errAccountRejected) {
-						return nil // respuesta ya escrita, detener cadena
-					}
 					return pipelineErr
 				}
 				c.Set("user_claims", claims)
@@ -153,9 +147,7 @@ func (m *AuthMiddleware) Handle(next echo.HandlerFunc) echo.HandlerFunc {
 				} else {
 					sharedhttp.ClearAuthCookiesDev(c)
 				}
-				return c.JSON(http.StatusUnauthorized, serrors.ErrUnauthorized(
-					"Sesión expirada. Inicia sesión nuevamente.", err,
-				).WithInstance(c.Request().URL.Path))
+				return echo.NewHTTPError(http.StatusUnauthorized, "Sesión expirada. Inicia sesión nuevamente.")
 			}
 		}
 
@@ -165,9 +157,7 @@ func (m *AuthMiddleware) Handle(next echo.HandlerFunc) echo.HandlerFunc {
 		} else {
 			sharedhttp.ClearAuthCookiesDev(c)
 		}
-		return c.JSON(http.StatusUnauthorized, serrors.ErrUnauthorized(
-			"Autenticación requerida", nil,
-		).WithInstance(c.Request().URL.Path))
+		return echo.NewHTTPError(http.StatusUnauthorized, "Autenticación requerida")
 	}
 }
 
@@ -205,10 +195,7 @@ func (m *AuthMiddleware) runAccessPipeline(c *echo.Context, claims *token.Access
 				slog.String("path", path),
 			)
 			if enforce {
-				_ = c.JSON(http.StatusUnauthorized, serrors.ErrUnauthorized(
-					"Token revocado. Inicia sesión nuevamente.", domain.ErrTokenRevoked,
-				).WithInstance(path))
-				return errAccountRejected
+				return echo.NewHTTPError(http.StatusUnauthorized, "Token revocado. Inicia sesión nuevamente.")
 			}
 			// observe: continuar con el request
 		}
@@ -236,9 +223,7 @@ func (m *AuthMiddleware) runAccessPipeline(c *echo.Context, claims *token.Access
 				slog.String("path", path),
 			)
 			if enforce {
-				return c.JSON(http.StatusUnauthorized, serrors.ErrUnauthorized(
-					"Token desactualizado. Inicia sesión nuevamente.", nil,
-				).WithInstance(path))
+				return echo.NewHTTPError(http.StatusUnauthorized, "Token desactualizado. Inicia sesión nuevamente.")
 			}
 			// observe: usar datos cacheados y continuar
 			claims.TokenVersion = cacheTV
@@ -246,7 +231,7 @@ func (m *AuthMiddleware) runAccessPipeline(c *echo.Context, claims *token.Access
 
 		// Paso 6: Verificar estado de la cuenta
 		if err := m.checkAccountStatus(c, sessionData.Status, enforce); err != nil {
-			return err // propagar error para que Handle detecte errAccountRejected
+			return err
 		}
 
 		// Paso 7: Inyectar Permissions[] en claims
@@ -518,13 +503,8 @@ func (m *AuthMiddleware) refreshSessionTTL(ctx context.Context, sessionID string
 	}
 }
 
-// =============================================================================
-// errAccountRejected es un sentinel para detener la cadena de middleware
-// después de escribir una respuesta de rechazo (403/401).
-var errAccountRejected = errors.New("account rejected")
-
 // checkAccountStatus — verifica el estado de la cuenta.
-// En modo enforce: escribe la respuesta de error y retorna error no-nil para detener la cadena.
+// En modo enforce: retorna echo.NewHTTPError para detener la cadena de middleware.
 // En modo observe: solo loguea y retorna nil.
 
 func (m *AuthMiddleware) checkAccountStatus(c *echo.Context, status string, enforce bool) error {
@@ -537,30 +517,21 @@ func (m *AuthMiddleware) checkAccountStatus(c *echo.Context, status string, enfo
 			slog.String("path", path),
 		)
 		if enforce {
-			_ = c.JSON(http.StatusForbidden, serrors.ErrForbidden(
-				"Cuenta deshabilitada. Contacta al administrador.", domain.ErrAccountDisabled,
-			).WithInstance(path))
-			return errAccountRejected
+			return echo.NewHTTPError(http.StatusForbidden, "Cuenta deshabilitada. Contacta al administrador.")
 		}
 	case string(domain.StatusSuspended):
 		slog.WarnContext(ctx, "cuenta suspendida",
 			slog.String("path", path),
 		)
 		if enforce {
-			_ = c.JSON(http.StatusForbidden, serrors.ErrForbidden(
-				"Cuenta suspendida. Contacta al administrador.", domain.ErrAccountSuspended,
-			).WithInstance(path))
-			return errAccountRejected
+			return echo.NewHTTPError(http.StatusForbidden, "Cuenta suspendida. Contacta al administrador.")
 		}
 	case string(domain.StatusPendingVerification):
 		slog.WarnContext(ctx, "cuenta pendiente de verificación",
 			slog.String("path", path),
 		)
 		if enforce {
-			_ = c.JSON(http.StatusUnauthorized, serrors.ErrUnauthorized(
-				"Email no verificado. Revisa tu bandeja de entrada.", domain.ErrEmailNotVerified,
-			).WithInstance(path))
-			return errAccountRejected
+			return echo.NewHTTPError(http.StatusUnauthorized, "Email no verificado. Revisa tu bandeja de entrada.")
 		}
 	}
 

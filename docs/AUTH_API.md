@@ -1,55 +1,77 @@
 # Auth Module API Documentation (Cookie-Based)
 
 > **Arquitectura:** Cookie-based authentication con HttpOnly cookies. El frontend nunca manipula tokens.
+> Auth endpoints devuelven identidad mínima (`id`, `email`, `role_name`). Datos completos del usuario
+> se obtienen vía `GET /v1/user/profile` y preferencias de viaje vía `GET /v1/user/travel-preferences`.
+> Ver [USER_API](./USER_API.md).
 
 ---
 
 ## Índice
 
-| Endpoint | Estado |
+| Sección | Estado |
 |----------|--------|
-| [Arquitectura](#arquitectura) | ✅ |
-| [Features Planificadas](#features-planificadas) | — |
-| [Seguridad de Cookies](#seguridad-de-cookies) | ✅ |
-| [Base URLs](#base-urls) | ✅ |
-| [Errores Estándar](#errores-estándar) | ✅ |
 | [Register](#register) | ✅ Implementado |
 | [Resend Verification Email](#resend-verification-email) | ✅ Implementado |
 | [Verify Email](#verify-email) | ✅ Implementado |
 | [Login](#login) | ✅ Implementado |
-| [Login MFA](#login-mfa) | 🚧 Planificado |
 | [Logout](#logout) | ✅ Implementado |
 | [Logout All Sessions](#logout-all-sessions) | ✅ Implementado |
-| [Refresh Token](#refresh-token) | 🚧 Planificado |
-| [Change Password](#change-password) | 🚧 Planificado |
-| [Forgot Password](#forgot-password) | 🚧 Planificado |
-| [Reset Password](#reset-password) | 🚧 Planificado |
 | [OAuth Google](#oauth-google) | ✅ Implementado |
 | [OAuth Google Callback](#oauth-google-callback) | ✅ Implementado |
-| [Current User (Me)](#current-user-me) | ✅ Implementado |
-| [SSE Token](#sse-token) | 🚧 Planificado |
-| [Configuración CORS](#configuración-cors) | ✅ |
-| [Rate Limiting](#rate-limiting) | ✅ |
-| [Cache](#cache) | ✅ |
-| [Notas de Seguridad](#notas-de-seguridad) | ✅ |
-
 ---
 
 ## Arquitectura
 
-### Flujo de Autenticación
+### Flujo de Autenticación por Email
 
 ```
-┌─────────────┐       POST /login       ┌─────────────┐
-│   Browser   │ ──────────────────────> │   Backend   │
-│  (Frontend) │    {email, password}    │             │
-└─────────────┘                         └─────────────┘
-^                                                     │
-│         Set-Cookie: __Secure-access_token=...       │
-│         Set-Cookie: __Secure-refresh_token=...      │
-└─────────────────────────────────────────────────────┘
-Las cookies se envían AUTOMÁTICAMENTE en cada request subsiguiente.
-El frontend NO almacena ni lee tokens.
+┌──────────┐  POST /register            ┌──────────┐  evento: auth.user.registered
+│ Frontend │ ──────────────────────────> │   Auth   │ ────────────────────────────> Módulo Notificaciones
+└──────────┘  {email, password, name}    └──────────┘                                (envía email verificación)
+                                                 │
+                                                 │  evento: auth.user.registered
+                                                 │  ────────────────────────────> Módulo User
+                                                 │                                  (crea perfil con first_name y email)
+                                                 │
+  (usuario hace clic en enlace)                  │
+┌──────────┐  POST /verify-email          ┌──────────┐  evento: auth.user.verified
+│ Frontend │ ──────────────────────────>  │   Auth   │ ────────────────────────────> Módulo User
+└──────────┘  {token}                     └──────────┘                                (setea preferencias:
+       │                                         │                                     language de Accept-Language header)
+       │  200 { user: { id, email,               │                                     
+       │          role_name } }                  │
+       │  Set-Cookie: access_token               │
+       │  Set-Cookie: refresh_token              │
+       └─────────────────────────────────────────┘
+```
+
+### Flujo OAuth (Google)
+
+```
+┌──────────┐  GET /oauth/google     ┌──────────┐
+│ Frontend │ ──────────────────────> │   Auth   │
+└──────────┘  { auth_url }          └──────────┘
+     │                                    │
+     │  window.location.href = auth_url   │
+     ▼                                    │
+┌──────────┐                              │
+│  Google  │  (usuario autoriza)          │
+└──────────┘                              │
+     │  GET /oauth/google/callback        │
+     │  ?code=xxx&state=yyy               │
+     └───────────────────────────────────>│
+                                          │  valida state, intercambia code,
+                                          │  crea/vincula usuario, emite cookies.
+                                          │  Si es nuevo → evento auth.user.registered
+                                          │    └─> Módulo User (crea perfil con datos de Google)
+                                          │
+     302 → /auth/callback?status=success  │
+     Set-Cookie: access_token             │
+     Set-Cookie: refresh_token            │
+┌──────────┐<─────────────────────────────│
+│ Frontend │  GET /v1/user/profile       │  → session bootstrap
+└──────────┘  GET /v1/realtime/events    │  → realtime sync
 ```
 
 ### Política de Cookies
@@ -59,23 +81,7 @@ El frontend NO almacena ni lee tokens.
 | Access Token | `__Secure-access_token` | 15 min | Sesión activa |
 | Refresh Token | `__Secure-refresh_token` | 7 días | Rotación de sesión |
 
-> En despliegues single-domain sin subdominios cruzados, usar `__Host-access_token` y `__Host-refresh_token` para máxima seguridad (impide el atributo `Domain`).
-
----
-
-## Features Planificadas
-
-Las siguientes features están planificadas pero **no implementadas** aún. Las secciones correspondientes están marcadas con 🚧.
-
-| Feature | Estado | Notas |
-|---------|--------|-------|
-| Login MFA | 🚧 Planificado | Segundo factor post-login (TOTP, email, SMS) |
-| Refresh Token (explícito) | 🚧 Planificado | Rotación vía middleware ya implementada |
-| Change Password | 🚧 Planificado | Requiere sesión activa |
-| Forgot Password | 🚧 Planificado | Flujo de reset vía email |
-| Reset Password | 🚧 Planificado | Token de un solo uso |
-| MFA Setup/Management | 🚧 Planificado | TOTP, email, SMS, recovery codes |
-| SSE Token | 🚧 Planificado | Conexiones SSE autenticadas |
+> En desarrollo local (sin HTTPS), las cookies usan los nombres `access_token` y `refresh_token` sin el prefijo `__Secure-`.
 
 ---
 
@@ -89,24 +95,18 @@ Las siguientes features están planificadas pero **no implementadas** aún. Las 
 | `Secure` | `true` | Solo HTTPS en producción |
 | `SameSite` | `Lax` | Protección CSRF. Permite navegación top-level (OAuth callbacks) |
 | `Path` | `/` | Disponible en todas las rutas |
-| `Domain` | `.proactrip.com` | Compartido entre subdominios (omitir si usas `__Host-`) |
+| `Domain` | `.proactrip.com` | Compartido entre subdominios (solo en producción) |
 
 ### Formatos de Producción
 
-**Multi-subdominio (recomendado para ProacTrip):**
 ```
 Set-Cookie: __Secure-access_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=900
 Set-Cookie: __Secure-refresh_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=604800
 ```
 
-**Single domain (máxima seguridad):**
-```
-Set-Cookie: __Host-access_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=900
-```
-
 ### Limpieza de Cookies (Logout)
 
-Además de `Max-Age=0`, el backend puede enviar:
+Además de `Max-Age=0`, el backend envía:
 
 ```
 Clear-Site-Data: "cookies"
@@ -159,7 +159,18 @@ El backend maneja el refresco de tokens transparentemente vía middleware.
 - Si `access_token` está expirado pero `refresh_token` es válido → nuevos tokens emitidos
 - Si ambos están expirados → 401 Unauthorized
 
-El frontend nunca llama manualmente a `/refresh-token`.
+---
+
+## Session Bootstrap
+
+El frontend reconstruye el estado del usuario al autenticarse o al recargar la página (F5 / SSR) con:
+
+1. `GET /v1/user/profile` → identidad, avatar y configuración regional.
+2. `GET /v1/user/travel-preferences` → preferencias de viaje.
+3. `GET /v1/environment` → ubicación actual como placeholder en la UI.
+4. `GET /v1/realtime/events` → conexión SSE para sincronización en tiempo real.
+
+**NO existe `/v1/auth/me`.** El perfil de usuario es la fuente de verdad para el estado del frontend.
 
 ---
 
@@ -167,11 +178,14 @@ El frontend nunca llama manualmente a `/refresh-token`.
 
 Crea una nueva cuenta. El backend:
 
-1. Obtiene la IP del cliente (de la conexión o proxy).
-2. Cachea la IP asociada al registro (TTL: 24h, mismo tiempo que el token de verificación).
+1. Obtiene la IP del cliente (de la conexión en producción o del header `X-Real-IP` en desarrollo).
+2. Valida los datos de entrada.
 3. Aplica rate limiting por IP.
-4. Envía email de verificación vía Resend.
-5. Establece cookies `__Secure-access_token` + `__Secure-refresh_token` inmediatamente (sesión pre-verificada con privilegios limitados).
+4. Crea el usuario con email sin verificar.
+5. Publica evento `auth.user.registered` con `first_name` y `email` para que:
+   - El módulo de notificaciones envíe el email de verificación.
+   - El módulo user cree el perfil inicial.
+6. No existe sesión hasta verificación (sin cookies de acceso/refresh).
 
 ### Request
 
@@ -183,16 +197,17 @@ POST /v1/auth/register
 
 | Header | Tipo | Requerido | Descripción |
 |--------|------|-----------|-------------|
-| `Idempotency-Key` | string | No | UUID v7. Previene registros duplicados por retries de red. El backend cachea la respuesta por 24h. |
 | `Content-Type` | string | Sí | `application/json` |
+| `Idempotency-Key` | string | Sí | UUID v7. Previene registros duplicados por retries de red. El backend cachea la respuesta por 24h |
+| `X-Real-IP` | string | No | IP del cliente (override de auto-detección). Útil para testing y desarrollo |
 
 **Body:**
 
 | Campo | Tipo | Requerido | Validación | Descripción |
 |-------|------|-----------|------------|-------------|
 | `email` | string | Sí | Email válido | Correo del usuario |
-| `password` | string | Sí | Mínimo 8 caracteres | Contraseña |
-| `first_name` | string | No | Máximo 100 caracteres | Nombre del usuario. Se usa en el email de verificación y se guarda en el perfil |
+| `password` | string | Sí | Mínimo 8 caracteres, al menos una mayúscula, una minúscula, un dígito y un carácter especial | Contraseña |
+| `first_name` | string | Sí | Máximo 100 caracteres | Nombre del usuario. Se usa en el email de verificación y se guarda en el perfil |
 
 **Ejemplo:**
 
@@ -207,45 +222,24 @@ curl -X POST {base_url}/register \
 
 #### 201 Created
 
-> **Seguridad:** En `EMAIL_ALREADY_EXISTS` (409), la respuesta es genérica y **no incluye cookies ni datos de usuario**.
-
 ```json
 {
-  "message": "Registration successful. Please verify your email."
+  "message": "Registro exitoso. Por favor verificá tu email."
 }
-```
-
-**Set-Cookie Headers:**
-
-```
-Set-Cookie: __Secure-access_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=900
-Set-Cookie: __Secure-refresh_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=604800
 ```
 
 #### Posibles Errores
 
 | Código | HTTP | Problem Type | Cuándo |
 |--------|------|-------------|--------|
-| `EMAIL_ALREADY_EXISTS` | 409 | `conflict` | Email ya registrado |
-| `INVALID_EMAIL` | 400 | `invalid-email` | Formato de email inválido |
-| `WEAK_PASSWORD` | 400 | `weak-password` | La contraseña no cumple los requisitos: mínimo 8 caracteres, al menos una mayúscula, una minúscula, un dígito y un carácter especial (!@#$%^&*) |
-| `INVALID_INPUT` | 400 | `invalid-input` | Faltan campos requeridos (email o password vacíos) |
-| `VALIDATION_ERROR` | 400 | `validation-error` | Body malformado (JSON inválido) |
-| `RATE_LIMIT_EXCEEDED` | 429 | `rate-limit-exceeded` | Demasiadas peticiones |
-| `INTERNAL_ERROR` | 500 | `internal-error` | Error inesperado |
+| `ErrEmailAlreadyExists` | 409 | `conflict` | Email ya registrado |
+| `ErrInvalidEmail` | 400 | `invalid-email` | Email vacío o con formato inválido |
+| `ErrInvalidInput` | 400 | `invalid-input` | Faltan campos requeridos (`email`, `password` o `first_name`) |
+| `ErrPasswordTooShort` | 400 | `weak-password` | Contraseña con menos de 8 caracteres |
+| `ErrInvalidPassword` | 400 | `weak-password` | Contraseña no cumple los requisitos de complejidad |
+| `ErrRoleNotFound` | 404 | `not-found` | Error de configuración del servidor |
 
-### Comportamiento del campo `first_name` en el email de verificación
-
-El template de verificación de Resend usa la variable `{{first_name}}` para personalizar el saludo. El comportamiento es:
-
-| Origen del registro | `first_name` | Resultado en el email |
-|---------------------|-------------|----------------------|
-| **Email + contraseña (con nombre)** | `first_name` del body del register | "Hola, **María**" (nombre indicado) |
-| **Email + contraseña (sin nombre)** | no se envía en el evento | "Hola, **Usuario**" (fallback del template) |
-| **OAuth (Google)** | `given_name` del perfil de Google | "Hola, **Juan**" (nombre real) |
-| **OAuth (Google) sin given_name** | string vacío | "Hola, **Usuario**" (fallback del template) |
-
-> El template de Resend está configurado para mostrar "Usuario" cuando `first_name` no está definido o es una cadena vacía. El módulo de notificación pasa el valor tal cual lo recibe del evento `auth.user.registered`, sin transformarlo.
+> Errores de rate limiting (429 `rate-limit-exceeded`) e internos (500 `internal-error`) aplican a todos los endpoints. Son manejados por middleware global. Ver [Rate Limiting](#rate-limiting).
 
 ---
 
@@ -265,7 +259,7 @@ POST /v1/auth/resend-verification
 |-------|------|-----------|-------------|
 | `email` | string | Sí | Email usado en el registro |
 
-**Example:**
+**Ejemplo:**
 
 ```bash
 curl -X POST {base_url}/resend-verification \
@@ -279,31 +273,45 @@ curl -X POST {base_url}/resend-verification \
 
 ```json
 {
-  "message": "If the email exists and is unverified, a new verification email will be sent."
+  "message": "Si el email existe y no está verificado, se enviará un nuevo email de verificación."
 }
 ```
 
-#### Possible Errors
+#### Posibles Errores
 
-| Code | HTTP | When |
-|------|------|------|
-| `VALIDATION_ERROR` | 400 | Missing or malformed body |
-| `INTERNAL_ERROR` | 500 | Unexpected server error |
+| Código | HTTP | Problem Type | Cuándo |
+|--------|------|-------------|--------|
+| `ErrInvalidEmail` | 400 | `invalid-email` | Email vacío o con formato inválido |
+| `ErrInvalidInput` | 400 | `invalid-input` | Body malformado (JSON inválido) |
 
 ---
 
 ## Verify Email
 
-Verifica el email usando el token del enlace.
-El backend usa la IP cacheada del registro. Si el cache expiró, obtiene la IP de la conexión actual.
+Verifica el email usando el token del enlace. Este es el paso donde se activa la cuenta y se establecen las preferencias iniciales del perfil.
 
-> **Nota:** El enlace del email apunta al frontend (`{FRONTEND_URL}/auth/verify-email?token=xxx`), no al backend. El frontend llama a este endpoint.
+El backend:
+
+1. Extrae language de Accept-Language header.
+2. Valida el token de verificación.
+3. Marca el email como verificado y activa la cuenta.
+4. Resuelve defaults de entorno (language) desde Accept-Language header.
+5. Publica evento `auth.user.verified` con los defaults para que el user module los persista como preferencias iniciales del perfil.
+6. Genera tokens de sesión y los envía como cookies.
+
+> **Nota:** El enlace del email apunta al frontend (`{FRONTEND_URL}/auth/verify-email?token=xxx`), no al backend. El frontend extrae el token de la URL y llama a este endpoint.
 
 ### Request
 
 ```
 POST /v1/auth/verify-email
 ```
+
+**Headers:**
+
+| Header | Tipo | Requerido | Descripción |
+|--------|------|-----------|-------------|
+| `Content-Type` | string | Sí | `application/json` |
 
 **Body:**
 
@@ -328,35 +336,38 @@ curl -X POST {base_url}/verify-email \
   "user": {
     "id": "019d5439-cb43-716d-90b5-51dcbe980908",
     "email": "user@example.com",
-    "email_verified": true,
     "role_name": "client"
   }
 }
 ```
-> **Nota:** El `environment` NO se devuelve en verify-email. El frontend debe managejarlo por separado vía `GET /v1/environment` (ver [ENVIRONMENT_API](./ENVIRONMENT_API.md)).
 
-**Set-Cookie Headers (actualiza la sesión):**
+**Set-Cookie Headers:**
 
 ```
 Set-Cookie: __Secure-access_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=900
 Set-Cookie: __Secure-refresh_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=604800
 ```
 
+> Para obtener datos completos del usuario, el frontend debe llamar a `GET /v1/user/profile` (identidad y avatar) y `GET /v1/user/travel-preferences` (preferencias de viaje).
+
 #### Posibles Errores
 
-| Código | HTTP | Cuándo |
-|--------|------|--------|
-| `TOKEN_INVALID` | 401 | Token malformado o inexistente |
-| `TOKEN_EXPIRED` | 401 | Token expiró (24h) |
-| `VALIDATION_ERROR` | 400 | Falta el campo `token` |
-| `INTERNAL_ERROR` | 500 | Error inesperado |
+| Código | HTTP | Problem Type | Cuándo |
+|--------|------|-------------|--------|
+| `ErrInvalidInput` | 400 | `invalid-input` | Falta el campo `token` |
+| `ErrTokenInvalid` | 401 | `unauthorized` | Token inválido, expirado o malformado |
+| `ErrUserNotFound` | 404 | `not-found` | El email del token no coincide con ningún usuario |
 
 ---
 
 ## Login
 
-Autentica con email y password.  
-**No requiere `X-Real-IP`**: la IP se obtiene de la conexión y se usa para GeoIP/Weather.
+Autentica con email y password. El backend valida credenciales, verifica el estado de la cuenta y emite cookies de sesión.
+
+> **Frontend:** Después del login, el frontend debería:
+> 1. Llamar a `GET /v1/user/profile` para obtener identidad y avatar.
+> 2. Llamar a `GET /v1/user/travel-preferences` para preferencias de viaje.
+> 3. Llamar a `GET /v1/environment` para obtener la ubicación actual como placeholder en la UI. Ver [ENVIRONMENT_API](./ENVIRONMENT_API.md).
 
 ### Request
 
@@ -381,66 +392,43 @@ curl -X POST {base_url}/login \
 
 ### Responses
 
-#### 200 OK — Sin MFA
+#### 200 OK 
 
 ```json
 {
   "user": {
     "id": "019d5439-cb43-716d-90b5-51dcbe980908",
     "email": "user@example.com",
-    "email_verified": true,
     "role_name": "client"
   }
 }
 ```
 
-> **Nota:** El `environment` NO se devuelve en login. El frontend debe managejarlo por separado vía `GET /v1/environment` (ver [ENVIRONMENT_API](./ENVIRONMENT_API.md)).
-
 **Set-Cookie Headers:**
 
 ```
-Set-Cookie: __Secure-access_token=...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=900
-Set-Cookie: __Secure-refresh_token=...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=604800
+Set-Cookie: __Secure-access_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=900
+Set-Cookie: __Secure-refresh_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=604800
 ```
-
-#### 200 OK — MFA Requerido
-
-Cuando `mfa_required` es `true`, **no se establecen cookies** hasta completar `/login/mfa`.
-
-```json
-{
-  "user": {
-    "email": "user@example.com"
-  },
-  "mfa_required": true,
-  "mfa_methods": ["totp", "email", "sms"],
-  "session_id": "019d5439-cb43-716d-90b5-51dcbe980908"
-}
-```
-
-> **Cambios aplicados:** El `session_id` expira en 5 minutos.
 
 #### Posibles Errores
 
-| Código | HTTP | Cuándo |
-|--------|------|--------|
-| `INVALID_CREDENTIALS` | 401 | Email o password incorrectos |
-| `EMAIL_NOT_VERIFIED` | 401 | Email no verificado |
-| `ACCOUNT_LOCKED` | 429 | Demasiados intentos fallidos |
-| `ACCOUNT_SUSPENDED` | 403 | Cuenta suspendida |
-| `ACCOUNT_INACTIVE` | 403 | Cuenta inactiva |
-| `VALIDATION_ERROR` | 400 | Body malformado |
-| `INTERNAL_ERROR` | 500 | Error inesperado |
+| Código | HTTP | Problem Type | Cuándo |
+|--------|------|-------------|--------|
+| `ErrInvalidCredentials` | 401 | `unauthorized` | Email o password incorrectos |
+| `ErrEmailNotVerified` | 401 | `unauthorized` | Email no verificado |
+| `ErrAccountLocked` | 429 | `rate-limit-exceeded` | Cuenta bloqueada por demasiados intentos fallidos |
+| `ErrAccountSuspended` | 403 | `forbidden` | Cuenta suspendida |
+| `ErrAccountInactive` | 403 | `forbidden` | Cuenta inactiva o deshabilitada |
+| `ErrInvalidEmail` | 400 | `invalid-email` | Email vacío o con formato inválido |
+| `ErrInvalidInput` | 400 | `invalid-input` | Falta email o password |
+| `ErrPasswordTooShort` | 400 | `weak-password` | Contraseña con menos de 8 caracteres |
 
 ---
 
-## Login MFA 🚧
-
-> 🚧 **Planificado — no implementado.** El segundo factor de autenticación (TOTP, email, SMS) será agregado en una fase posterior. Actualmente el login devuelve directamente las cookies de sesión sin requerir MFA.
-
 ## Logout
 
-Revoca la sesión actual. **No se pasa token en el body**: el backend lee las cookies automáticamente.
+Revoca la sesión actual. El backend lee las cookies automáticamente — no se pasa ningún token en el body.
 
 ### Request
 
@@ -448,7 +436,14 @@ Revoca la sesión actual. **No se pasa token en el body**: el backend lee las co
 POST /v1/auth/logout
 ```
 
-> El navegador envía las cookies automáticamente. No enviar body.
+> El navegador envía las cookies automáticamente. No enviar body ni headers adicionales.
+
+**Ejemplo:**
+
+```bash
+curl -X POST {base_url}/logout \
+  -c cookies.txt -b cookies.txt
+```
 
 ### Responses
 
@@ -456,29 +451,30 @@ POST /v1/auth/logout
 
 ```json
 {
-  "message": "Logged out successfully."
+  "message": "Sesión cerrada correctamente."
 }
 ```
 
 **Headers de limpieza:**
 
 ```
-Set-Cookie: __Secure-access_token=; Max-Age=0; Path=/; Domain=.proactrip.com; Secure
-Set-Cookie: __Secure-refresh_token=; Max-Age=0; Path=/; Domain=.proactrip.com; Secure
+Set-Cookie: __Secure-access_token=; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=0
+Set-Cookie: __Secure-refresh_token=; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=0
 Clear-Site-Data: "cookies"
 ```
 
 #### Posibles Errores
 
-| Código | HTTP | Cuándo |
-|--------|------|--------|
-| `INTERNAL_ERROR` | 500 | Error inesperado |
+| Código | HTTP | Problem Type | Cuándo |
+|--------|------|-------------|--------|
+| `ErrNotAuthenticated` | 401 | `unauthorized` | No hay cookie de sesión (rechazado por middleware de auth) |
+| `ErrTokenInvalid` | 401 | `unauthorized` | Token inválido o expirado (rechazado por middleware de auth) |
 
 ---
 
 ## Logout All Sessions
 
-Revoca **todas** las sesiones activas del usuario. Requiere cookie `__Secure-access_token` válida. **No se pasa token en el body**.
+Revoca **todas** las sesiones activas del usuario en todos los dispositivos. El backend lee la cookie automáticamente.
 
 ### Request
 
@@ -486,60 +482,43 @@ Revoca **todas** las sesiones activas del usuario. Requiere cookie `__Secure-acc
 POST /v1/auth/logout/all
 ```
 
+**Ejemplo:**
+
+```bash
+curl -X POST {base_url}/logout/all \
+  -c cookies.txt -b cookies.txt
+```
+
 ### Responses
 
 #### 200 OK
 
 ```json
 {
-  "message": "All sessions have been revoked."
+  "message": "Todas las sesiones fueron revocadas."
 }
 ```
 
 **Headers de limpieza:**
 
 ```
-Set-Cookie: __Secure-access_token=; Max-Age=0; Path=/; Domain=.proactrip.com; Secure
-Set-Cookie: __Secure-refresh_token=; Max-Age=0; Path=/; Domain=.proactrip.com; Secure
+Set-Cookie: __Secure-access_token=; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=0
+Set-Cookie: __Secure-refresh_token=; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=0
 Clear-Site-Data: "cookies"
 ```
 
 #### Posibles Errores
 
-| Código | HTTP | Cuándo |
-|--------|------|--------|
-| `TOKEN_INVALID` | 401 | Cookie inválida o expirada |
-| `INTERNAL_ERROR` | 500 | Error inesperado |
-
----
-
-## Refresh Token 🚧
-
-> 🚧 **Planificado — no implementado.** La rotación de refresh tokens ya ocurre transparentemente vía middleware de autenticación. Un endpoint explícito de refresh será agregado en una fase posterior.
-
----
-
-## Change Password 🚧
-
-> 🚧 **Planificado — no implementado.**
-
----
-
-## Forgot Password 🚧
-
-> 🚧 **Planificado — no implementado.**
-
----
-
-## Reset Password 🚧
-
-> 🚧 **Planificado — no implementado.**
+| Código | HTTP | Problem Type | Cuándo |
+|--------|------|-------------|--------|
+| `ErrNotAuthenticated` | 401 | `unauthorized` | No hay cookie de sesión (rechazado por middleware de auth) |
+| `ErrTokenInvalid` | 401 | `unauthorized` | Token inválido o expirado (rechazado por middleware de auth) |
 
 ---
 
 ## OAuth Google
 
-Inicia el flujo de autenticación OAuth con Google. El frontend debe llamar este endpoint y redirigir al usuario a la URL de autorización devuelta por el backend.
+Inicia el flujo de autenticación OAuth con Google. El frontend llama a este endpoint, obtiene la `auth_url` y redirige al usuario.
 
 ### Request
 
@@ -551,13 +530,7 @@ GET /v1/auth/oauth/:provider
 
 | Parámetro | Tipo | Requerido | Descripción |
 |-----------|------|-----------|-------------|
-| `provider` | string | Sí | Proveedor OAuth. Actualmente solo `google`. |
-
-**Headers:**
-
-| Header | Tipo | Requerido | Descripción |
-|--------|------|-----------|-------------|
-| (ninguno requerido) | — | — | Endpoint público sin autenticación |
+| `provider` | string | Sí | Proveedor OAuth. Actualmente solo `google` |
 
 **Ejemplo:**
 
@@ -575,20 +548,34 @@ curl -X GET {base_url}/oauth/google
 }
 ```
 
-> **Flujo:** El frontend debe redirigir al navegador a `auth_url` con `window.location.href = data.auth_url`. El backend genera un `state` anti-CSRF one-time en cada llamada — **no cachear esta respuesta**.
+> **Flujo:** El frontend redirige al navegador con `window.location.href = data.auth_url`. El backend genera un `state` anti-CSRF one-time en cada llamada — **no cachear esta respuesta**.
 
 #### Posibles Errores
 
-| Código | HTTP | Cuándo |
-|--------|------|--------|
-| `OAUTH_PROVIDER_NOT_FOUND` | 400 | Proveedor no soportado (ej: `facebook`) |
-| `INTERNAL_ERROR` | 500 | Error inesperado |
+| Código | HTTP | Problem Type | Cuándo |
+|--------|------|-------------|--------|
+| `ErrOAuthProviderNotFound` | 400 | `bad-request` | Proveedor no soportado (ej: `facebook`) |
 
 ---
 
 ## OAuth Google Callback
 
-Callback llamado por Google después de que el usuario autoriza la aplicación. **Este endpoint NO debe ser llamado directamente por el frontend.** El navegador sigue la redirección automáticamente desde Google.
+Callback llamado por Google después de que el usuario autoriza. **Este endpoint no debe ser llamado directamente por el frontend** — el navegador sigue la redirección automáticamente desde Google.
+
+El backend:
+
+1. Valida el `state` anti-CSRF (one-time, se elimina del cache al validarse).
+2. Intercambia el `code` por tokens con Google.
+3. Crea el usuario si es la primera vez, o vincula la cuenta si ya existe.
+4. Si es un **nuevo usuario**: publica el evento `auth.user.registered` para que el módulo user cree el perfil inicial con given_name, family_name, locale(para language) y avatar de google.
+5. Emite cookies de sesión y redirige al frontend.
+
+> **Frontend:** Después del redirect exitoso (`status=success`):
+> 1. Llamar a `GET /v1/user/profile` para obtener identidad y avatar.
+> 2. Llamar a `GET /v1/user/travel-preferences` para preferencias de viaje.
+> 3. Llamar a `GET /v1/environment` para ubicación actual como placeholder en la UI.
+>
+> Ver [ENVIRONMENT_API](./ENVIRONMENT_API.md).
 
 ### Flujo Completo
 
@@ -596,31 +583,28 @@ Callback llamado por Google después de que el usuario autoriza la aplicación. 
 ┌──────────┐   GET /oauth/:provider    ┌──────────┐
 │ Frontend │ ────────────────────────> │ Backend  │
 └──────────┘                           └──────────┘
-     │                                      │
-     │  { auth_url }                        │
+     │   { auth_url }                       │
      │<─────────────────────────────────────│
      │                                      │
-     │  window.location.href = auth_url     │
-     │─────────────────────────────────────>│
-     │                                      │
-     │           ┌──────────┐               │
-     │           │  Google  │               │
-     │           └──────────┘               │
-     │                │                     │
-     │  (usuario autoriza)                  │
-     │                │                     │
-     │   Google redirige al backend         │
-     │   GET /oauth/google/callback         │
-     │   ?code=xxx&state=yyy                │
-     │                │────────────────────>│
-     │                │                     │ (intercambia código,
-     │                │                     │  crea/víncula usuario,
-     │                │                     │  genera tokens)
-     │                │                     │
-     │  302 → /auth/callback?status=success │
-     │  + cookies: __Secure-access_token    │
-     │  + cookies: __Secure-refresh_token   │
-     │<─────────────────────────────────────│
+     │   window.location.href = auth_url    │
+     ▼                                      │
+┌──────────┐                               │
+│  Google  │ (usuario autoriza)            │
+└──────────┘                               │
+     │  GET /oauth/google/callback          │
+     │  ?code=xxx&state=yyy                 │
+     └─────────────────────────────────────>│
+                                            │ (valida state, intercambia código,
+                                            │  crea/vincula usuario, genera tokens.
+                                            │  Si es nuevo → evento auth.user.registered)
+                                            │
+     302 → /auth/callback?status=success    │
+     Set-Cookie: __Secure-access_token      │
+     Set-Cookie: __Secure-refresh_token     │
+┌──────────┐<───────────────────────────────│
+│ Frontend │  GET /v1/user/profile         │  → session bootstrap
+│          │  GET /v1/environment          │  → ubicación placeholder
+└──────────┘
 ```
 
 ### Request
@@ -633,22 +617,18 @@ GET /v1/auth/oauth/:provider/callback
 
 | Parámetro | Tipo | Requerido | Descripción |
 |-----------|------|-----------|-------------|
-| `provider` | string | Sí | Proveedor OAuth. Debe coincidir con el usado en `/oauth/:provider`. |
+| `provider` | string | Sí | Proveedor OAuth. Debe coincidir con el usado en `/oauth/:provider` |
 
-**Query Params (enviados por Google):**
+**Query Params (enviados por Google, no por el frontend):**
 
 | Parámetro | Tipo | Requerido | Descripción |
 |-----------|------|-----------|-------------|
 | `code` | string | Sí | Código de autorización de Google |
 | `state` | string | Sí | Token anti-CSRF generado por el backend en `/oauth/:provider` |
 
-> **Nota:** El frontend no necesita leer estos parámetros. Google los añade automáticamente a la URL de callback registrada.
-
 ### Responses
 
 #### 302 Found — Éxito
-
-El backend redirige al frontend:
 
 ```
 Location: {FRONTEND_URL}/auth/callback?status=success
@@ -661,106 +641,48 @@ Set-Cookie: __Secure-access_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=La
 Set-Cookie: __Secure-refresh_token=v4.local.eyJ...; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=604800
 ```
 
-| Cookie | HttpOnly | TTL | Contenido |
-|--------|----------|-----|-----------|
-| `__Secure-access_token` | Sí | 15 min | PASETO v4 access token (opaco) |
-| `__Secure-refresh_token` | Sí | 7 días | PASETO v4 refresh token (opaco) |
-
-> **Importante:** Después del callback OAuth, el frontend debe llamar a `GET /v1/auth/me` para obtener los datos del usuario (`id`, `email`, `email_verified`, `role_name`). Login, register y verify-email ya incluyen estos datos en su respuesta.
-
 #### 302 Found — Error
-
-El backend redirige al frontend con el código de error:
 
 ```
 Location: {FRONTEND_URL}/auth/callback?status=error&code=OAUTH_EXCHANGE_FAILED
 ```
 
-> El frontend debe leer `status` y `code` de los query params en la URL de callback para mostrar el error adecuado al usuario. Si `status=success`, el usuario ya está autenticado y las cookies están disponibles.
+> El frontend lee `status` y `code` de los query params para mostrar el error adecuado. Si `status=success`, las cookies ya están disponibles.
 
 #### Posibles Errores (vía redirect)
 
 Todos los errores se devuelven como `302 Found` con `status=error&code=XXX`. El frontend nunca recibe un JSON de error en este endpoint.
 
-| Código | Cuándo |
-|--------|--------|
-| `OAUTH_CODE_MISSING` | Falta el parámetro `code` en el callback (Google no lo envió) |
-| `OAUTH_STATE_MISSING` | Falta el parámetro `state` en el callback (Google no lo envió) |
-| `OAUTH_STATE_INVALID` | State inválido, expirado o reutilizado (posible ataque CSRF o replay) |
-| `OAUTH_ACCESS_DENIED` | El usuario denegó el acceso en Google o hubo un error del proveedor |
-| `OAUTH_EXCHANGE_FAILED` | Error al intercambiar el código por tokens con Google, o error interno inesperado |
-| `OAUTH_PROVIDER_NOT_FOUND` | Proveedor no soportado |
-| `EMAIL_NOT_VERIFIED` | El email de la cuenta de Google no está verificado |
-| `ACCOUNT_LOCKED` | Cuenta bloqueada por intentos fallidos |
-| `ACCOUNT_SUSPENDED` | Cuenta suspendida |
-| `ACCOUNT_INACTIVE` | Cuenta inactiva |
+| Código | HTTP | Problem Type (interno) | Cuándo |
+|--------|------|------------------------|--------|
+| `ErrOAuthCodeMissing` | 302 | `bad-request` | Falta el parámetro `code` en el callback |
+| `ErrOAuthStateMissing` | 302 | `bad-request` | Falta el parámetro `state` en el callback |
+| `ErrOAuthStateInvalid` | 302 | `bad-request` | State inválido, expirado o reutilizado (posible CSRF) |
+| `ErrOAuthAccessDenied` | 302 | `bad-request` | Usuario denegó el acceso en Google |
+| `ErrOAuthExchangeFailed` | 302 | `unauthorized` | Error al intercambiar código con Google |
+| `ErrOAuthProviderNotFound` | 302 | `bad-request` | Proveedor no soportado |
+| `ErrEmailNotVerified` | 302 | `unauthorized` | Email de Google no verificado |
+| `ErrAccountLocked` | 302 | `rate-limit-exceeded` | Cuenta bloqueada |
+| `ErrAccountSuspended` | 302 | `forbidden` | Cuenta suspendida |
+| `ErrAccountDisabled` | 302 | `forbidden` | Cuenta deshabilitada |
 
----
-
-## Current User (Me)
-
-Retorna los datos del usuario autenticado. Usa la cookie `__Secure-access_token` (o `access_token` en dev) para identificar al usuario.
-
-> **Cuándo llamarlo:** Este endpoint se usa después de OAuth callback para obtener los datos del usuario. Login, register y verify-email ya devuelven los datos del usuario en su respuesta.
-
-### Request
-
-```
-GET /v1/auth/me
-```
-
-> El navegador envía las cookies automáticamente. No requiere body ni headers adicionales.
-
-### Responses
-
-#### 200 OK
-
-```json
-{
-  "user": {
-    "id": "019d5439-cb43-716d-90b5-51dcbe980908",
-    "email": "user@example.com",
-    "email_verified": true,
-    "role_name": "client",
-    "avatar_url": "https://lh3.googleusercontent.com/a/photo.jpg"
-  }
-}
-```
-
-> `avatar_url` usa `omitzero` — se omite cuando es `nil` (perfil aún no creado por el consumer asíncrono de eventos). El frontend lo interpreta como `null`/ausente.
-
-**Headers:**
-
-| Header | Valor |
-|--------|-------|
-| `Cache-Control` | `no-store, private` |
-
-#### Posibles Errores
-
-| HTTP | Cuándo |
-|------|--------|
-| 401 | No autenticado — falta cookie de access token |
-| 500 | Usuario no encontrado en base de datos |
-
----
-
-## SSE Token 🚧
-
-> 🚧 **Planificado — no implementado.** Tokens de corta duración para conexiones Server-Sent Events.
+> La columna HTTP muestra `302` porque todos los errores son redirects. La columna Problem Type indica el tipo RFC 9457 que se usaría si el error fuera devuelto como JSON (valor interno de referencia).
 
 ---
 
 ## Configuración CORS
 
+Configuración global aplicada a todos los endpoints. El origen permitido se resuelve dinámicamente desde la configuración del servidor (`FRONTEND_URL_DEV` o `FRONTEND_URL_PROD` según `SERVER_ENV`).
+
 | Setting | Valor |
 |---------|-------|
-| Allowed Origins | `https://proactrip.com`, `http://localhost:3000` |
+| Allowed Origins | Un solo origen, resuelto dinámicamente: `http://localhost:3000` (dev) o `https://proactrip.com` (prod) |
 | Allowed Methods | `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS` |
 | Allowed Headers | `Content-Type`, `Accept`, `Authorization`, `X-Request-Id`, `X-Trace-Id`, `Idempotency-Key` |
 | Allow Credentials | `true` |
-| Max Age | `86400` |
+| Max Age | `86400` (24h) |
 
-> **Crítico:** NUNCA usar `Access-Control-Allow-Origin: *` cuando se envían cookies. Debe ser origen explícito. Max Age varia según el contexto.
+> **Crítico:** Con `AllowCredentials: true`, el spec CORS exige UN solo origen explícito. Nunca se usa `Access-Control-Allow-Origin: *`.
 
 ---
 
@@ -772,16 +694,16 @@ Rate limiting multi-tier con DragonflyDB y scripts Lua atómicos. Distribuido y 
 
 | Tier | Scope | Límite | Aplica a |
 |------|-------|--------|----------|
-| **Tier 1 — Global** | IP | 100 req/min | Todos los endpoints (DDoS shield) |
-| **Tier 2 — Authenticated** | UUID del usuario | 10 req/min | Endpoints protegidos con auth (`/v1/auth/*` autenticados) |
+| **Tier 1 — Global** | IP | 100 req/min | Todos los endpoints (escudo anti-DDoS) |
+| **Tier 2 — Authenticated** | UUID del usuario | 10 req/min | Endpoints protegidos con auth |
 | **Tier 3 — Anonymous** | Cookie `__Secure-anon_token` | 5 req/min | Endpoints públicos sin autenticación |
 
 ### Provider-Aware Rate Limiting
 
 | Proveedor | Límite | Descripción |
 |-----------|--------|-------------|
-| Resend (email) | 100/day | Límite del plan gratuito de Resend. Se aplica por IP |
-| SerpAPI | 50/hour | Límite por IP para llamadas al proveedor externo de búsqueda |
+| Resend (email) | 100/día | Límite del plan de Resend. Se aplica por IP |
+| SerpAPI | 50/hora | Límite por IP para llamadas al proveedor externo de búsqueda |
 
 ### Cookie Anónima (`__Secure-anon_token`)
 
@@ -794,16 +716,14 @@ Set-Cookie: __Secure-anon_token=019d5439-cb43-716d-90b5-51dcbe980908; HttpOnly; 
 | Atributo | Valor | Propósito |
 |----------|-------|-----------|
 | Nombre | `__Secure-anon_token` | Identificador anónimo para rate limiting |
-| TTL | 10 años (Max-Age=315360000) | Persiste entre sesiones del navegador — permite rate limiting consistente en usuarios no autenticados |
+| TTL | 10 años (`Max-Age=315360000`) | Persiste entre sesiones del navegador para rate limiting consistente |
 | `HttpOnly` | `true` | Inaccesible vía JavaScript |
 | `Secure` | `true` | Solo HTTPS en producción |
 | `SameSite` | `Lax` | Se envía en navegación top-level |
 
 > El frontend no necesita hacer nada con esta cookie. El navegador la envía automáticamente. Si la cookie no existe, el backend la establece en la primera respuesta.
 
-### Response on 429 (Rate Limit Exceeded)
-
-Formato **RFC 9457 Problem Details**:
+### Response en 429
 
 ```json
 {
@@ -817,8 +737,6 @@ Formato **RFC 9457 Problem Details**:
 ```
 
 ### Rate Limit Headers
-
-Todas las respuestas incluyen estos headers (independientemente del status code):
 
 | Header | Descripción |
 |--------|-------------|
@@ -841,12 +759,13 @@ Esto previene almacenamiento en caches compartidos o del navegador.
 
 | Endpoint | Cache-Control | Motivo |
 |----------|---------------|--------|
-| `POST /v1/auth/login` | `no-store, private` | Datos de sesión sensibles |
 | `POST /v1/auth/register` | `no-store, private` | Datos de registro sensibles |
-| `POST /v1/auth/verify-email` | `no-store, private` | Datos de usuario + sesión |
+| `POST /v1/auth/resend-verification` | `no-store, private` | Anti-enumeración |
+| `POST /v1/auth/verify-email` | `no-store, private` | Datos de usuario + emisión de sesión |
+| `POST /v1/auth/login` | `no-store, private` | Datos de sesión sensibles |
 | `POST /v1/auth/logout` | `no-store, private` | Invalidación de sesión |
 | `POST /v1/auth/logout/all` | `no-store, private` | Invalidación masiva de sesiones |
-| `GET /v1/auth/me` | `no-store, private` | Datos de usuario sensibles |
+| `GET /v1/auth/oauth/:provider` | `no-store` | State anti-CSRF one-time — nunca cachear |
 
 ---
 
@@ -854,60 +773,53 @@ Esto previene almacenamiento en caches compartidos o del navegador.
 
 ### Tokens PASETO v4
 
-Todos los tokens internos son **PASETO v4 symmetric**. Son opacos para el cliente.
+Todos los tokens internos son **PASETO v4 symmetric**. Son opacos para el cliente — el frontend nunca los lee ni los decodifica.
 
 | Token | TTL | Propósito |
 |-------|-----|-----------|
-| `access_token` (cookie `__Secure-access_token`) | 15 min | Autenticar requests |
-| `refresh_token` (cookie `__Secure-refresh_token`) | 7 días | Rotación de sesión |
-| Email verification | 24 horas | Verificar email |
+| `access_token` | 15 min | Autenticar requests |
+| `refresh_token` | 7 días | Rotación de sesión |
+| Email verification | 24 horas | Verificar email y activar cuenta |
 | Password reset | 1 hora | Reset de contraseña |
-| OAuth `state` | 5-10 min | Anti-CSRF OAuth |
-
-> 🚧 Los siguientes tipos de token están planificados pero no implementados: `session_id` (MFA, 5 min), `sse_token` (SSE, 30 seg).
+| OAuth `state` | 5-10 min | Anti-CSRF OAuth (one-time) |
 
 ### Hashing de Contraseñas
 
-**Argon2id** con parámetros recomendados por OWASP (2026).
+**Argon2id** con parámetros recomendados por OWASP.
 
 ### Rotación de Refresh Tokens
 
-Cada vez que el backend refresca un `__Secure-access_token`, rota también el `__Secure-refresh_token` (token rotation). Si un `__Secure-refresh_token` revocado es reutilizado, **todas las sesiones del usuario se invalidan** automáticamente (detección de robo).
+Cada vez que el middleware refresca un `access_token`, rota también el `refresh_token`. Si un `refresh_token` revocado es reutilizado, **todas las sesiones del usuario se invalidan** automáticamente (detección de robo de sesión).
 
-### GeoIP y Weather
+### Flujo de Eventos y Preferencias
 
-- Resueltos desde la IP de conexión vía `GET /v1/environment` (ver [ENVIRONMENT_API](./ENVIRONMENT_API.md)).
-- No se requiere header `X-Real-IP` manual.
-- El backend cachea estos datos 10 min para evitar llamadas repetidas a APIs externas.
-- Los endpoints de auth (`/v1/auth/*`) NO devuelven `environment` — es responsabilidad del frontend.
+El módulo auth publica eventos para que otros módulos actúen. Los datos de environment se resuelven en momentos específicos:
 
-### MFA 🚧
+| Evento | Publicado en | Datos incluidos | Consumidor |
+|--------|-------------|-----------------|------------|
+| `auth.user.registered` | Register + OAuth (nuevo usuario) | `user_id`, `email`, `first_name` | Módulo Notificaciones (envía email). Módulo User (crea perfil inicial). |
+| `auth.user.verified` | Verify Email (primera verificación) | `user_id`, `email`, `language_code` | Módulo User (setea preferencias iniciales desde Accept-Language header). |
 
-> 🚧 **Planificado — no implementado.** MFA con TOTP, email y SMS será agregado en una fase posterior. Las siguientes características están planificadas:
-> - Códigos de un solo uso, TTL 5 minutos
-> - Recovery codes de 8 caracteres hexadecimales (one-time display)
-> - Invalidación de todas las sesiones ante reúso de recovery codes
+Las preferencia (language) se establece **una sola vez** durante la verificación del email, usando Accept-Language header. Para OAuth, el perfil se crea con los datos disponibles del proveedor (given_name, avatar_url, family_name, locale) y las preferencias se configuran posteriormente.
 
 ### OAuth PKCE
 
-- El backend genera y almacena el `code_verifier`.
-- Google valida el hash PKCE internamente durante el exchange.
-- El `state` es one-time: se valida y elimina del cache inmediatamente.
+El backend genera y almacena el `code_verifier`. El `state` es one-time: se valida y se elimina del cache inmediatamente para prevenir replay attacks.
 
 ### Prevención de Ataques
 
 | Amenaza | Mitigación |
 |---------|------------|
-| XSS | `HttpOnly cookies + CSP`  |
+| XSS | `HttpOnly` cookies + CSP |
 | CSRF | `SameSite=Lax` + cookies automáticas |
-| Token Exposure in SSE | 🚧 Planificado — SSE authenticated via cookies (no tokens in URL) |
+| Enumeración de usuarios | `POST /resend-verification` siempre retorna 200 |
 | Replay de refresh | Rotación continua + invalidación total ante reúso |
-| Third-party cookies | No se usa Partitioned (CHIPS) — SameSite=Lax + Domain=.proactrip.com es suficiente para subdominios |
+| OAuth CSRF | State anti-CSRF one-time eliminado del cache al validarse |
 | Rate limiting abuse | Multi-tier con DragonflyDB + Lua scripts atómicos (IP, usuario autenticado, cookie anónima) |
 
 ### Compartición de Cookies entre Subdominios
 
-Las cookies de autenticación se comparten entre `api.proactrip.com` y `app.proactrip.com` usando `Domain=.proactrip.com` con `SameSite=Lax`. NO se usa `Partitioned` (CHIPS) porque CHIPS está diseñado para iframes y cross-site embedding, no para subdominios. Con `Partitioned` + un `Domain` amplio, las cookies no se envían entre subdominios, rompiendo la autenticación cruzada.
+Las cookies usan `Domain=.proactrip.com` con `SameSite=Lax`, lo que las comparte entre `api.proactrip.com` y `app.proactrip.com`. No se usa `Partitioned` (CHIPS) porque está diseñado para iframes cross-site, no para subdominios propios.
 
 ### Headers de Seguridad
 
@@ -920,5 +832,3 @@ X-Frame-Options: DENY
 Referrer-Policy: strict-origin-when-cross-origin
 Strict-Transport-Security: max-age=31536000
 ```
-
----

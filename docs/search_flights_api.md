@@ -7,33 +7,19 @@
 
 ## Índice
 
-- [Arquitectura](#arquitectura)
-- [Seguridad de Cookies](#seguridad-de-cookies)
-- [Base URLs](#base-urls)
-- [Errores Estándar](#errores-estándar)
-- [Estrategia de Refresco de Tokens](#estrategia-de-refresco-de-tokens)
-- [Search Flights](#search-flights)
-  - [Flujo de Búsqueda](#flujo-de-búsqueda)
-  - [Request](#request)
-  - [Responses](#responses)
-    - [Phase: outbound_selection](#phase-outbound_selection)
-    - [Phase: return_selection](#phase-return_selection)
-    - [Phase: complete (one_way)](#phase-complete-one_way)
-    - [Sin Resultados](#sin-resultados)
-  - [Response Fields Explained](#response-fields-explained)
-  - [Paginación](#paginación)
-  - [Tokens: departure_token vs booking_token](#tokens-departure_token-vs-booking_token)
-  - [Posibles Errores](#posibles-errores-search-flights)
-- [Flight Details](#flight-details)
-  - [Request](#request-flight-details)
-  - [Responses](#responses-flight-details)
-  - [Response Fields Explained](#response-fields-explained-flight-details)
-  - [Booking Options](#booking-options)
-  - [Posibles Errores](#posibles-errores-flight-details)
-- [Configuración CORS](#configuración-cors)
-- [Rate Limiting](#rate-limiting)
-- [Cache](#cache)
-- [Notas de Seguridad](#notas-de-seguridad)
+| Endpoint | Estado |
+|----------|--------|
+| [Arquitectura](#arquitectura) | ✅ |
+| [Seguridad de Cookies](#seguridad-de-cookies) | ✅ |
+| [Base URLs](#base-urls) | ✅ |
+| [Errores Estándar](#errores-estándar) | ✅ |
+| [Estrategia de Refresco de Tokens](#estrategia-de-refresco-de-tokens) | ✅ |
+| [Search Flights](#search-flights) | ✅ Implementado |
+| [Flight Details](#flight-details) | ✅ Implementado |
+| [Configuración CORS](#configuración-cors) | ✅ |
+| [Rate Limiting](#rate-limiting) | ✅ |
+| [Cache](#cache) | ✅ |
+| [Notas de Seguridad](#notas-de-seguridad) | ✅ |
 
 ---
 
@@ -74,7 +60,7 @@ Fase 2: return_selection (con outbound_selection_token)
   El usuario elige un vuelo de vuelta → obtiene su booking_token
 ```
 
-Para **one_way** y **multi_city**: una sola llamada devuelve `phase: "complete"` con `booking_token` directamente.
+Para **one_way**: una sola llamada devuelve `phase: "complete"` con `booking_token` directamente.
 
 ### Política de Cookies para Búsqueda
 
@@ -165,7 +151,7 @@ El frontend nunca llama manualmente a `/refresh-token`. Las cookies se gestionan
 
 ## Search Flights
 
-Busca vuelos de ida y vuelta, solo ida, o multi-destino.
+Busca vuelos de ida y vuelta, o solo ida.
 
 ### Flujo de Búsqueda
 
@@ -211,27 +197,13 @@ Busca vuelos de ida y vuelta, solo ida, o multi-destino.
 │  → Itinerario completo + booking_options                            │
 └─────────────────────────────────────────────────────────────────────┘
 
-┌─────────────────────────────────────────────────────────────────────┐
-│                      MULTI CITY (1 o 2 fases)                       │
-│                                                                     │
-│  POST /v1/search/flights                                            │
-│  Request:  { trip_type:"multi_city", legs:[...], ... }             │
-│  Response: { phase:"complete",                                     │
-│              best_flights[].departure_token o booking_token,       │
-│              other_flights[].departure_token o booking_token }     │
-│                            ↓                                        │
-│  Si hay booking_token → POST /v1/search/flight-details              │
-│  Si hay departure_token → segunda llamada como round_trip           │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
 ### Máquina de Estados
 
 | Estado | Fase | trip_type | Token en respuesta | Próximo paso |
 |--------|------|-----------|--------------------|--------------|
 | `outbound_selection` | Búsqueda de ida | `round_trip` | `departure_token` | Segunda llamada con `outbound_selection_token` |
 | `return_selection` | Búsqueda de vuelta | `round_trip` | `booking_token` | Llamar a `/flight-details` |
-| `complete` | Completo | `one_way`, `multi_city` | `booking_token` | Llamar a `/flight-details` |
+| `complete` | Completo | `one_way` | `booking_token` | Llamar a `/flight-details` |
 | `empty` | Sin resultados | cualquiera | — | Refinar parámetros y reintentar |
 
 ### Request
@@ -258,7 +230,6 @@ POST /v1/search/flights
   "arrival": "LIM",
   "outbound_date": "2026-03-20",
   "return_date": "2026-03-30",
-  "legs": [],
   "adults": 2,
   "children": 0,
   "infants_in_seat": 0,
@@ -289,12 +260,11 @@ POST /v1/search/flights
 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
-| `trip_type` | string | Tipo de viaje: `"round_trip"`, `"one_way"`, `"multi_city"` |
+| `trip_type` | string | Tipo de viaje: `"round_trip"`, `"one_way"` |
 | `departure` | string | Identificador del origen. Puede ser código IATA de aeropuerto (ej: `"MAD"`, `"LIM"`), kgmid de ciudad/región (ej: `"/m/04jpl"`), o múltiples separados por coma (ej: `"CDG,ORY,/m/04jpl"`). **Requerido para `round_trip` y `one_way`. Validado como no-vacío** |
 | `arrival` | string | Identificador del destino. Mismo formato que `departure`. **Requerido para `round_trip` y `one_way`. Validado como no-vacío** |
 | `outbound_date` | string | Fecha de salida. Formato `YYYY-MM-DD`. **Requerido para `round_trip` y `one_way`. Validado como no-vacío** |
 | `return_date` | string | Fecha de vuelta. Formato `YYYY-MM-DD`. **Requerido solo para `round_trip`. Validado como no-vacío en ese caso** |
-| `legs` | array | Tramos del viaje. **Requerido solo para `multi_city`** |
 
 **Campos Opcionales:**
 
@@ -332,7 +302,6 @@ POST /v1/search/flights
 |-------|-------------|
 | `"round_trip"` | Ida y vuelta. Requiere `outbound_date` y `return_date` |
 | `"one_way"` | Solo ida. Requiere solo `outbound_date` |
-| `"multi_city"` | Múltiples destinos. Requiere campo `legs` |
 
 **`travel_class`:**
 
@@ -399,41 +368,7 @@ Rango de horas en formato de 24 horas (0–23). Los campos de llegada son opcion
 | `min_minutes` | integer | Sí | Duración mínima de escala en minutos |
 | `max_minutes` | integer | Sí | Duración máxima de escala en minutos |
 
-**`legs` (solo para `multi_city`):**
-
-Array de tramos en orden. Cada tramo tiene su propio origen, destino, fecha y restricción horaria opcional.
-
-```json
-[
-  {
-    "departure": "MAD",
-    "arrival": "MIA",
-    "date": "2026-11-02",
-    "times": {
-      "departure_from": 6,
-      "departure_to": 18,
-      "arrival_from": 10,
-      "arrival_to": 23
-    }
-  },
-  {
-    "departure": "MIA",
-    "arrival": "MAD",
-    "date": "2026-11-12"
-  }
-]
-```
-
-| Campo | Tipo | Requerido | Descripción |
-|-------|------|-----------|-------------|
-| `departure` | string | Sí | Origen del tramo (códigos IATA separados por coma) |
-| `arrival` | string | Sí | Destino del tramo |
-| `date` | string | Sí | Fecha del tramo. Formato `YYYY-MM-DD` |
-| `times` | object | No | Restricción horaria del tramo. Misma estructura que `outbound_times` |
-
-Los aeropuertos pueden ser múltiples, separados por coma: `"departure": "LAX,SFO"` busca salidas desde cualquiera de los dos.
-
-### Notas sobre Parámetros de Localización
+### Ejemplos curl
 
 La ubicación del usuario la resuelve **siempre el backend** a partir de la IP de la request. El frontend nunca llama a APIs externas de geolocalización directamente.
 
@@ -510,45 +445,6 @@ curl -X POST {base_url}/flights \
     "adults": 2,
     "currency": "EUR",
     "sort_by": "price"
-  }'
-```
-
-#### Multi-destino (multi_city)
-
-```bash
-curl -X POST {base_url}/flights \
-  -H "Content-Type: application/json" \
-  -d '{
-    "trip_type": "multi_city",
-    "adults": 2,
-    "children": 2,
-    "infants_in_seat": 1,
-    "infants_on_lap": 1,
-    "travel_class": "economy",
-    "currency": "EUR",
-    "bags": 5,
-    "max_price": 10000,
-    "stops": "max_2",
-    "include_airlines": ["UA"],
-    "emissions_filter": true,
-    "layover_duration": { "min_minutes": 90, "max_minutes": 330 },
-    "exclude_connections": ["CDG", "AUS"],
-    "max_duration_minutes": 3000,
-    "sort_by": "price",
-    "legs": [
-      {
-        "departure": "MAD",
-        "arrival": "MIA",
-        "date": "2026-11-02",
-        "times": { "departure_from": 6, "departure_to": 18, "arrival_from": 10, "arrival_to": 23 }
-      },
-      {
-        "departure": "MIA",
-        "arrival": "MAD",
-        "date": "2026-11-12",
-        "times": { "departure_from": 6, "departure_to": 20, "arrival_from": 10, "arrival_to": 23 }
-      }
-    ]
   }'
 ```
 
@@ -1003,7 +899,7 @@ Cuando no se encuentran vuelos para la búsqueda.
 
 ```json
 {
-  "trip_type": "multi_city",
+  "trip_type": "one_way",
   "phase": "complete",
   "results_state": "empty",
   "best_flights": [],
@@ -1048,13 +944,13 @@ Cuando no se encuentran vuelos para la búsqueda.
 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
-| `trip_type` | string | Tipo de viaje: `"round_trip"`, `"one_way"`, `"multi_city"` |
-| `phase` | string | `"outbound_selection"` (primera llamada de round_trip), `"return_selection"` (segunda llamada de round_trip), `"complete"` (one_way y multi_city) |
+| `trip_type` | string | Tipo de viaje: `"round_trip"`, `"one_way"` |
+| `phase` | string | `"outbound_selection"` (primera llamada de round_trip), `"return_selection"` (segunda llamada de round_trip), `"complete"` (one_way) |
 | `results_state` | string | `"matching"` = resultados encontrados, `"empty"` = sin resultados |
-| `best_flights` | array | Vuelos destacados/recomendados por el proveedor. Puede ser `[]` con filtros específicos. Aparece en `one_way` y `multi_city` con resultados. **No aparece** en `round_trip` |
+| `best_flights` | array | Vuelos destacados/recomendados por el proveedor. Puede ser `[]` con filtros específicos. Aparece en `one_way` con resultados. **No aparece** en `round_trip` |
 | `other_flights` | array | Resto de vuelos disponibles. Aparece en todas las fases excepto `empty` |
 | `airports` | array | Información completa de los aeropuertos involucrados en la búsqueda. **Siempre presente**, incluso con 0 resultados |
-| `price_insights` | object\|null | Análisis de precios históricos para la ruta. Solo en primera llamada de `round_trip` y en `one_way`. `null` en fase `return_selection` y `multi_city` |
+| `price_insights` | object\|null | Análisis de precios históricos para la ruta. Solo en primera llamada de `round_trip` y en `one_way`. `null` en fase `return_selection` |
 | `from_cache` | boolean | `true` si la respuesta vino de caché |
 | `cached_at` | string\|null | Timestamp ISO 8601 del momento en que se cacheó. `null` si no es de caché |
 | `meta` | object\|null | Metadatos de paginación. Ver sección [Paginación](#paginación). `null` cuando no hay suficientes resultados para paginar |
@@ -1205,19 +1101,19 @@ Itinerario completo + booking_options (respuesta)
 | `round_trip` | Primera llamada | En `other_flights[]` | No aparece |
 | `round_trip` | Segunda llamada | No aparece | En `other_flights[]` |
 | `one_way` | Única llamada | No aparece | En `best_flights[]` y `other_flights[]` |
-| `multi_city` | Con resultados | En `best_flights[]` y `other_flights[]` | No aparece (puede haber `booking_token` si el proveedor lo permite) |
 | Cualquiera | Sin resultados | No aparece | No aparece |
 
 ### Posibles Errores (Search Flights)
 
-| Código | HTTP | Cuándo |
-|--------|------|--------|
-| `VALIDATION_ERROR` | 400 | Body inválido, `trip_type` no reconocido, faltan campos requeridos según el tipo de viaje, `include_airlines` y `exclude_airlines` usados simultáneamente, `return_date` ausente en `round_trip` |
-| `INVALID_PARAM_RANGE` | 422 | Parámetros fuera de rango: `bags` supera el número de pasajeros, horas de rango inválidas, `outbound_selection_token` expirado o inválido |
-| `PROVIDER_UNAVAILABLE` | 503 | El proveedor externo (SerpAPI) no está disponible |
-| `TOKEN_INVALID` | 401 | Cookie de sesión inválida o expirada (solo si el usuario estaba autenticado) |
-| `RATE_LIMIT_EXCEEDED` | 429 | Demasiadas peticiones (RFC 9457 Problem JSON). Ver [Rate Limiting](#rate-limiting) |
-| `INTERNAL_ERROR` | 500 | Error inesperado del servidor |
+| Código | HTTP | Problem Type | Cuándo |
+|--------|------|-------------|--------|
+| `ErrInvalidTripType` | 400 | `bad-request` | `trip_type` no reconocido |
+| `ErrMissingRequiredField` | 400 | `validation-error` | Faltan campos requeridos según el tipo de viaje (`departure`, `arrival`, `outbound_date`, `return_date`) |
+| `ErrInvalidParameterRange` | 422 | `validation-error` | Parámetros fuera de rango: `bags` supera número de pasajeros, horas inválidas, `include_airlines` y `exclude_airlines` usados simultáneamente, `outbound_selection_token` en trip_type incorrecto |
+| `ErrProviderUnavailable` | 503 | `service-unavailable` | El proveedor externo (SerpAPI) no está disponible |
+| `ErrProviderError` | 503 | `service-unavailable` | Error inesperado del proveedor externo |
+| `ErrTokenInvalid` | 401 | `unauthorized` | Cookie de sesión inválida o expirada (solo si el usuario estaba autenticado) |
+| `ErrRateLimitExceeded` | 429 | `rate-limit-exceeded` | Demasiadas peticiones (RFC 9457 Problem JSON). Ver [Rate Limiting](#rate-limiting) |
 
 ---
 
@@ -1570,15 +1466,14 @@ El frontend debe mostrar esta información al usuario para que sepa qué aerolí
 
 ### Posibles Errores (Flight Details)
 
-| Código | HTTP | Cuándo |
-|--------|------|--------|
-| `VALIDATION_ERROR` | 400 | `booking_token` vacío o ausente, `departure` o `arrival` no proporcionados, `outbound_date` no proporcionado |
-| `BOOKING_TOKEN_EXPIRED` | 404 | El `booking_token` no devuelve resultados — puede haber caducado. Los tokens del proveedor expiran después de un tiempo variable (generalmente horas). Si esto ocurre, el frontend debe volver a llamar `POST /v1/search/flights` con los mismos parámetros para obtener un token nuevo |
-| `INVALID_PARAM_RANGE` | 422 | Parámetros de pasajeros incoherentes con el token |
-| `PROVIDER_UNAVAILABLE` | 503 | El proveedor externo no está disponible |
-| `TOKEN_INVALID` | 401 | Cookie de sesión inválida o expirada (solo si el usuario estaba autenticado) |
-| `RATE_LIMIT_EXCEEDED` | 429 | Demasiadas peticiones (RFC 9457 Problem JSON). Ver [Rate Limiting](#rate-limiting) |
-| `INTERNAL_ERROR` | 500 | Error inesperado del servidor |
+| Código | HTTP | Problem Type | Cuándo |
+|--------|------|-------------|--------|
+| `ErrMissingRequiredField` | 400 | `validation-error` | `booking_token` vacío o ausente, `departure` o `arrival` no proporcionados, `outbound_date` no proporcionado |
+| `ErrBookingTokenExpired` | 404 | `not-found` | El `booking_token` no devuelve resultados — puede haber caducado. Los tokens del proveedor expiran después de un tiempo variable (generalmente horas). Si esto ocurre, el frontend debe volver a llamar `POST /v1/search/flights` con los mismos parámetros para obtener un token nuevo |
+| `ErrInvalidParameterRange` | 422 | `validation-error` | Parámetros de pasajeros incoherentes con el token |
+| `ErrProviderUnavailable` | 503 | `service-unavailable` | El proveedor externo no está disponible |
+| `ErrTokenInvalid` | 401 | `unauthorized` | Cookie de sesión inválida o expirada (solo si el usuario estaba autenticado) |
+| `ErrRateLimitExceeded` | 429 | `rate-limit-exceeded` | Demasiadas peticiones (RFC 9457 Problem JSON). Ver [Rate Limiting](#rate-limiting) |
 
 ---
 
@@ -1693,7 +1588,6 @@ La clave de caché se genera haciendo hash de los siguientes campos del request:
 | `arrival` | Sí |
 | `outbound_date` | Sí |
 | `return_date` | Sí (si aplica) |
-| `legs` | Sí (para multi_city) |
 | `adults` | Sí |
 | `children` | Sí |
 | `infants_in_seat` | Sí |

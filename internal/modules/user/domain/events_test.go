@@ -61,15 +61,6 @@ func TestMedicalProfileUpdated_EventType(t *testing.T) {
 	}
 }
 
-func TestNotificationPreferencesUpdated_EventType(t *testing.T) {
-	userID := uuid.Must(uuid.NewV7())
-	evt := NewNotificationPreferencesUpdated(userID)
-
-	if evt.EventType() != "NotificationPreferencesUpdated" {
-		t.Errorf("EventType = %s, se esperaba NotificationPreferencesUpdated", evt.EventType())
-	}
-}
-
 func TestDocumentUploadReceived_EventType(t *testing.T) {
 	userID := uuid.Must(uuid.NewV7())
 	docID := uuid.Must(uuid.NewV7())
@@ -146,7 +137,6 @@ func TestDomainEvents_Interface(t *testing.T) {
 		NewUserProfileUpdated(uuid.Must(uuid.NewV7())),
 		NewTravelPreferencesUpdated(uuid.Must(uuid.NewV7())),
 		NewMedicalProfileUpdated(uuid.Must(uuid.NewV7())),
-		NewNotificationPreferencesUpdated(uuid.Must(uuid.NewV7())),
 		NewDocumentUploadReceived(uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), "file.pdf"),
 		NewDocumentValidationPassed(uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())),
 		NewDocumentValidationFailed(uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), "reason"),

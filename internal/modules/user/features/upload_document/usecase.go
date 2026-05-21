@@ -15,6 +15,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/ProacTrip/Backend/internal/modules/user/adapters/filetype"
+	"github.com/ProacTrip/Backend/internal/modules/user/adapters/storage"
 	"github.com/ProacTrip/Backend/internal/modules/user/domain"
 )
 
@@ -283,10 +284,10 @@ func (uc *UseCase) Execute(ctx context.Context, cmd UploadDocumentCommand) (*Upl
 		MimeType:          &detectedMime,
 		DetectedMimeType:  &detectedMime,
 		DetectedSizeBytes: &realSize,
-		OCRStatus:         domain.OCRStatusQueued,
-		IsVerified:        false,
-		CreatedAt:         now,
-		UpdatedAt:         now,
+		OCRStatus:          domain.OCRStatusQueued,
+		VerificationStatus: domain.VerificationStatusUnverified,
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}
 	fs := int(realSize)
 	doc.FileSize = &fs
@@ -296,7 +297,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd UploadDocumentCommand) (*Upl
 	}
 
 	// 9. Subir archivo a R2 raw/
-	if err := uc.storage.Upload(ctx, "proactrip-secure", storageKey,
+	if err := uc.storage.Upload(ctx, storage.SecureBucket(), storageKey,
 		bytes.NewReader(cmd.FileBytes), realSize, detectedMime); err != nil {
 		slog.Error("fallo al subir archivo a R2", "doc_id", docID, "error", err)
 		// Best-effort cleanup del registro huérfano en DB — si R2 falla
@@ -346,8 +347,8 @@ func (uc *UseCase) Execute(ctx context.Context, cmd UploadDocumentCommand) (*Upl
 	resp := &UploadDocumentResponse{
 		DocumentID: docID.String(),
 		Status:     string(domain.OCRStatusQueued),
-		EventsURL:  fmt.Sprintf("/v1/user/documents/%s/events", docID.String()),
-		Message:    "Documento recibido. El procesamiento ha comenzado. Seguí el progreso vía events_url.",
+		EventsURL:  storage.SSEBaseURL(),
+		Message:    "Documento recibido. El procesamiento ha comenzado. Seguí el progreso vía SSE en " + storage.SSEBaseURL() + ".",
 	}
 
 	return resp, nil
@@ -391,9 +392,9 @@ func (uc *UseCase) reuseGlobalDedup(
 		MimeType:          &cmd.MimeType,
 		DetectedMimeType:  &cmd.MimeType,
 		DetectedSizeBytes: &realSize,
-		OCRStatus:         domain.OCRStatusQueued,
-		OCRData:           cached.OCRResults,
-		IsVerified:        false,
+		OCRStatus:          domain.OCRStatusQueued,
+		OCRData:            cached.OCRResults,
+		VerificationStatus: domain.VerificationStatusUnverified,
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}
@@ -439,7 +440,7 @@ func (uc *UseCase) reuseGlobalDedup(
 	return &UploadDocumentResponse{
 		DocumentID: docID.String(),
 		Status:     string(domain.OCRStatusQueued),
-		EventsURL:  fmt.Sprintf("/v1/user/documents/%s/events", docID.String()),
+		EventsURL:  storage.SSEBaseURL(),
 		Message:    "Documento reutilizado por deduplicación global. Procesamiento iniciado.",
 	}, true
 }

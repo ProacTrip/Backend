@@ -3,12 +3,14 @@
 package account_status
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 
 	httperr "github.com/ProacTrip/Backend/internal/shared/http"
+	sharedauth "github.com/ProacTrip/Backend/internal/shared/auth"
 )
 
 // =============================================================================
@@ -55,9 +57,7 @@ func (h *Handler) Handle(c *echo.Context) error {
 		return httperr.MapError(c, bindErr)
 	}
 
-	// 3. Extraer actor ID del contexto (inyectado por auth middleware en PR 5)
-	// Por ahora, usamos un valor por defecto. Cuando el middleware esté activo,
-	// se leerá de los claims. Mientras tanto, cualquier actor != userID permite la acción.
+	// 3. Extraer actor ID de los claims del token PASETO
 	actorID := extractActorID(c)
 
 	cmd := EnableDisableCommand{
@@ -78,11 +78,16 @@ func (h *Handler) Handle(c *echo.Context) error {
 // extractActorID — extrae el ID del usuario autenticado del contexto
 // =============================================================================
 
-// extractActorID obtiene el ID del usuario autenticado desde el contexto.
-// Cuando el middleware de autenticación esté cableado (PR 5), leerá los claims reales.
-// Por ahora retorna un UUID aleatorio para permitir que los tests pasen.
+// extractActorID obtiene el ID del usuario autenticado desde los claims del token PASETO.
+// Lee los claims inyectados por el middleware de autenticación en el contexto de Echo.
+// Si no hay claims (sin autenticación), retorna uuid.Nil como fallback.
 func extractActorID(c *echo.Context) uuid.UUID {
-	// FUTURE (PR 5): leer de c.Get("user_claims") → claims.UserID
-	// Por ahora, cualquier valor que no sea el userID del path param permite la acción.
-	return uuid.Nil // nil UUID nunca coincide con un userID real → self-disable bloqueado
+	claims, err := sharedauth.GetAccessClaims(c)
+	if err != nil {
+		slog.Warn("extractActorID: no se pudieron obtener los claims del token",
+			slog.String("error", err.Error()))
+		return uuid.Nil
+	}
+
+	return claims.UserID
 }

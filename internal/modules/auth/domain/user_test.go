@@ -79,11 +79,6 @@ func TestNuevoUsuario(t *testing.T) {
 				t.Errorf("FailedLoginAttempts = %d, se esperaba 0", user.FailedLoginAttempts)
 			}
 
-			// MFAEnabled debe ser false
-			if user.MFAEnabled {
-				t.Error("MFAEnabled debería ser false")
-			}
-
 			// EmailVerified debe ser false
 			if user.EmailVerified {
 				t.Error("EmailVerified debería ser false")

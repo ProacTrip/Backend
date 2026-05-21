@@ -19,8 +19,10 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/ProacTrip/Backend/internal/modules/user/adapters/filetype"
+	"github.com/ProacTrip/Backend/internal/modules/user/adapters/storage"
 	"github.com/ProacTrip/Backend/internal/modules/user/domain"
 	"github.com/ProacTrip/Backend/internal/shared/eventbus"
+	"github.com/ProacTrip/Backend/internal/shared/sse"
 )
 
 // =============================================================================
@@ -203,7 +205,7 @@ func (v *ValidatorWorker) processMessage(ctx context.Context, msg redis.XMessage
 	if !filetype.IsAccepted(detectedMime) {
 		v.rejectDocument(ctx, doc, "MIME type no aceptado: "+detectedMime)
 		_ = v.rdb.XAck(ctx, docValidateStream, v.group, msg.ID)
-		v.publishSSEEvent(ctx, docID, "rejected", map[string]interface{}{
+		v.publishSSEEvent(ctx, doc.UserID, docID, "rejected", map[string]interface{}{
 			"failure_reason": "invalid_mime_type",
 			"detail":         "El tipo de archivo no es aceptado.",
 		})
@@ -215,7 +217,7 @@ func (v *ValidatorWorker) processMessage(ctx context.Context, msg redis.XMessage
 		if rejection := v.crossValidate(ctx, storageKey, detectedMime, docID); rejection != "" {
 			v.rejectDocument(ctx, doc, rejection)
 			_ = v.rdb.XAck(ctx, docValidateStream, v.group, msg.ID)
-			v.publishSSEEvent(ctx, docID, "rejected", map[string]interface{}{
+			v.publishSSEEvent(ctx, doc.UserID, docID, "rejected", map[string]interface{}{
 				"failure_reason": "cross_validation_failed",
 				"detail":         rejection,
 			})
@@ -236,7 +238,7 @@ func (v *ValidatorWorker) processMessage(ctx context.Context, msg redis.XMessage
 	}
 
 	// 6. Publicar SSE
-	v.publishSSEEvent(ctx, docID, "processing", map[string]interface{}{
+	v.publishSSEEvent(ctx, doc.UserID, docID, "processing", map[string]interface{}{
 		"sub_state": "validating",
 		"message":   "Validación cruzada completada. Pasando a sanitización...",
 	})
@@ -290,7 +292,7 @@ func (v *ValidatorWorker) crossValidate(ctx context.Context, storageKey, detecte
 	}
 
 	// 2. Validate R2 metadata ContentType matches detected MIME
-	r2ContentType, err := v.r2.HeadContentType(ctx, "proactrip-secure", storageKey)
+	r2ContentType, err := v.r2.HeadContentType(ctx, storage.SecureBucket(), storageKey)
 	if err != nil {
 		slog.Warn("doc validator: head content type failed", "doc_id", docID, "key", storageKey, "error", err)
 	} else if r2ContentType != "" && r2ContentType != detectedMime {
@@ -298,7 +300,7 @@ func (v *ValidatorWorker) crossValidate(ctx context.Context, storageKey, detecte
 	}
 
 	// 3. Download file for polyglot + PDF checks
-	reader, err := v.r2.Download(ctx, "proactrip-secure", storageKey)
+	reader, err := v.r2.Download(ctx, storage.SecureBucket(), storageKey)
 	if err != nil {
 		slog.Error("doc validator: download for cross-validation failed", "doc_id", docID, "error", err)
 		return "unable to download file for validation"
@@ -402,7 +404,10 @@ func (v *ValidatorWorker) rejectDocument(ctx context.Context, doc *domain.UserDo
 // SSE publishing
 // =============================================================================
 
-func (v *ValidatorWorker) publishSSEEvent(ctx context.Context, docID uuid.UUID, event string, data map[string]interface{}) {
+// publishSSEEvent publica un evento SSE en el stream doc:events:{id}
+// y también en el SSE Hub para consumidores conectados vía HTTP.
+func (v *ValidatorWorker) publishSSEEvent(ctx context.Context, userID, docID uuid.UUID, event string, data map[string]interface{}) {
+	// Redis stream (existing — kept for other consumers)
 	stream := fmt.Sprintf("{events}:doc:events:%s", docID.String())
 
 	payload := map[string]interface{}{
@@ -420,6 +425,12 @@ func (v *ValidatorWorker) publishSSEEvent(ctx context.Context, docID uuid.UUID, 
 	}).Result(); err != nil {
 		slog.Warn("doc validator: publish SSE event failed", "doc_id", docID, "event", event, "error", err)
 	}
+
+	// SSE Hub (new — for HTTP EventSource connections)
+	sse.GetHub().Publish(userID, sse.Event{
+		Type: "doc." + event,
+		Data: payload,
+	})
 }
 
 // =============================================================================

@@ -51,10 +51,6 @@ func (n *noopCache) Set(ctx context.Context, key string, value any, ttl time.Dur
 	return nil
 }
 
-type noopRepo struct{}
-
-func (n *noopRepo) Save(ctx context.Context, entry domain.SearchHistoryEntry) error { return nil }
-
 func setupHandlerIntegrationTest(t *testing.T) (*search_flights.Handler, *spyProvider, *redis.Client) {
 	t.Helper()
 
@@ -67,7 +63,6 @@ func setupHandlerIntegrationTest(t *testing.T) (*search_flights.Handler, *spyPro
 	uc := search_flights.NewUseCase(search_flights.UseCaseDeps{
 		Provider:    spy,
 		Cache:       &noopCache{},
-		Repo:        &noopRepo{},
 		RateLimiter: nil, // nil-safe in UseCase.Execute
 		SearchTTL:   15 * time.Minute,
 	})

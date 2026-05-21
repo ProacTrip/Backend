@@ -72,12 +72,12 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		}
 	}
 
-	// 3. Build filters
+	// 3. Build filters — mapear status público a valor DB
 	filters := ListUsersFilters{
 		Offset:        offset,
 		Limit:         cmd.Limit,
 		Role:          cmd.Role,
-		Status:        cmd.Status,
+		Status:        StatusToDB(cmd.Status),
 		Search:        cmd.Search,
 		CreatedBefore: cmd.CreatedBefore,
 		CreatedAfter:  cmd.CreatedAfter,

@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -15,16 +16,35 @@ import (
 )
 
 // =============================================================================
-// Constantes de buckets
+// Configuración de buckets desde env vars
 // =============================================================================
 
-const (
-	// BucketSecure almacena documentos sensibles (encriptados, acceso restringido).
-	BucketSecure = "proactrip-secure"
+// SecureBucket retorna el nombre del bucket para documentos sensibles.
+// Configurable via R2_SECURE_BUCKET (default "proactrip-secure").
+func SecureBucket() string {
+	if v := os.Getenv("R2_SECURE_BUCKET"); v != "" {
+		return v
+	}
+	return "proactrip-secure"
+}
 
-	// BucketAssets almacena assets públicos (avatars, imágenes procesadas).
-	BucketAssets = "proactrip-assets"
-)
+// AssetsBucket retorna el nombre del bucket para assets públicos.
+// Configurable via R2_ASSETS_BUCKET (default "proactrip-assets").
+func AssetsBucket() string {
+	if v := os.Getenv("R2_ASSETS_BUCKET"); v != "" {
+		return v
+	}
+	return "proactrip-assets"
+}
+
+// SSEBaseURL retorna la URL base para Server-Sent Events.
+// Configurable via SSE_BASE_URL (default "/v1/realtime/events").
+func SSEBaseURL() string {
+	if v := os.Getenv("SSE_BASE_URL"); v != "" {
+		return v
+	}
+	return "/v1/realtime/events"
+}
 
 // =============================================================================
 // R2Storage — Adaptador de almacenamiento R2 (S3-compatible)
@@ -73,6 +93,15 @@ func (s *R2Storage) Download(ctx context.Context, bucket, key string) (io.ReadCl
 		return nil, fmt.Errorf("descargar objeto: %w", err)
 	}
 	return obj, nil
+}
+
+// GenerateDownloadURL genera una URL prefirmada para descargar un archivo.
+func (s *R2Storage) GenerateDownloadURL(ctx context.Context, bucket, key string, expiry time.Duration) (string, error) {
+	url, err := s.client.PresignedGetObject(ctx, bucket, key, expiry, nil)
+	if err != nil {
+		return "", fmt.Errorf("generar download URL: %w", err)
+	}
+	return url.String(), nil
 }
 
 // Delete elimina un archivo del storage.

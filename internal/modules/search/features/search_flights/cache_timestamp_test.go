@@ -41,21 +41,6 @@ func (c *stubCacheWithSet) Set(ctx context.Context, key string, value any, ttl t
 	return nil
 }
 
-// repoStub es un stub de SearchHistoryRepository con saveFn.
-type repoStub struct {
-	saveFn func(ctx context.Context, entry domain.SearchHistoryEntry) error
-}
-
-func (s *repoStub) Save(ctx context.Context, entry domain.SearchHistoryEntry) error {
-	return s.saveFn(ctx, entry)
-}
-
-func newStubRepo() *repoStub {
-	return &repoStub{saveFn: func(ctx context.Context, entry domain.SearchHistoryEntry) error {
-		return nil
-	}}
-}
-
 // =============================================================================
 // Test: Cache hit preserves original CachedAt timestamp
 // =============================================================================
@@ -93,7 +78,6 @@ func TestCacheHitPreservesTimestamp(t *testing.T) {
 	uc := search_flights.NewUseCase(search_flights.UseCaseDeps{
 		Provider:  provider,
 		Cache:     getCache,
-		Repo:      newStubRepo(),
 		SearchTTL: 5 * time.Minute,
 	})
 
@@ -134,7 +118,6 @@ func TestEmptyCacheKeyGuard(t *testing.T) {
 			},
 		},
 		Cache:     cache,
-		Repo:      newStubRepo(),
 		SearchTTL: 5 * time.Minute,
 	})
 
@@ -176,7 +159,6 @@ func TestCacheMissSetsRecentCachedAt(t *testing.T) {
 			},
 		},
 		Cache:     getCache,
-		Repo:      newStubRepo(),
 		SearchTTL: 5 * time.Minute,
 	})
 
@@ -232,7 +214,6 @@ func TestIntegration_MiniredisCacheHitTimestamp(t *testing.T) {
 			},
 		},
 		Cache:     getCache,
-		Repo:      newStubRepo(),
 		SearchTTL: 5 * time.Minute,
 	})
 

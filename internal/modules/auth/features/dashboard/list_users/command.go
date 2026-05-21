@@ -61,18 +61,30 @@ func (cmd *Command) Validate() error {
 }
 
 // =============================================================================
+// Mapeo de status públicos a valores DB
+// =============================================================================
+
+// StatusToDB mapea el valor público del query param al valor de DB.
+// "unverified" → "pending_verification", los demás pasan directo.
+func StatusToDB(status string) string {
+	switch status {
+	case "unverified":
+		return string(domain.StatusPendingVerification)
+	default:
+		return status
+	}
+}
+
+// =============================================================================
 // Helpers de validación
 // =============================================================================
 
-// validUserStatuses is the set of valid user status values for filtering.
-// Matches the CHECK constraint in the users table.
+// validUserStatuses es el conjunto de valores de status aceptados en el query param.
+// Solo 3 valores públicos: "unverified", "active", "disabled".
 var validUserStatuses = map[string]bool{
-	string(domain.StatusPendingVerification): true,
-	string(domain.StatusActive):              true,
-	string(domain.StatusInactive):            true,
-	string(domain.StatusSuspended):           true,
-	string(domain.StatusLocked):              true,
-	string(domain.StatusDisabled):            true,
+	"unverified": true,
+	"active":     true,
+	"disabled":   true,
 }
 
 func isValidUserStatus(s string) bool {

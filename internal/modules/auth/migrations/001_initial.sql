@@ -1,5 +1,21 @@
 -- +migrate Up
 -- =============================================================================
+-- MIGRACIÓN 001: Schema base del módulo Auth
+-- =============================================================================
+-- Crea las tablas core del sistema de autenticación:
+--   roles              — roles del sistema (client, staff, admin)
+--   permissions        — permisos RBAC (recurso + acción)
+--   role_permissions   — relación roles ↔ permisos (M:N)
+--   users              — usuarios con email, contraseña, estado, rol
+--   user_permission_overrides — sobrescritura de permisos por usuario
+--   user_feature_limits       — límites de features por usuario
+--   default_feature_limits    — límites de features por rol
+--   user_auth_identities      — identidades OAuth vinculadas a usuarios
+--
+-- También incluye seeds: roles (3), permisos admin (9), admin user.
+-- =============================================================================
+--
+-- =============================================================================
 -- FUNCIONES Y UTILIDADES (sin lógica de negocio)
 -- =============================================================================
 
@@ -15,54 +31,10 @@ $$
 LANGUAGE plpgsql;
 
 -- =============================================================================
--- TIPOS DE TOKEN
--- =============================================================================
-CREATE TABLE IF NOT EXISTS token_types(
-    id uuid PRIMARY KEY DEFAULT uuidv7(),
-    code varchar(50) NOT NULL UNIQUE,
-    description text,
-    ttl_seconds integer NOT NULL CHECK (ttl_seconds > 0),
-    is_active boolean DEFAULT TRUE,
-    created_at timestamptz DEFAULT CURRENT_TIMESTAMP,
-    updated_at timestamptz DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TRIGGER update_token_types_updated_at
-    BEFORE UPDATE ON token_types
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
-INSERT INTO token_types(code, description, ttl_seconds)
-    VALUES
-        ('access', 'Token de acceso para API', 3600),
-        ('refresh', 'Token para renovar access tokens', 2592000),
-        ('email_verification', 'Token para verificación de email', 86400),
-        ('password_reset', 'Token para reset de contraseña', 3600);
-
--- =============================================================================
--- PROVEEDORES DE AUTENTICACIÓN (OAuth2)
--- =============================================================================
-CREATE TABLE IF NOT EXISTS auth_providers(
-    id uuid PRIMARY KEY DEFAULT uuidv7(),
-    code varchar(30) NOT NULL UNIQUE,
-    name varchar(50) NOT NULL,
-    is_active boolean DEFAULT TRUE,
-    config jsonb DEFAULT '{}',
-    created_at timestamptz DEFAULT CURRENT_TIMESTAMP,
-    updated_at timestamptz DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TRIGGER update_auth_providers_updated_at
-    BEFORE UPDATE ON auth_providers
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
-INSERT INTO auth_providers(code, name, config)
-    VALUES ('google', 'Google', '{"icon": "google", "scopes": ["openid", "email", "profile"]}'::jsonb);
-
--- =============================================================================
 -- ROLES
 -- =============================================================================
+-- Define los roles base del sistema. Cada usuario tiene un único rol.
+-- is_system = TRUE: roles que no pueden eliminarse (client, admin).
 CREATE TABLE IF NOT EXISTS roles(
     id uuid PRIMARY KEY DEFAULT uuidv7(),
     name varchar(50) UNIQUE NOT NULL,
@@ -86,6 +58,8 @@ INSERT INTO roles(name, description, is_system)
 -- =============================================================================
 -- PERMISOS RBAC
 -- =============================================================================
+-- Catálogo de permisos del sistema. Cada permiso es un par (recurso, acción).
+-- Ejemplo: resource='users', action='read' → puede ver usuarios.
 CREATE TABLE IF NOT EXISTS permissions(
     id uuid PRIMARY KEY DEFAULT uuidv7(),
     resource varchar(50) NOT NULL,
@@ -102,8 +76,10 @@ CREATE TRIGGER update_permissions_updated_at
     EXECUTE FUNCTION update_updated_at_column();
 
 -- =============================================================================
--- RELACIÓN ROLES ↔ PERMISOS
+-- RELACIÓN ROLES ↔ PERMISOS (M:N)
 -- =============================================================================
+-- Asocia cada rol con los permisos que tiene. Un rol puede tener
+-- múltiples permisos y un permiso puede estar en múltiples roles.
 CREATE TABLE IF NOT EXISTS role_permissions(
     role_id uuid NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
     permission_id uuid NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
@@ -138,6 +114,10 @@ SELECT r.id, p.id FROM roles r, permissions p WHERE r.name = 'admin';
 -- =============================================================================
 -- USUARIOS
 -- =============================================================================
+-- Tabla principal de autenticación. Almacena credenciales (password_hash),
+-- estado de verificación (email_verified), bloqueo por intentos fallidos
+-- (locked_until, failed_login_attempts), y relación con roles.
+-- mfa_enabled: reservado para futuro MFA, actualmente no implementado.
 CREATE TABLE IF NOT EXISTS users(
     id uuid PRIMARY KEY DEFAULT uuidv7(),
     email varchar(255) NOT NULL UNIQUE,
@@ -169,6 +149,9 @@ CREATE INDEX idx_users_locked_until ON users(locked_until) WHERE locked_until IS
 -- =============================================================================
 -- SOBRESCRITURA DE PERMISOS POR USUARIO
 -- =============================================================================
+-- Permite otorgar/denegar permisos a usuarios individuales más allá de su rol.
+-- Ejemplo: denegar 'users:delete' a un admin específico, o conceder
+-- 'users:read' a un client. Usado por el dashboard de permisos.
 CREATE TABLE IF NOT EXISTS user_permission_overrides(
     user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     permission_id uuid NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
@@ -193,6 +176,9 @@ CREATE INDEX idx_upo_expires_at    ON user_permission_overrides(expires_at)
 -- =============================================================================
 -- LÍMITES DE FEATURES POR USUARIO
 -- =============================================================================
+-- Restringe el uso de features a nivel de usuario (rate limiting funcional).
+-- Ejemplo: limitar búsquedas de vuelo a 10/día para un usuario específico.
+-- Si no hay límite por usuario, se usa el límite por rol (default_feature_limits).
 CREATE TABLE IF NOT EXISTS user_feature_limits(
     user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     feature_key varchar(100) NOT NULL,
@@ -212,8 +198,10 @@ CREATE TRIGGER update_user_feature_limits_updated_at
     EXECUTE FUNCTION update_updated_at_column();
 
 -- =============================================================================
--- LÍMITES DE FEATURES POR ROL
+-- LÍMITES DE FEATURES POR ROL (default)
 -- =============================================================================
+-- Límites base por rol. Se aplican cuando no hay un límite específico
+-- por usuario en user_feature_limits. Ejemplo: client = 50 búsquedas/día.
 CREATE TABLE IF NOT EXISTS default_feature_limits(
     role_id uuid NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
     feature_key varchar(100) NOT NULL,
@@ -232,10 +220,14 @@ CREATE TRIGGER update_default_feature_limits_updated_at
 -- =============================================================================
 -- IDENTIDADES DE AUTENTICACIÓN (OAuth2)
 -- =============================================================================
+-- Vincula usuarios con proveedores externos (Google). Almacena tokens OAuth
+-- encriptados (access_token_enc, refresh_token_enc) y metadatos del perfil
+-- externo (display_name, avatar_url). Un usuario puede tener múltiples
+-- identidades (una por proveedor).
 CREATE TABLE IF NOT EXISTS user_auth_identities(
     id uuid PRIMARY KEY DEFAULT uuidv7(),
     user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    provider_code varchar(30) NOT NULL REFERENCES auth_providers(code),
+    provider_code varchar(30) NOT NULL,
     provider_user_id varchar(255) NOT NULL,
     email varchar(255),
     display_name varchar(255),
@@ -258,88 +250,11 @@ CREATE TRIGGER update_user_auth_identities_updated_at
 CREATE INDEX idx_uai_user_id ON user_auth_identities(user_id);
 
 -- =============================================================================
--- TOKENS ACTIVOS
+-- SEED: Usuario admin inicial
 -- =============================================================================
-CREATE TABLE IF NOT EXISTS user_tokens(
-    id uuid PRIMARY KEY DEFAULT uuidv7(),
-    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    token_type_id varchar(50) NOT NULL,
-    token_jti uuid NOT NULL UNIQUE,
-    issued_at timestamptz DEFAULT CURRENT_TIMESTAMP,
-    expires_at timestamptz NOT NULL,
-    revoked_at timestamptz,
-    revoked_reason varchar(100),
-    ip_address inet,
-    user_agent text,
-    device_info jsonb DEFAULT '{}',
-    created_at timestamptz DEFAULT CURRENT_TIMESTAMP,
-    updated_at timestamptz DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT chk_user_token_type CHECK (token_type_id IN ('access', 'refresh', 'email_verification', 'password_reset'))
-);
-
-CREATE TRIGGER update_user_tokens_updated_at
-    BEFORE UPDATE ON user_tokens
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-CREATE INDEX idx_user_tokens_user_id    ON user_tokens(user_id);
-CREATE INDEX idx_user_tokens_expires_at ON user_tokens(expires_at);
-CREATE INDEX idx_user_tokens_active     ON user_tokens(user_id, expires_at)
-    WHERE revoked_at IS NULL;
-
--- =============================================================================
--- TOKENS REVOCADOS (blacklist persistente)
--- =============================================================================
-CREATE TABLE IF NOT EXISTS revoked_tokens(
-    id uuid PRIMARY KEY DEFAULT uuidv7(),
-    token_jti uuid NOT NULL UNIQUE,
-    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    token_type_id varchar(50) NOT NULL,
-    revoked_at timestamptz DEFAULT CURRENT_TIMESTAMP,
-    revoked_by uuid REFERENCES users(id),
-    reason varchar(100),
-    ip_address inet,
-    user_agent text,
-    expires_at timestamptz NOT NULL,
-    created_at timestamptz DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT chk_revoked_token_type CHECK (token_type_id IN ('access', 'refresh', 'email_verification', 'password_reset'))
-);
-
-CREATE TRIGGER update_revoked_tokens_updated_at
-    BEFORE UPDATE ON revoked_tokens
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-CREATE INDEX idx_revoked_tokens_user_id    ON revoked_tokens(user_id);
-CREATE INDEX idx_revoked_tokens_expires_at ON revoked_tokens(expires_at);
-
--- =============================================================================
--- MÉTODOS MFA
--- =============================================================================
-CREATE TABLE IF NOT EXISTS user_mfa_methods(
-    id uuid PRIMARY KEY DEFAULT uuidv7(),
-    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    method_type varchar(20) NOT NULL CHECK (method_type IN ('totp', 'sms', 'email', 'backup_codes')),
-    is_enabled boolean DEFAULT TRUE,
-    is_verified boolean DEFAULT FALSE,
-    phone_number varchar(20),
-    email_address varchar(255),
-    totp_secret_encrypted text,
-    backup_codes_hash text[],
-    verified_at timestamptz,
-    last_used_at timestamptz,
-    created_at timestamptz DEFAULT CURRENT_TIMESTAMP,
-    updated_at timestamptz DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TRIGGER update_user_mfa_methods_updated_at
-    BEFORE UPDATE ON user_mfa_methods
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-CREATE INDEX idx_mfa_user_id ON user_mfa_methods(user_id);
-
--- =============================================================================
--- SEED: Admin user with verified email and MFA
--- Password: Admin123!
--- =============================================================================
+-- Email: admin@proactrip.com / Password: Admin123!
+-- Rol admin con todos los permisos (ver seed de role_permissions arriba).
+-- Email ya verificado, cuenta activa, sin bloqueo.
 
 -- 1. Create admin user
 INSERT INTO users (
@@ -360,27 +275,5 @@ SELECT
     NOW(),
     NOW()
 ON CONFLICT (email) DO NOTHING;
-
--- 2. Create MFA method (TOTP) for admin
--- Secret: JBSWY3DPEHPK3PXP (test secret, compatible with Google Authenticator)
-INSERT INTO user_mfa_methods (
-    id, user_id, method_type, is_enabled, is_verified,
-    totp_secret_encrypted, verified_at, created_at, updated_at
-)
-SELECT
-    uuidv7(),
-    u.id,
-    'totp',
-    true,
-    true,
-    'JBSWY3DPEHPK3PXP',
-    NOW(),
-    NOW(),
-    NOW()
-FROM users u
-WHERE u.email = 'admin@proactrip.com'
-  AND NOT EXISTS (
-      SELECT 1 FROM user_mfa_methods m WHERE m.user_id = u.id
-  );
 -- +migrate Down
 -- No hay rollback para migración inicial (schema base).

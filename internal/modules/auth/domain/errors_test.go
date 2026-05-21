@@ -57,18 +57,6 @@ var allErrors = []struct {
 	{"ErrIdentityNotFound", domain.ErrIdentityNotFound},
 	{"ErrIdentityAlreadyExists", domain.ErrIdentityAlreadyExists},
 
-	// MFA
-	{"ErrMFARequired", domain.ErrMFARequired},
-	{"ErrMFAInvalidCode", domain.ErrMFAInvalidCode},
-	{"ErrMFANotEnabled", domain.ErrMFANotEnabled},
-	{"ErrMFAAlreadyEnabled", domain.ErrMFAAlreadyEnabled},
-	{"ErrMFAInvalidMethod", domain.ErrMFAInvalidMethod},
-	{"ErrMFARequiredCode", domain.ErrMFARequiredCode},
-	{"ErrMFACodeExpired", domain.ErrMFACodeExpired},
-	{"ErrInvalidBackupCode", domain.ErrInvalidBackupCode},
-	{"ErrMFAInvalidRecoveryCode", domain.ErrMFAInvalidRecoveryCode},
-	{"ErrMFARecoveryCodesExhausted", domain.ErrMFARecoveryCodesExhausted},
-
 	// Validación
 	{"ErrInvalidEmail", domain.ErrInvalidEmail},
 	{"ErrInvalidInput", domain.ErrInvalidInput},
@@ -79,9 +67,13 @@ var allErrors = []struct {
 	{"ErrPermissionNotFound", domain.ErrPermissionNotFound},
 	{"ErrPermissionDenied", domain.ErrPermissionDenied},
 	{"ErrFeatureLimitNotFound", domain.ErrFeatureLimitNotFound},
-	{"ErrInvalidBlockDuration", domain.ErrInvalidBlockDuration},
-	{"ErrInvalidReason", domain.ErrInvalidReason},
-	{"ErrPermissionOverrideNotFound", domain.ErrPermissionOverrideNotFound},
+
+	// Dashboard — account status
+	{"ErrCannotDisableSelf", domain.ErrCannotDisableSelf},
+
+	// Dashboard — feature limits
+	{"ErrFeatureLimitAlreadyExists", domain.ErrFeatureLimitAlreadyExists},
+	{"ErrNotImplemented", domain.ErrNotImplemented},
 }
 
 // =============================================================================
@@ -143,9 +135,9 @@ func TestErrorCodes_FormatoCorrecto(t *testing.T) {
 // =============================================================================
 
 func TestErrorCodes_CantidadEsperada(t *testing.T) {
-	// Debe haber al menos 46 errores (los definidos en errors.go)
-	if len(allErrors) < 46 {
-		t.Errorf("cantidad de errores: esperaba >= 46, obtuve %d", len(allErrors))
+	// Debe haber al menos 35 errores (los definidos en errors.go después de limpieza)
+	if len(allErrors) < 35 {
+		t.Errorf("cantidad de errores: esperaba >= 35, obtuve %d", len(allErrors))
 	}
 	t.Logf("Total de errores centinela: %d", len(allErrors))
 }

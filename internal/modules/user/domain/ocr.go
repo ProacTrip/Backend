@@ -13,7 +13,7 @@ import (
 // OCRService es el puerto para extraer datos de documentos de viaje.
 // Las implementaciones se adaptan a backends específicos (DeepSeek V4 Flash, etc.).
 type OCRService interface {
-	ExtractFromDocument(ctx context.Context, fileBytes []byte, mimeType string) (*ExtractedData, error)
+	ExtractFromDocument(ctx context.Context, fileURL string) (*ExtractedData, error)
 }
 
 // =============================================================================

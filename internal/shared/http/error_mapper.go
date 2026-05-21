@@ -80,9 +80,19 @@ func MapError(c *echo.Context, err error) error {
 
 	// 3. Check for registered domain error mappers (registry pattern)
 	if problem := serrors.MapDomainError(err); problem != nil {
+		problem = problem.WithInstance(c.Request().URL.Path)
 		c.Response().Header().Set("X-Trace-Id", problem.TraceID)
 		c.Response().Header().Set(echo.HeaderContentType, "application/problem+json")
 		return c.JSON(problem.Status, problem)
+	}
+
+	// 4. Check for echo.ErrNonExistentKey — auth middleware didn't inject claims
+	if errors.Is(err, echo.ErrNonExistentKey) {
+		problem := serrors.ErrUnauthorized("autenticación requerida", err).
+			WithInstance(c.Request().URL.Path)
+		c.Response().Header().Set("X-Trace-Id", problem.TraceID)
+		c.Response().Header().Set(echo.HeaderContentType, "application/problem+json")
+		return c.JSON(http.StatusUnauthorized, problem)
 	}
 
 	// Fallback: generic internal error con trace_id

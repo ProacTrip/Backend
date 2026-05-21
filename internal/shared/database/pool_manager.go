@@ -75,7 +75,6 @@ type PoolConfig struct {
 	User            string
 	Booking         string
 	Payment         string
-	Search          string
 	Notification    string
 	Audit           string
 	MaxOpenConns    int
@@ -106,7 +105,6 @@ func NewPoolManager(cfg PoolConfig) *PoolManager {
 		DBUser:         cfg.User,
 		DBBooking:      cfg.Booking,
 		DBPayment:      cfg.Payment,
-		DBSearch:       cfg.Search,
 		DBNotification: cfg.Notification,
 		DBAudit:        cfg.Audit,
 	}

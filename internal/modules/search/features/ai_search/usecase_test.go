@@ -927,7 +927,7 @@ func TestUseCase_ExistingConversationID_Continues(t *testing.T) {
 // The adapters already assert this via `var _ domain.AIInterpreter = (*Adapter)(nil)`
 // in their respective packages. This test documents the swappable contract.
 func TestProviderSwitch_BothAdaptersSatisfyInterface(t *testing.T) {
-	// Both adapters are swappable via AI_PROVIDER env var in module.go.
+	// Both adapters are swappable via AI_SEARCH_PROVIDER env var in module.go.
 	// This test validates the contract: any AIInterpreter can be wired into UseCase.
 	// The compile-time checks in deepseek/adapter.go and ollama/adapter.go
 	// enforce that both adapters satisfy the interface.

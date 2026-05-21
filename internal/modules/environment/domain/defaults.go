@@ -11,7 +11,7 @@ const (
 	DefaultCountry     = "Argentina"
 	DefaultCountryCode = "AR"
 	DefaultCity        = "Buenos Aires"
-	DefaultCurrency    = "ARS"
+	DefaultCurrency    = "USD"
 	DefaultLanguage    = "es"
 	DefaultLatitude    = -34.6037
 	DefaultLongitude   = -58.3816

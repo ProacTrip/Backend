@@ -1,8 +1,14 @@
 -- +migrate Up
--- Agrega el estado 'disabled' al CHECK constraint de users
--- y la columna token_version para invalidación de sesiones.
--- Migración de schema del módulo auth (002).
-
+-- =============================================================================
+-- MIGRACIÓN 002: Estado 'disabled' + token_version para invalidación
+-- =============================================================================
+-- Agrega el estado 'disabled' a la tabla users (CHECK constraint ampliado)
+-- y la columna token_version. Cada vez que se deshabilita una cuenta,
+-- token_version se incrementa atómicamente, invalidando todos los tokens
+-- existentes del usuario (el middleware de auth compara el token_version
+-- del PASETO con el valor actual en DB/caché).
+-- =============================================================================
+--
 -- 1. Agregar 'disabled' al CHECK constraint de status
 -- Down below:
 ALTER TABLE users DROP CONSTRAINT IF EXISTS chk_user_status;
@@ -17,7 +23,7 @@ ALTER TABLE users ADD CONSTRAINT chk_token_version_positive
     CHECK (token_version >= 1);
 
 -- +migrate Down
--- Revierte los cambios del migration 002.
+-- Revierte: quita token_version, revierte CHECK a 5 estados originales.
 ALTER TABLE users DROP CONSTRAINT IF EXISTS chk_token_version_positive;
 ALTER TABLE users DROP COLUMN IF EXISTS token_version;
 ALTER TABLE users DROP CONSTRAINT IF EXISTS chk_user_status;

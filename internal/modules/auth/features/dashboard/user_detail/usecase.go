@@ -78,7 +78,6 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 			RoleID:        user.RoleID,
 			RoleName:      user.RoleName,
 			EmailVerified: user.EmailVerified,
-			MFAEnabled:    user.MFAEnabled,
 			LoginCount:    user.LoginCount,
 			LastLoginAt:   user.LastLoginAt,
 			CreatedAt:     user.CreatedAt,

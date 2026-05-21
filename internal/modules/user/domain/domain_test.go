@@ -137,7 +137,8 @@ func TestMedicalProfileV2_SetField(t *testing.T) {
 	oldUpdated := mp.UpdatedAt
 
 	time.Sleep(1 * time.Millisecond)
-	mp.SetField("blood_type", "A+", MedicalSourceProfile)
+	source := MedicalSourceDetail{Type: "manual"}
+	mp.SetField("blood_type", "A+", source)
 
 	val, exists := mp.Data["blood_type"]
 	if !exists {
@@ -146,8 +147,8 @@ func TestMedicalProfileV2_SetField(t *testing.T) {
 	if val.Value != "A+" {
 		t.Errorf("Value = %s, se esperaba A+", val.Value)
 	}
-	if val.Source != MedicalSourceProfile {
-		t.Errorf("Source = %s, se esperaba profile", val.Source)
+	if val.Source.Type != "manual" {
+		t.Errorf("Source.Type = %s, se esperaba manual", val.Source.Type)
 	}
 	if val.UpdatedAt.IsZero() {
 		t.Error("UpdatedAt del campo no debería ser zero")
@@ -160,7 +161,7 @@ func TestMedicalProfileV2_SetField(t *testing.T) {
 func TestMedicalProfileV2_RemoveField(t *testing.T) {
 	userID := uuid.Must(uuid.NewV7())
 	mp := NewMedicalProfileV2(userID)
-	mp.SetField("blood_type", "A+", MedicalSourceProfile)
+	mp.SetField("blood_type", "A+", MedicalSourceDetail{Type: "manual"})
 	mp.RemoveField("blood_type")
 
 	if _, exists := mp.Data["blood_type"]; exists {
@@ -171,7 +172,7 @@ func TestMedicalProfileV2_RemoveField(t *testing.T) {
 func TestMedicalProfileV2_JSON(t *testing.T) {
 	userID := uuid.Must(uuid.NewV7())
 	mp := NewMedicalProfileV2(userID)
-	mp.SetField("blood_type", "A+", MedicalSourceProfile)
+	mp.SetField("blood_type", "A+", MedicalSourceDetail{Type: "manual"})
 
 	data, err := json.Marshal(mp)
 	if err != nil {
@@ -204,76 +205,6 @@ func TestMedicalSource_Values(t *testing.T) {
 	for i, s := range sources {
 		if string(s) != expected[i] {
 			t.Errorf("MedicalSource[%d] = %s, se esperaba %s", i, s, expected[i])
-		}
-	}
-}
-
-// =============================================================================
-// T-1.1: Notification Preference
-// =============================================================================
-
-func TestNewNotificationPreference(t *testing.T) {
-	userID := uuid.Must(uuid.NewV7())
-	np := NewNotificationPreference(userID, NotifChannelEmail, NotifTypeBookingConfirmation)
-
-	if np.ID == uuid.Nil {
-		t.Error("se esperaba UUIDv7 no nulo")
-	}
-	if np.UserID != userID {
-		t.Errorf("UserID = %v, se esperaba %v", np.UserID, userID)
-	}
-	if np.Channel != NotifChannelEmail {
-		t.Errorf("Channel = %s, se esperaba email", np.Channel)
-	}
-	if np.NotificationType != NotifTypeBookingConfirmation {
-		t.Errorf("NotificationType = %s, se esperaba booking_confirmation", np.NotificationType)
-	}
-	if np.Enabled != true {
-		t.Error("Enabled debería ser true por defecto")
-	}
-}
-
-func TestNotificationPreference_Toggle(t *testing.T) {
-	userID := uuid.Must(uuid.NewV7())
-	np := NewNotificationPreference(userID, NotifChannelEmail, NotifTypeBookingConfirmation)
-	oldUpdated := np.UpdatedAt
-
-	time.Sleep(1 * time.Millisecond)
-	np.Toggle()
-
-	if np.Enabled != false {
-		t.Error("Enabled debería ser false después de toggle")
-	}
-	if !np.UpdatedAt.After(oldUpdated) {
-		t.Error("UpdatedAt debería haberse actualizado")
-	}
-
-	np.Toggle()
-	if np.Enabled != true {
-		t.Error("Enabled debería ser true después del segundo toggle")
-	}
-}
-
-// =============================================================================
-// T-1.1: Notification Channel / Type enums
-// =============================================================================
-
-func TestNotificationChannel_Values(t *testing.T) {
-	channels := []NotificationChannel{NotifChannelEmail, NotifChannelSMS, NotifChannelWebSocket}
-	expected := []string{"email", "sms", "websocket"}
-	for i, ch := range channels {
-		if string(ch) != expected[i] {
-			t.Errorf("NotificationChannel[%d] = %s, se esperaba %s", i, ch, expected[i])
-		}
-	}
-}
-
-func TestNotificationType_Values(t *testing.T) {
-	types := []NotificationType{NotifTypeBookingConfirmation, NotifTypeFlightReminder, NotifTypePromotional}
-	expected := []string{"booking_confirmation", "flight_reminder", "promotional"}
-	for i, nt := range types {
-		if string(nt) != expected[i] {
-			t.Errorf("NotificationType[%d] = %s, se esperaba %s", i, nt, expected[i])
 		}
 	}
 }
@@ -387,151 +318,3 @@ func TestDocumentType_JSON(t *testing.T) {
 		t.Error("is_identity debería ser true")
 	}
 }
-
-// =============================================================================
-// T-1.1: Saved Search
-// =============================================================================
-
-func TestNewSavedSearch(t *testing.T) {
-	userID := uuid.Must(uuid.NewV7())
-	params := map[string]any{"origin": "MAD", "destination": "BCN"}
-	search, err := NewSavedSearch(userID, "My Search", params, "test-hash-123")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if search.ID == uuid.Nil {
-		t.Error("se esperaba UUIDv7 no nulo")
-	}
-	if search.UserID != userID {
-		t.Errorf("UserID = %v, se esperaba %v", search.UserID, userID)
-	}
-	if search.AlertEnabled != false {
-		t.Error("AlertEnabled debería ser false por defecto")
-	}
-	if search.SearchHash != "test-hash-123" {
-		t.Errorf("SearchHash = %s, se esperaba test-hash-123", search.SearchHash)
-	}
-}
-
-func TestSavedSearch_ToggleAlert(t *testing.T) {
-	userID := uuid.Must(uuid.NewV7())
-	search, err := NewSavedSearch(userID, "Test", map[string]any{"q": "test"}, "toggle-hash")
-	if err != nil {
-		t.Fatal(err)
-	}
-	oldUpdated := search.UpdatedAt
-
-	time.Sleep(1 * time.Millisecond)
-	search.ToggleAlert()
-
-	if search.AlertEnabled != true {
-		t.Error("AlertEnabled debería ser true después de toggle")
-	}
-	if !search.UpdatedAt.After(oldUpdated) {
-		t.Error("UpdatedAt debería haberse actualizado")
-	}
-}
-
-// =============================================================================
-// T-1.1: Favorite
-// =============================================================================
-
-func TestNewFavorite(t *testing.T) {
-	userID := uuid.Must(uuid.NewV7())
-	entityID := uuid.Must(uuid.NewV7())
-	fav := NewFavorite(userID, entityID, FavoriteEntityHotel, "Hotel Ritz")
-
-	if fav.ID == uuid.Nil {
-		t.Error("se esperaba UUIDv7 no nulo")
-	}
-	if fav.UserID != userID {
-		t.Errorf("UserID = %v, se esperaba %v", fav.UserID, userID)
-	}
-	if fav.EntityID != entityID {
-		t.Errorf("EntityID = %v, se esperaba %v", fav.EntityID, entityID)
-	}
-	if fav.EntityType != FavoriteEntityHotel {
-		t.Errorf("EntityType = %s, se esperaba hotel", fav.EntityType)
-	}
-	if fav.Title != "Hotel Ritz" {
-		t.Errorf("Title = %s, se esperaba Hotel Ritz", fav.Title)
-	}
-}
-
-func TestFavorite_SetNotes(t *testing.T) {
-	userID := uuid.Must(uuid.NewV7())
-	fav := NewFavorite(userID, uuid.Must(uuid.NewV7()), FavoriteEntityFlight, "Vuelo a NYC")
-	oldUpdated := fav.UpdatedAt
-
-	time.Sleep(1 * time.Millisecond)
-	notes := "Vuelo directo, salida por la mañana"
-	fav.SetNotes(&notes)
-
-	if fav.Notes == nil || *fav.Notes != notes {
-		t.Errorf("Notes = %v, se esperaba %s", fav.Notes, notes)
-	}
-	if !fav.UpdatedAt.After(oldUpdated) {
-		t.Error("UpdatedAt debería haberse actualizado")
-	}
-}
-
-func TestFavorite_JSON(t *testing.T) {
-	userID := uuid.Must(uuid.NewV7())
-	fav := NewFavorite(userID, uuid.Must(uuid.NewV7()), FavoriteEntityActivity, "Safari en Kenia")
-
-	data, err := json.Marshal(fav)
-	if err != nil {
-		t.Fatalf("marshal error: %v", err)
-	}
-	var decoded map[string]any
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("unmarshal error: %v", err)
-	}
-	if decoded["entity_type"] != "activity" {
-		t.Errorf("entity_type = %v, se esperaba activity", decoded["entity_type"])
-	}
-	if decoded["title"] != "Safari en Kenia" {
-		t.Errorf("title = %v, se esperaba Safari en Kenia", decoded["title"])
-	}
-	// notes debe omitirse cuando es nil
-	if _, exists := decoded["notes"]; exists {
-		t.Error("notes nil debería omitirse con omitzero")
-	}
-}
-
-// =============================================================================
-// T-1.1: Favorite Entity Type enum
-// =============================================================================
-
-func TestFavoriteEntityType_Values(t *testing.T) {
-	types := []FavoriteEntityType{
-		FavoriteEntityHotel, FavoriteEntityFlight, FavoriteEntityActivity,
-	}
-	expected := []string{
-		"hotel", "flight", "activity",
-	}
-	for i, et := range types {
-		if string(et) != expected[i] {
-			t.Errorf("FavoriteEntityType[%d] = %s, se esperaba %s", i, et, expected[i])
-		}
-	}
-}
-
-func TestIsValidFavoriteEntityType(t *testing.T) {
-	valid := []string{"hotel", "flight", "activity"}
-	for _, v := range valid {
-		if !IsValidFavoriteEntityType(v) {
-			t.Errorf("IsValidFavoriteEntityType(%q) debería ser true", v)
-		}
-	}
-
-	invalid := []string{"", "car", "train", "invalid", "airport", "airline", "hotel_chain", "country", "destination"}
-	for _, iv := range invalid {
-		if IsValidFavoriteEntityType(iv) {
-			t.Errorf("IsValidFavoriteEntityType(%q) debería ser false", iv)
-		}
-	}
-}
-
-

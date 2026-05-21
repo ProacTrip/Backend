@@ -19,21 +19,15 @@ import (
 	authModule "github.com/ProacTrip/Backend/internal/modules/auth"
 	authmiddleware "github.com/ProacTrip/Backend/internal/modules/auth/adapters/middleware"
 	environmentModule "github.com/ProacTrip/Backend/internal/modules/environment"
-	envShared "github.com/ProacTrip/Backend/internal/modules/environment/features/shared"
 	notifModule "github.com/ProacTrip/Backend/internal/modules/notification"
 	searchModule "github.com/ProacTrip/Backend/internal/modules/search"
 	searchDomain "github.com/ProacTrip/Backend/internal/modules/search/domain"
 	ai_deepseek "github.com/ProacTrip/Backend/internal/modules/search/adapters/ai/deepseek"
 	ai_ollama "github.com/ProacTrip/Backend/internal/modules/search/adapters/ai/ollama"
-	searchConv "github.com/ProacTrip/Backend/internal/modules/search/shared/conversation"
 	searchShared "github.com/ProacTrip/Backend/internal/modules/search/features/shared"
 	userModule "github.com/ProacTrip/Backend/internal/modules/user"
-	userAdapters "github.com/ProacTrip/Backend/internal/modules/user/adapters"
 	userStorage "github.com/ProacTrip/Backend/internal/modules/user/adapters/storage"
-	"github.com/ProacTrip/Backend/internal/modules/auth/features/register"
-	"github.com/ProacTrip/Backend/internal/modules/auth/features/me"
 	sendverification "github.com/ProacTrip/Backend/internal/modules/notification/features/send_verification_email"
-	userDomain "github.com/ProacTrip/Backend/internal/modules/user/domain"
 	"github.com/ProacTrip/Backend/internal/shared/cache"
 	contextutil "github.com/ProacTrip/Backend/internal/shared/context"
 	"github.com/ProacTrip/Backend/internal/shared/database"
@@ -43,6 +37,7 @@ import (
 	sharedauth "github.com/ProacTrip/Backend/internal/shared/auth"
 	sharedmiddleware "github.com/ProacTrip/Backend/internal/shared/middleware"
 	"github.com/ProacTrip/Backend/internal/shared/ratelimit"
+	"github.com/ProacTrip/Backend/internal/shared/sse"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
@@ -52,29 +47,6 @@ import (
 
 // StartConfig es un alias para echo.StartConfig
 type StartConfig = echo.StartConfig
-
-// Compile-time interface check: EnvironmentResolverAdapter implements register.EnvironmentResolver.
-var _ register.EnvironmentResolver = (*envShared.EnvironmentResolverAdapter)(nil)
-
-// meProfileAdapter implementa me.UserProfileProvider usando el ProfileRepository
-// del módulo user. Definido en el composition root (app.go) para evitar imports
-// cross-module desde auth → user/domain.
-// Convierte ErrProfileNotFound → (nil, nil) porque el perfil se crea asíncronamente
-// por el consumer de eventos.
-type meProfileAdapter struct {
-	repo userDomain.ProfileRepository
-}
-
-func (a *meProfileAdapter) GetByUserID(ctx context.Context, userID uuid.UUID) (*me.Profile, error) {
-	profile, err := a.repo.GetByUserID(ctx, userID)
-	if err != nil {
-		if errors.Is(err, userDomain.ErrProfileNotFound) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return &me.Profile{AvatarURL: profile.AvatarURL}, nil
-}
 
 // resendNotificationAdapter adapta SendVerificationEmailUseCase del módulo
 // notification al NotificationPort local de resend_verification.
@@ -101,7 +73,7 @@ type App struct {
 	EventBus    *eventbus.EventBus
 	Cfg         *config.Config
 	DB          *database.PoolManager // Pool manager con DB por módulo
-	startTime   time.Time             // server start time for health checks
+	startTime   time.Time             // timestamp de inicio del servidor para health checks
 
 	// Modules
 	AuthModule         *authModule.Module
@@ -128,7 +100,7 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	// Middleware: request ID, traceparent, logging, recovery, CORS
 	e.Use(middleware.RequestID())
 
-	// Traceparent W3C header - generar trace ID si no existe
+	// Header traceparent W3C — generar trace ID si no existe
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			traceparent := c.Request().Header.Get("traceparent")
@@ -143,7 +115,7 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		}
 	})
 
-	// Store trace ID / request ID in context.Context for downstream use
+	// Guardar trace ID / request ID en context.Context para uso downstream
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			traceID := c.Response().Header().Get(echo.HeaderXRequestID)
@@ -226,7 +198,6 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		Auth:            cfg.DB.GetDSNForDB("proactrip_auth"),
 		User:            cfg.DB.GetDSNForDB("proactrip_user"),
 		Notification:    cfg.DB.GetDSNForDB("proactrip_notification"),
-		Search:          cfg.DB.GetDSNForDB("proactrip_search"),
 		MaxOpenConns:    25,
 		MaxIdleConns:    10,
 		MaxConnLifetime: 30 * time.Minute,
@@ -245,10 +216,6 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	notifPool, err := poolMgr.GetPool(database.DBNotification)
 	if err != nil {
 		return nil, fmt.Errorf("notification DB pool: %w", err)
-	}
-	searchPool, err := poolMgr.GetPool(database.DBSearch)
-	if err != nil {
-		return nil, fmt.Errorf("search DB pool: %w", err)
 	}
 
 	// Redis / Dragonfly
@@ -277,6 +244,9 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	// Event Bus (Streams)
 	eventBus := eventbus.NewEventBus(rdb)
 
+	// SSE Hub (initialize before modules so worker pipelines can publish)
+	sse.Init()
+
 	// Inicializar módulos
 
 	// Environment Module (IP geolocation + weather)
@@ -284,6 +254,7 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	environmentMod := environmentModule.NewModule(environmentModule.Config{
 		OpenWeatherAPIKey:   cfg.Environment.OpenWeatherAPIKey,
 		OpenWeatherCacheTTL: cfg.Environment.OpenWeatherCacheTTL,
+		OpenWeatherTimeout:  cfg.Environment.OpenWeatherTimeout,
 		IpQueryBaseURL:      cfg.Environment.IpQueryBaseURL,
 		Cache:               df,
 		RateLimiter:         rateLimiter,
@@ -294,11 +265,6 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		return nil, fmt.Errorf("auth migrations: %w", err)
 	}
 
-	// Search DB migrations — idempotentes, usan IF NOT EXISTS / CREATE TABLE IF NOT EXISTS
-	if err := searchModule.RunMigrations(appCtx, searchPool); err != nil {
-		return nil, fmt.Errorf("search migrations: %w", err)
-	}
-
 	// Notification DB migrations — idempotentes, usan IF NOT EXISTS / ADD CONSTRAINT IF NOT EXISTS
 	if err := notifModule.RunMigrations(appCtx, notifPool); err != nil {
 		return nil, fmt.Errorf("notification migrations: %w", err)
@@ -306,7 +272,6 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 
 	// Auth Module (incluye DragonflyClient para idempotency)
 	authMod, err := authModule.NewModule(authModule.Config{
-		EnvResolver: environmentMod.EnvironmentResolver,
 		PostgresPool:         authPool,
 		DragonflyClient:      rdb,
 		PasetoKey:            cfg.PasetoKeyBytes, // Bytes decodificados de hex
@@ -350,6 +315,7 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		EventBus:      eventBus,
 		EncryptionKey: encKeyBytes,
 		R2Storage:     r2Storage,
+		OCRConfig:     cfg.OCR,
 		RateLimiter:   rateLimiter,
 	})
 	if err != nil {
@@ -378,11 +344,6 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	// El adapter (resendNotificationAdapter) está definido a nivel paquete en este archivo
 	// (composition root) para evitar imports cross-module desde auth → notification/features.
 	authMod.WireResendVerification(&resendNotificationAdapter{uc: notifMod.SendVerificationEmailUseCase})
-
-	// Wire user profile provider para GET /v1/auth/me avatar_url enrichment.
-	// El adapter (meProfileAdapter) está definido a nivel paquete en este archivo
-	// (composition root) para evitar imports cross-module desde auth → user/domain.
-	authMod.WireUserProfile(&meProfileAdapter{repo: userMod.ProfileRepo()})
 
 	// Start user consumer (BACKGROUND - consume eventos de Dragonfly Streams)
 	if err := userMod.EventConsumer().Start(appCtx); err != nil {
@@ -423,11 +384,6 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	}
 
 	// Conversation PG store for auth users
-	convPgStore := searchConv.NewPgConversationStore(searchPool)
-
-	// SavedSearchResolver bridges user module's SavedSearchRepo to search module's SavedSearchProvider.
-	savedSearchResolver := userAdapters.NewSearchResolver(userMod.SavedSearchRepo())
-
 	searchMod, err := searchModule.NewModule(searchModule.Config{
 		Provider:          nil, // created from SerpAPIKey/SerpAPITimeout
 		SerpAPIKey:        cfg.SerpAPIKey,
@@ -436,8 +392,6 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		DetailsCache:      cache.NewMetricsDecorator(df),
 		HotelSearchCache:  cache.NewMetricsDecorator(df),
 		HotelDetailsCache: cache.NewMetricsDecorator(df),
-		Repo:              nil, // created from PgxPool
-		PgxPool:           searchPool,
 		SearchTTL:         15 * time.Minute,
 		FlightDetailsTTL:  15 * time.Minute,
 		HotelSearchTTL:    5 * time.Minute,
@@ -450,9 +404,7 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 			CountryCode: cfg.DefaultCountryCode,
 		},
 		AIInterpreter:     aiInterpreter,
-		ConversationStore: convPgStore,
-		EventBus:          eventBus,
-		SavedSearchProvider: savedSearchResolver,
+		SavedSearchProvider: nil,
 	})
 	if err != nil {
 		return nil, err
@@ -527,9 +479,6 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	// Resend-verification endpoint — pública con rate limiting anónimo
 	authGroup.POST("/resend-verification", authMod.ResendVerificationHandler.Handle, anonRateLimitMW)
 
-	// Me endpoint — auth middleware + authenticated rate limiting
-	authGroup.GET("/me", authMod.MeHandler.Handle, authMiddleware.Handle, authRateLimitMW)
-
 	// Search routes: /v1/search (públicas con rate limit)
 	searchGroup := e.Group("/v1/search", anonRateLimitMW, authMiddleware.Optional())
 	searchGroup.POST("/flights", searchMod.SearchFlightsHandler.Handle)
@@ -539,7 +488,7 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	// AI search — supports streaming via "stream": true in the request body
 	searchGroup.POST("/ai", searchMod.AISearchHandler.Handle)
 
-	// Execute saved search — requires auth (cookie), not optional
+	// Ejecutar búsqueda guardada — requiere auth (cookie), no opcional
 	if searchMod.ExecuteSavedSearchHandler != nil {
 		searchGroup.POST("/execute_saved", searchMod.ExecuteSavedSearchHandler.Handle, authMiddleware.Handle, authRateLimitMW)
 	}
@@ -548,17 +497,33 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	environmentGroup := e.Group("/v1")
 	environmentGroup.GET("/environment", environmentMod.GetEnvironmentHandler.Handle)
 
-	// User routes: /v1/user/profile/* (autenticado via cookie)
-	userGroup := e.Group("/v1/user", authMiddleware.Handle, authRateLimitMW)
+	// User routes: /v1/user/profile/* (autenticado via cookie, requiere rol "client")
+	userGroup := e.Group("/v1/user", authMiddleware.Handle, authRateLimitMW, sharedmiddleware.RequireClientRole())
 	userPublicGroup := e.Group("/v1/user") // rutas públicas sin auth middleware
 	userMod.RegisterRoutes(userGroup, userPublicGroup, authMiddleware.Handle)
+
+	// SSE realtime events: /v1/realtime/events (authenticated via cookie)
+	sseGroup := e.Group("")
+	sseGroup.Use(authMiddleware.Handle)
+	sseGroup.GET("/v1/realtime/events", sse.Handler(sse.GetHub()))
 
 	// ========== DASHBOARD ROUTES ==========
 	// Todas las rutas del dashboard requieren PASETO válido + permiso users:read base.
 	// Endpoints de mutación añaden permisos más restrictivos (RequirePermission adicional).
+	// Admin rate limit: 30 req/min (Tier 3), configurable via RATELIMIT_ADMIN_PER_MINUTE.
+	adminRateLimitMW := ratelimit.AdminRateLimitMiddleware(rateLimiter,
+		func(c *echo.Context) (string, bool) {
+			claims, err := sharedauth.GetAccessClaims(c)
+			if err != nil {
+				return "", false
+			}
+			return claims.UserID.String(), true
+		},
+	)
+
 	dashboard := e.Group("/v1/dashboard",
 		authMiddleware.Handle,
-		authRateLimitMW,
+		adminRateLimitMW,
 		sharedmiddleware.RequirePermission(sharedauth.PermUsersRead),
 	)
 
@@ -570,6 +535,7 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	dashboard.PUT("/users/:id/status",
 		authMod.AccountStatusHandler.Handle,
 		sharedmiddleware.RequirePermission(sharedauth.PermUsersWrite),
+		sharedmiddleware.RequirePermission(sharedauth.PermSessionsWrite),
 	)
 
 	// Feature limits — lectura usa permiso del grupo, escritura requiere feature_limits:write.
@@ -582,34 +548,6 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		authMod.FeatureLimitsHandler.HandleDeleteUserLimit,
 		sharedmiddleware.RequirePermission(sharedauth.PermFeatureLimitsWrite),
 	)
-	dashboard.GET("/roles/:id/feature-limits", authMod.FeatureLimitsHandler.HandleGetRoleDefaults)
-	dashboard.POST("/roles/:id/feature-limits",
-		authMod.FeatureLimitsHandler.HandleSetRoleDefault,
-		sharedmiddleware.RequirePermission(sharedauth.PermFeatureLimitsWrite),
-	)
-	dashboard.DELETE("/roles/:id/feature-limits/:key",
-		authMod.FeatureLimitsHandler.HandleDeleteRoleDefault,
-		sharedmiddleware.RequirePermission(sharedauth.PermFeatureLimitsWrite),
-	)
-
-	// Permission overrides — lectura usa permiso del grupo, escritura requiere permissions:write.
-	dashboard.GET("/users/:id/permission-overrides", authMod.PermissionOverridesHandler.HandleListOverrides)
-	dashboard.POST("/users/:id/permission-overrides",
-		authMod.PermissionOverridesHandler.HandleCreateOverride,
-		sharedmiddleware.RequirePermission(sharedauth.PermPermsWrite),
-	)
-	dashboard.DELETE("/users/:id/permission-overrides/:overrideId",
-		authMod.PermissionOverridesHandler.HandleDeleteOverride,
-		sharedmiddleware.RequirePermission(sharedauth.PermPermsWrite),
-	)
-
-	// Start conversation consumer (BACKGROUND - persiste conversaciones en PG via streams)
-	if searchMod.ConvConsumer != nil {
-		if err := searchMod.ConvConsumer.Start(appCtx); err != nil {
-			slog.Warn("conversation consumer failed to start", "error", err)
-			// No es fatal - el servidor puede iniciar sin el consumer
-		}
-	}
 
 	// === App Structure ===
 	app := &App{
@@ -627,7 +565,7 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		startTime:          time.Now(),
 	}
 
-	cancelOnError = false // app owns the cancel now — Shutdown will call it
+	cancelOnError = false // la app es dueña del cancel ahora — Shutdown lo llamará
 
 	// Health checks (registered after app creation so methods can access modules)
 	e.GET("/health", app.healthCheckHandler())
@@ -700,16 +638,7 @@ func (app *App) readyCheckHandler(rdb *redis.Client, poolMgr *database.PoolManag
 			}
 		}
 
-		if app.SearchModule != nil && app.SearchModule.ConvConsumer != nil {
-			cc := app.SearchModule.ConvConsumer
-			if cc.IsRunning() {
-				checks[cc.Name()] = "ok"
-			} else {
-				checks[cc.Name()] = "error: consumer not running"
-			}
-		}
-
-		// Determine overall status
+		// Determinar estado general
 		var failed []string
 		for component, status := range checks {
 			if status != "ok" {

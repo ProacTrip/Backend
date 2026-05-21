@@ -70,9 +70,9 @@ func TestListDocumentsHandler_Handle(t *testing.T) {
 			wantStatus: http.StatusOK,
 		},
 		{
-			name:       "debe retornar error cuando no hay claims",
+			name:       "debe retornar 401 cuando no hay claims (no autenticado)",
 			mockRepo:   &mockDocRepo{},
-			wantStatus: http.StatusInternalServerError,
+			wantStatus: http.StatusUnauthorized,
 		},
 		{
 			name:   "debe retornar error cuando repo falla",

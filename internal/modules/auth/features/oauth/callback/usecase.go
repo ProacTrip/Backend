@@ -327,7 +327,6 @@ func newOAuthUser(email string, roleID uuid.UUID) *domain.User {
 		Status:              domain.StatusActive, // email ya verificado por Google
 		LoginCount:          0,
 		FailedLoginAttempts: 0,
-		MFAEnabled:          false,
 		CreatedAt:           now,
 		UpdatedAt:           now,
 	}

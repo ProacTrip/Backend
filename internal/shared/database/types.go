@@ -15,7 +15,6 @@ const (
 	DBUser         DBType = "user"
 	DBBooking      DBType = "booking"
 	DBPayment      DBType = "payment"
-	DBSearch       DBType = "search"
 	DBNotification DBType = "notification"
 	DBAudit        DBType = "audit"
 )

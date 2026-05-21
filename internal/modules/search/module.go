@@ -13,9 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/ProacTrip/Backend/internal/modules/search/adapters/postgres"
 	"github.com/ProacTrip/Backend/internal/modules/search/adapters/serpapi"
-	"github.com/ProacTrip/Backend/internal/modules/search/consumer"
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/ai_search"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/execute_saved_search"
@@ -27,7 +25,6 @@ import (
 	"github.com/ProacTrip/Backend/internal/modules/search/shared/airports"
 	"github.com/ProacTrip/Backend/internal/modules/search/shared/conversation"
 	serrors "github.com/ProacTrip/Backend/internal/shared/errors"
-	"github.com/ProacTrip/Backend/internal/shared/eventbus"
 	"github.com/ProacTrip/Backend/internal/shared/ratelimit"
 )
 
@@ -43,14 +40,12 @@ type Module struct {
 	HotelDetailsHandler       *hotel_details.Handler
 	AISearchHandler           *ai_search.Handler
 	ExecuteSavedSearchHandler *execute_saved_search.Handler
-	Repository                domain.SearchHistoryRepository
 
 	searchUC       *search_flights.UseCase
 	detailsUC      *flight_details.UseCase
 	hotelsUC       *search_hotels.UseCase
 	hdetailsUC     *hotel_details.UseCase
 	aiSearchUC     *ai_search.UseCase
-	ConvConsumer   *consumer.ConversationConsumer // event-driven PG persistence
 	sessionID      string                         // UUID v7 generado una vez por ciclo de vida del módulo
 }
 
@@ -96,25 +91,14 @@ type Config struct {
 	// SearchDefaults — fallback defaults for GL/HL/Currency when nothing else available
 	SearchDefaults shared.SearchDefaultConfig
 
-	// SearchHistoryRepo — repositorio para grabar historial de búsquedas.
-	// Si es nil, se crea desde PgxPool.
-	Repo domain.SearchHistoryRepository
-
 	// TTLs para cache
 	SearchTTL        time.Duration
 	FlightDetailsTTL time.Duration
 	HotelSearchTTL   time.Duration
 	HotelDetailsTTL  time.Duration
 
-	// Pool para el repositorio de historial (solo si Repo es nil)
-	PgxPool postgres.PgxPool
-
 	// AI Search
-	AIInterpreter     domain.AIInterpreter                // AI natural language interpreter (nil = AI disabled)
-	ConversationStore *conversation.PgConversationStore    // PG conversation history store
-
-	// Event Bus — for publishing conversation_saved events to Dragonfly Streams
-	EventBus *eventbus.EventBus
+	AIInterpreter domain.AIInterpreter // AI natural language interpreter (nil = AI disabled)
 
 	// SavedSearchProvider — provides access to saved searches from the user module.
 	SavedSearchProvider domain.SavedSearchProvider
@@ -189,17 +173,10 @@ func NewModule(cfg Config) (*Module, error) {
 		return nil, errors.New("provider does not implement domain.HotelProvider")
 	}
 
-	// 2. Repository (search history)
-	repo := cfg.Repo
-	if repo == nil {
-		repo = postgres.NewSearchHistoryRepo(cfg.PgxPool)
-	}
-
-	// 3. Use Cases — flights
+	// 2. Use Cases — flights
 	searchUC := search_flights.NewUseCase(search_flights.UseCaseDeps{
 		Provider:    provider,
 		Cache:       cfg.SearchCache,
-		Repo:        repo,
 		RateLimiter: cfg.RateLimiter,
 		SearchTTL:   cfg.SearchTTL,
 	})
@@ -239,13 +216,7 @@ func NewModule(cfg Config) (*Module, error) {
 	// 6. AI Search (nil interpreter = AI disabled — handler returns 503)
 	var aiSearchHandler *ai_search.Handler
 	var aiSearchUC *ai_search.UseCase
-	var convConsumer *consumer.ConversationConsumer
 	if cfg.AIInterpreter != nil {
-		// Wire event bus for event-driven PG persistence
-		if cfg.EventBus != nil && cfg.ConversationStore != nil {
-			conversation.InitEventBus(cfg.EventBus)
-		}
-
 		// Wrap conversation functions as ConversationStore interface
 		convStore := &dragonflyConvStore{
 			rdb: cfg.RedisClient,
@@ -275,11 +246,6 @@ func NewModule(cfg Config) (*Module, error) {
 		})
 		aiSearchHandler = ai_search.NewHandler(aiSearchUC, cfg.RedisClient, cfg.SearchDefaults)
 		aiSearchHandler.RateLimiter = cfg.RateLimiter
-
-		// Create conversation consumer (started in bootstrap/app.go with app context)
-		if cfg.EventBus != nil && cfg.ConversationStore != nil {
-			convConsumer = consumer.NewConversationConsumer(cfg.RedisClient, cfg.ConversationStore)
-		}
 	} else {
 		// Handler with nil usecase → Handle() returns 503 "AI not configured"
 		aiSearchHandler = ai_search.NewHandler(nil, cfg.RedisClient, cfg.SearchDefaults)
@@ -320,13 +286,11 @@ func NewModule(cfg Config) (*Module, error) {
 		HotelDetailsHandler:       hdetailsHandler,
 		AISearchHandler:           aiSearchHandler,
 		ExecuteSavedSearchHandler: executeSavedSearchHandler,
-		Repository:                repo,
 		searchUC:             searchUC,
 		detailsUC:            detailsUC,
 		hotelsUC:             hotelsUC,
 		hdetailsUC:           hdetailsUC,
 		aiSearchUC:           aiSearchUC,
-		ConvConsumer:         convConsumer,
 		sessionID:            sessionID,
 	}, nil
 }

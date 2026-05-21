@@ -53,7 +53,7 @@ func (h *Handler) Handle(c *echo.Context) error {
 func extractLanguage(c *echo.Context) string {
 	header := c.Request().Header.Get("Accept-Language")
 	if header == "" {
-		return "en"
+		return "es"
 	}
 
 	// Extraer el primer idioma (antes de coma)
@@ -77,5 +77,5 @@ func extractLanguage(c *echo.Context) string {
 	if len(first) >= 2 {
 		return strings.ToLower(first[:2])
 	}
-	return "en"
+	return "es"
 }

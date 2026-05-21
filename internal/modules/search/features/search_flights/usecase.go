@@ -1,5 +1,5 @@
 // Lógica de negocio para búsqueda de vuelos.
-// Orquesta cache, proveedor externo e historial de búsquedas.
+// Orquesta cache y proveedor externo.
 package search_flights
 
 import (
@@ -9,8 +9,6 @@ import (
 	"log/slog"
 	"sync"
 	"time"
-
-	"github.com/google/uuid"
 
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
 	"github.com/ProacTrip/Backend/internal/shared/pagination"
@@ -32,11 +30,10 @@ type Cache interface {
 // UseCase
 // =============================================================================
 
-// UseCase orchestrates flight search with caching and history recording.
+// UseCase orchestrates flight search with caching.
 type UseCase struct {
 	provider    domain.FlightProvider
 	cache       Cache
-	repo        domain.SearchHistoryRepository
 	rateLimiter *ratelimit.RateLimiter
 	searchTTL   time.Duration
 	wg          sync.WaitGroup
@@ -46,7 +43,6 @@ type UseCase struct {
 type UseCaseDeps struct {
 	Provider    domain.FlightProvider
 	Cache       Cache
-	Repo        domain.SearchHistoryRepository
 	RateLimiter *ratelimit.RateLimiter
 	SearchTTL   time.Duration
 }
@@ -56,7 +52,6 @@ func NewUseCase(deps UseCaseDeps) *UseCase {
 	return &UseCase{
 		provider:    deps.Provider,
 		cache:       deps.Cache,
-		repo:        deps.Repo,
 		rateLimiter: deps.RateLimiter,
 		searchTTL:   deps.SearchTTL,
 	}
@@ -72,10 +67,8 @@ func (uc *UseCase) Wait() {
 // Ejecución Principal
 // =============================================================================
 
-// Execute performs the flight search with caching and history recording.
+// Execute performs the flight search with caching.
 func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) {
-	start := time.Now()
-
 	// 1. Validate
 	if err := cmd.Validate(); err != nil {
 		return nil, err
@@ -95,18 +88,8 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 			// CachedAt se preserva del valor cacheado — no se recalcula time.Now()
 			// (el unmarshal ya pobló resp.CachedAt desde el JSON cacheado)
 
-			// Capture full lengths before slicing (for history + pagination gating)
-			resultCount := len(resp.BestFlights) + len(resp.OtherFlights)
+			// Capture full lengths before slicing (for pagination gating)
 			maxLen := max(len(resp.BestFlights), len(resp.OtherFlights))
-
-			// Fire-and-forget: save to search history async (full count)
-			// Use WithoutCancel so the goroutine survives handler return.
-			saveCtx := context.WithoutCancel(ctx)
-			uc.wg.Go(func() {
-				e := int(time.Since(start).Milliseconds())
-				uc.saveSearchHistory(saveCtx, domainReq, resultCount, true,
-					&e, cmd.IPAddress, cmd.UserAgent)
-			})
 
 			// Slice response to return only the requested page
 			offset := decodeCursorFromReq(domainReq.Cursor)
@@ -159,16 +142,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		})
 	}
 
-	// 8. Save to search history async — fire-and-forget (full count before slicing)
-	resultCount := len(resp.BestFlights) + len(resp.OtherFlights)
-	saveCtx := context.WithoutCancel(ctx)
-	uc.wg.Go(func() {
-		e := int(time.Since(start).Milliseconds())
-		uc.saveSearchHistory(saveCtx, domainReq, resultCount, false,
-			&e, cmd.IPAddress, cmd.UserAgent)
-	})
-
-	// 9. Slice response and build pagination meta
+	// 8. Slice response and build pagination meta
 	maxLen := max(len(resp.BestFlights), len(resp.OtherFlights))
 	offset := decodeCursorFromReq(domainReq.Cursor)
 	limit := domainReq.Limit
@@ -197,39 +171,6 @@ func generateCacheKey(req domain.FlightSearchRequest) string {
 			req.OutboundDate, req.ReturnDate)
 	}
 	return "{search}:flights:" + domain.HashKey(raw)
-}
-
-// =============================================================================
-// Historial de Búsqueda
-// =============================================================================
-
-func (uc *UseCase) saveSearchHistory(ctx context.Context, req domain.FlightSearchRequest, resultCount int, cacheHit bool, executionTimeMs *int, ipAddress, userAgent string) {
-	bgCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-
-	rawQuery, _ := json.Marshal(req)
-
-	entry := domain.SearchHistoryEntry{
-		ID:              uuid.Must(uuid.NewV7()),
-		QueryType:       "structured",
-		RawQuery:        fmt.Sprintf("%s → %s", req.Departure, req.Arrival),
-		ParsedParams:    rawQuery,
-		ResultCount:     resultCount,
-		ExecutionTimeMs: executionTimeMs,
-		CacheHit:        cacheHit,
-		IPAddress:       ipAddress,
-		UserAgent:       userAgent,
-		SessionID:        uuid.Must(uuid.NewV7()).String(), // anonymous searches need a session_id for the identity constraint
-		CreatedAt:       time.Now(),
-	}
-
-	if err := uc.repo.Save(bgCtx, entry); err != nil {
-		slog.ErrorContext(bgCtx, "search history save failed",
-			slog.String("query_type", entry.QueryType),
-			slog.String("raw_query", entry.RawQuery),
-			slog.Any("err", err),
-		)
-	}
 }
 
 // =============================================================================

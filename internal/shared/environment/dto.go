@@ -62,9 +62,12 @@ type WeatherDTO struct {
 // CacheKey — Formato canónico de clave de caché
 // =============================================================================
 
-// CacheKey retorna la clave DragonflyDB para el caché de entorno.
-// Formato: "env:{ip}" — usado por ambos módulos para garantizar
-// que leen y escriben la misma clave.
+// CacheKey retorna la clave DragonflyDB base para el caché de entorno.
+// Formato: "env:{ip}" — usado por el módulo search para leer CountryInfo.
+// El módulo environment añade ":lang" al final para segregar por idioma:
+//
+//	env:{ip}:{lang}  → respuestas completas (location + weather + language)
+//	env:{ip}          → CountryInfo (country, currency, language) para search
 func CacheKey(ip string) string {
 	return "env:" + ip
 }

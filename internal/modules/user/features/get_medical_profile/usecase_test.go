@@ -121,17 +121,17 @@ func TestGetMedicalProfile_HappyPath(t *testing.T) {
 		Data: map[string]*domain.MedicalFieldValue{
 			"blood_type": {
 				Value:     bloodValue,
-				Source:    domain.MedicalSourceProfile,
+				Source:    domain.MedicalSourceDetail{Type: "manual"},
 				UpdatedAt: now,
 			},
 			"allergies_enc": {
 				Value:     makeEncryptedValue(encSvc, allergiesPlain),
-				Source:    domain.MedicalSourceProfile,
+				Source:    domain.MedicalSourceDetail{Type: "manual"},
 				UpdatedAt: now,
 			},
 			"medications_enc": {
 				Value:     makeEncryptedValue(encSvc, medicationsPlain),
-				Source:    domain.MedicalSourceOCR,
+				Source:    domain.MedicalSourceDetail{Type: "ocr"},
 				UpdatedAt: now,
 			},
 		},
@@ -170,8 +170,8 @@ func TestGetMedicalProfile_HappyPath(t *testing.T) {
 	if bt.Value != "A+" {
 		t.Errorf("blood_type = %s, se esperaba A+", bt.Value)
 	}
-	if bt.Source != "manual" {
-		t.Errorf("blood_type source = %s, se esperaba manual", bt.Source)
+	if bt.Source.Type != "manual" {
+		t.Errorf("blood_type source = %s, se esperaba manual", bt.Source.Type)
 	}
 
 	// Verificar allergies (desencriptado, sin sufijo _enc)
@@ -283,7 +283,7 @@ func TestGetMedicalProfile_DecryptionError(t *testing.T) {
 		Data: map[string]*domain.MedicalFieldValue{
 			"allergies_enc": {
 				Value:     "esto-no-es-base64!!!",
-				Source:    domain.MedicalSourceProfile,
+				Source:    domain.MedicalSourceDetail{Type: "manual"},
 				UpdatedAt: now,
 			},
 		},
@@ -322,7 +322,7 @@ func TestGetMedicalProfile_NoPendingConflicts(t *testing.T) {
 		Data: map[string]*domain.MedicalFieldValue{
 			"blood_type": {
 				Value:     "O+",
-				Source:    domain.MedicalSourceProfile,
+				Source:    domain.MedicalSourceDetail{Type: "manual"},
 				UpdatedAt: now,
 			},
 		},

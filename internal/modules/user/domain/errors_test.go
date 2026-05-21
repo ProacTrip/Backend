@@ -15,12 +15,10 @@ func TestSentinelErrors_Format(t *testing.T) {
 		"ErrProfileNotFound":         ErrProfileNotFound,
 		"ErrMedicalProfileNotFound":  ErrMedicalProfileNotFound,
 		"ErrTravelPrefsNotFound":     ErrTravelPrefsNotFound,
-		"ErrNotifPrefsNotFound":      ErrNotifPrefsNotFound,
 		"ErrInvalidGender":           ErrInvalidGender,
 		"ErrInvalidBloodType":        ErrInvalidBloodType,
 		"ErrInvalidPreferredClass":   ErrInvalidPreferredClass,
 		"ErrInvalidSeatPreference":   ErrInvalidSeatPreference,
-		"ErrInvalidChannel":          ErrInvalidChannel,
 		"ErrInvalidCountryCode":      ErrInvalidCountryCode,
 		"ErrInvalidLanguageCode":     ErrInvalidLanguageCode,
 		"ErrInvalidCurrencyCode":     ErrInvalidCurrencyCode,
@@ -29,15 +27,11 @@ func TestSentinelErrors_Format(t *testing.T) {
 		"ErrDecryptionError":         ErrDecryptionError,
 		"ErrDocumentNotFound":        ErrDocumentNotFound,
 		"ErrInvalidDocumentType":     ErrInvalidDocumentType,
-		"ErrInvalidEnum":            ErrInvalidEnum,
+		"ErrInvalidEnum":             ErrInvalidEnum,
 		"ErrInvalidFileType":         ErrInvalidFileType,
 		"ErrFileTooLarge":            ErrFileTooLarge,
 		"ErrDocumentNotReady":        ErrDocumentNotReady,
 		"ErrMaxDocumentsReached":     ErrMaxDocumentsReached,
-		"ErrSearchNotFound":          ErrSearchNotFound,
-		"ErrDuplicateSavedSearch":    ErrDuplicateSavedSearch,
-		"ErrFavoriteNotFound":        ErrFavoriteNotFound,
-		"ErrDuplicateFavorite":       ErrDuplicateFavorite,
 		"ErrPendingUpdateNotFound":   ErrPendingUpdateNotFound,
 		"ErrPendingUpdateExpired":    ErrPendingUpdateExpired,
 		"ErrInvalidPendingAction":    ErrInvalidPendingAction,
@@ -83,7 +77,7 @@ func TestSentinelErrors_IsWrapping(t *testing.T) {
 	if !errors.Is(actuallyWrapped, ErrDocumentNotFound) {
 		t.Error("errors.Is debería detectar error envuelto con %w")
 	}
-	
+
 	// Sentinel error direct match
 	if !errors.Is(ErrDocumentNotFound, ErrDocumentNotFound) {
 		t.Error("errors.Is debería coincidir consigo mismo")
@@ -91,39 +85,27 @@ func TestSentinelErrors_IsWrapping(t *testing.T) {
 }
 
 func TestSentinelErrors_Count(t *testing.T) {
-	// Debe haber al menos 27 sentinels
+	// Debe haber al menos 24 sentinels
 	allErrors := []error{
 		ErrProfileNotFound, ErrMedicalProfileNotFound, ErrTravelPrefsNotFound,
-		ErrNotifPrefsNotFound, ErrInvalidEnum, ErrInvalidGender,
+		ErrInvalidEnum, ErrInvalidGender,
 		ErrInvalidBloodType, ErrInvalidPreferredClass, ErrInvalidSeatPreference,
-		ErrInvalidChannel, ErrInvalidCountryCode, ErrInvalidLanguageCode,
+		ErrInvalidCountryCode, ErrInvalidLanguageCode,
 		ErrInvalidCurrencyCode, ErrInvalidTimezone, ErrEncryptionError,
 		ErrDecryptionError, ErrDocumentNotFound, ErrInvalidDocumentType,
 		ErrInvalidFileType, ErrFileTooLarge,
-		ErrDocumentNotReady, ErrMaxDocumentsReached, ErrSearchNotFound,
-		ErrDuplicateSavedSearch, ErrFavoriteNotFound, ErrDuplicateFavorite,
+		ErrDocumentNotReady, ErrMaxDocumentsReached,
 		ErrPendingUpdateNotFound,
 		ErrPendingUpdateExpired, ErrInvalidPendingAction, ErrPermissionDenied,
 	}
-	
+
 	for i, err := range allErrors {
 		if err == nil {
 			t.Errorf("error en índice %d es nil", i)
 		}
 	}
-	
-	if len(allErrors) < 27 {
-		t.Errorf("se esperaban al menos 27 errores, hay %d", len(allErrors))
-	}
-}
 
-func TestErrFavoriteNotFound_Valid(t *testing.T) {
-	if ErrFavoriteNotFound != ErrFavoriteNotFound {
-		t.Error("ErrFavoriteNotFound should compare equal with itself")
-	}
-	// Verificar que es accesible como sentinel
-	err := ErrFavoriteNotFound
-	if err.Error() == "" {
-		t.Error("ErrFavoriteNotFound.Error() no debería estar vacío")
+	if len(allErrors) < 24 {
+		t.Errorf("se esperaban al menos 24 errores, hay %d", len(allErrors))
 	}
 }

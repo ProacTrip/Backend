@@ -21,11 +21,8 @@ import (
 
 type stubFeatureLimitRepo struct {
 	getUserLimits    func(ctx context.Context, userID uuid.UUID) ([]featurelimits.FeatureLimitRow, error)
-	setUserLimit     func(ctx context.Context, userID uuid.UUID, featureKey string, limitValue *int, window string) error
+	setUserLimit     func(ctx context.Context, userID uuid.UUID, featureKey string, limitValue *int, window string) (bool, error)
 	deleteUserLimit  func(ctx context.Context, userID uuid.UUID, featureKey string) error
-	getRoleDefaults  func(ctx context.Context, roleID uuid.UUID) ([]featurelimits.FeatureLimitRow, error)
-	setRoleDefault   func(ctx context.Context, roleID uuid.UUID, featureKey string, limitValue *int, window string) error
-	deleteRoleDefault func(ctx context.Context, roleID uuid.UUID, featureKey string) error
 	getUserLimitVal  func(ctx context.Context, userID uuid.UUID, featureKey string) (*int, error)
 	getRoleDefaultVal func(ctx context.Context, roleID uuid.UUID, featureKey string) (*int, error)
 }
@@ -33,20 +30,11 @@ type stubFeatureLimitRepo struct {
 func (s *stubFeatureLimitRepo) GetUserLimits(ctx context.Context, userID uuid.UUID) ([]featurelimits.FeatureLimitRow, error) {
 	return s.getUserLimits(ctx, userID)
 }
-func (s *stubFeatureLimitRepo) SetUserLimit(ctx context.Context, userID uuid.UUID, featureKey string, limitValue *int, window string) error {
+func (s *stubFeatureLimitRepo) SetUserLimit(ctx context.Context, userID uuid.UUID, featureKey string, limitValue *int, window string) (bool, error) {
 	return s.setUserLimit(ctx, userID, featureKey, limitValue, window)
 }
 func (s *stubFeatureLimitRepo) DeleteUserLimit(ctx context.Context, userID uuid.UUID, featureKey string) error {
 	return s.deleteUserLimit(ctx, userID, featureKey)
-}
-func (s *stubFeatureLimitRepo) GetRoleDefaults(ctx context.Context, roleID uuid.UUID) ([]featurelimits.FeatureLimitRow, error) {
-	return s.getRoleDefaults(ctx, roleID)
-}
-func (s *stubFeatureLimitRepo) SetRoleDefault(ctx context.Context, roleID uuid.UUID, featureKey string, limitValue *int, window string) error {
-	return s.setRoleDefault(ctx, roleID, featureKey, limitValue, window)
-}
-func (s *stubFeatureLimitRepo) DeleteRoleDefault(ctx context.Context, roleID uuid.UUID, featureKey string) error {
-	return s.deleteRoleDefault(ctx, roleID, featureKey)
 }
 func (s *stubFeatureLimitRepo) GetUserLimitValue(ctx context.Context, userID uuid.UUID, featureKey string) (*int, error) {
 	return s.getUserLimitVal(ctx, userID, featureKey)
@@ -106,8 +94,8 @@ func TestSetUserLimit_Success(t *testing.T) {
 	userID := uuid.Must(uuid.NewV7())
 
 	repo := &stubFeatureLimitRepo{
-		setUserLimit: func(ctx context.Context, uid uuid.UUID, fk string, lv *int, w string) error {
-			return nil
+		setUserLimit: func(ctx context.Context, uid uuid.UUID, fk string, lv *int, w string) (bool, error) {
+			return true, nil // isCreated=true
 		},
 	}
 	uc := newUseCase(repo)
@@ -118,7 +106,7 @@ func TestSetUserLimit_Success(t *testing.T) {
 		LimitValue: ptr(5),
 		Window:     "month",
 	}
-	resp, err := uc.SetUserLimit(ctx, cmd)
+	resp, _, err := uc.SetUserLimit(ctx, cmd)
 	if err != nil {
 		t.Fatalf("SetUserLimit() unexpected error: %v", err)
 	}
@@ -136,8 +124,8 @@ func TestSetUserLimit_Unlimited(t *testing.T) {
 	userID := uuid.Must(uuid.NewV7())
 
 	repo := &stubFeatureLimitRepo{
-		setUserLimit: func(ctx context.Context, uid uuid.UUID, fk string, lv *int, w string) error {
-			return nil
+		setUserLimit: func(ctx context.Context, uid uuid.UUID, fk string, lv *int, w string) (bool, error) {
+			return true, nil // isCreated=true
 		},
 	}
 	uc := newUseCase(repo)
@@ -148,7 +136,7 @@ func TestSetUserLimit_Unlimited(t *testing.T) {
 		LimitValue: nil, // unlimited
 		Window:     "",
 	}
-	resp, err := uc.SetUserLimit(ctx, cmd)
+	resp, _, err := uc.SetUserLimit(ctx, cmd)
 	if err != nil {
 		t.Fatalf("SetUserLimit() unexpected error: %v", err)
 	}
@@ -163,8 +151,8 @@ func TestSetUserLimit_Blocked(t *testing.T) {
 	userID := uuid.Must(uuid.NewV7())
 
 	repo := &stubFeatureLimitRepo{
-		setUserLimit: func(ctx context.Context, uid uuid.UUID, fk string, lv *int, w string) error {
-			return nil
+		setUserLimit: func(ctx context.Context, uid uuid.UUID, fk string, lv *int, w string) (bool, error) {
+			return true, nil // isCreated=true
 		},
 	}
 	uc := newUseCase(repo)
@@ -175,7 +163,7 @@ func TestSetUserLimit_Blocked(t *testing.T) {
 		LimitValue: ptr(0), // bloqueado
 		Window:     "",
 	}
-	resp, err := uc.SetUserLimit(ctx, cmd)
+	resp, _, err := uc.SetUserLimit(ctx, cmd)
 	if err != nil {
 		t.Fatalf("SetUserLimit() unexpected error: %v", err)
 	}
@@ -190,8 +178,8 @@ func TestSetUserLimit_DuplicateKey(t *testing.T) {
 	userID := uuid.Must(uuid.NewV7())
 
 	repo := &stubFeatureLimitRepo{
-		setUserLimit: func(ctx context.Context, uid uuid.UUID, fk string, lv *int, w string) error {
-			return domain.ErrFeatureLimitAlreadyExists
+		setUserLimit: func(ctx context.Context, uid uuid.UUID, fk string, lv *int, w string) (bool, error) {
+			return true, domain.ErrFeatureLimitAlreadyExists
 		},
 	}
 	uc := newUseCase(repo)
@@ -201,7 +189,7 @@ func TestSetUserLimit_DuplicateKey(t *testing.T) {
 		FeatureKey: "projects",
 		LimitValue: ptr(5),
 	}
-	_, err := uc.SetUserLimit(ctx, cmd)
+	_, _, err := uc.SetUserLimit(ctx, cmd)
 	if err == nil {
 		t.Fatal("expected conflict error, got nil")
 	}
@@ -254,64 +242,6 @@ func TestDeleteUserLimit_NotFound(t *testing.T) {
 	}
 	if !errors.Is(err, domain.ErrFeatureLimitNotFound) {
 		t.Errorf("expected ErrFeatureLimitNotFound, got %v", err)
-	}
-}
-
-// =============================================================================
-// Tests — CRUD Role Defaults
-// =============================================================================
-
-// TestGetRoleDefaults_Success retorna lista de defaults del rol.
-func TestGetRoleDefaults_Success(t *testing.T) {
-	ctx := t.Context()
-	roleID := uuid.Must(uuid.NewV7())
-
-	repo := &stubFeatureLimitRepo{
-		getRoleDefaults: func(ctx context.Context, rid uuid.UUID) ([]featurelimits.FeatureLimitRow, error) {
-			return []featurelimits.FeatureLimitRow{
-				{FeatureKey: "projects", LimitValue: ptr(10), Window: "month"},
-			}, nil
-		},
-	}
-	uc := newUseCase(repo)
-
-	cmd := featurelimits.GetRoleDefaultsCommand{RoleID: roleID}
-	resp, err := uc.GetRoleDefaults(ctx, cmd)
-	if err != nil {
-		t.Fatalf("GetRoleDefaults() unexpected error: %v", err)
-	}
-	if len(resp.Limits) != 1 {
-		t.Fatalf("expected 1 default, got %d", len(resp.Limits))
-	}
-	if resp.Limits[0].FeatureKey != "projects" {
-		t.Errorf("FeatureKey = %s, expected projects", resp.Limits[0].FeatureKey)
-	}
-}
-
-// TestSetRoleDefault_Success crea un default de rol.
-func TestSetRoleDefault_Success(t *testing.T) {
-	ctx := t.Context()
-	roleID := uuid.Must(uuid.NewV7())
-
-	repo := &stubFeatureLimitRepo{
-		setRoleDefault: func(ctx context.Context, rid uuid.UUID, fk string, lv *int, w string) error {
-			return nil
-		},
-	}
-	uc := newUseCase(repo)
-
-	cmd := featurelimits.SetRoleDefaultCommand{
-		RoleID:     roleID,
-		FeatureKey: "projects",
-		LimitValue: ptr(3),
-		Window:     "day",
-	}
-	resp, err := uc.SetRoleDefault(ctx, cmd)
-	if err != nil {
-		t.Fatalf("SetRoleDefault() unexpected error: %v", err)
-	}
-	if resp.FeatureKey != "projects" {
-		t.Errorf("FeatureKey = %s, expected projects", resp.FeatureKey)
 	}
 }
 

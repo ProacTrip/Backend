@@ -223,11 +223,6 @@ func buildSerpapiParams(req domain.FlightSearchRequest) map[string]string {
 		params["departure_token"] = req.OutboundSelectionToken
 	}
 
-	// Multi-city legs
-	if len(req.Legs) > 0 {
-		params["multi_city_json"] = marshalMultiCityLegs(req.Legs)
-	}
-
 	// Internal SerpAPI params (always set, not exposed to clients)
 	params["show_hidden"] = "1"   // Show ALL results (equivalent to "View more flights" on Google Flights)
 	params["deep_search"] = "1"   // Enable deep search for better results (matches browser experience)
@@ -296,8 +291,6 @@ func mapTripType(t string) string {
 		return "1"
 	case "one_way":
 		return "2"
-	case "multi_city":
-		return "3"
 	default:
 		return ""
 	}
@@ -359,35 +352,6 @@ func formatTimes(tr *domain.TimeRange) string {
 		)
 	}
 	return fmt.Sprintf("%d,%d", tr.DepartureFrom, tr.DepartureTo)
-}
-
-// =============================================================================
-// Multi-City
-// =============================================================================
-
-type multiCityLegJSON struct {
-	DepartureID string  `json:"departure_id"`
-	ArrivalID   string  `json:"arrival_id"`
-	Date        string  `json:"date"`
-	Times       *string `json:"times,omitempty"`
-}
-
-func marshalMultiCityLegs(legs []domain.MultiCityLeg) string {
-	jsonLegs := make([]multiCityLegJSON, len(legs))
-	for i, leg := range legs {
-		mc := multiCityLegJSON{
-			DepartureID: leg.Departure,
-			ArrivalID:   leg.Arrival,
-			Date:        leg.Date,
-		}
-		if leg.Times != nil {
-			timesStr := formatTimes(leg.Times)
-			mc.Times = new(timesStr)
-		}
-		jsonLegs[i] = mc
-	}
-	data, _ := json.Marshal(jsonLegs)
-	return string(data)
 }
 
 // =============================================================================

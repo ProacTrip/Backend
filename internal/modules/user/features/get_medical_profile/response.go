@@ -3,13 +3,15 @@ package get_medical_profile
 
 import (
 	"time"
+
+	"github.com/ProacTrip/Backend/internal/modules/user/domain"
 )
 
 // MedicalFieldEntry representa un campo médico con su valor, fuente y timestamp.
 type MedicalFieldEntry struct {
-	Value     string `json:"value"`
-	Source    string `json:"source"`
-	UpdatedAt string `json:"updated_at"`
+	Value     string                      `json:"value"`
+	Source    domain.MedicalSourceDetail  `json:"source"`
+	UpdatedAt string                      `json:"updated_at"`
 }
 
 // MedicalProfileResponse es la respuesta del endpoint de perfil médico.

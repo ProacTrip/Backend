@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -41,7 +40,7 @@ func (r *DocumentRepository) Create(ctx context.Context, doc *domain.UserDocumen
 			id, user_id, document_type_id, file_name, file_size,
 			mime_type, storage_key, detected_mime_type, detected_size_bytes,
 			document_type, failure_reason,
-			is_verified, verified_at, verified_by,
+			verification_status,
 			ocr_status, ocr_data, ocr_confidence, extracted_data,
 			has_newer_medical_data, medical_update_summary,
 			valid_from, valid_until, document_number, issuing_country,
@@ -50,11 +49,11 @@ func (r *DocumentRepository) Create(ctx context.Context, doc *domain.UserDocumen
 			$1, $2, $3, $4, $5,
 			$6, $7, $8, $9,
 			$10, $11,
-			$12, $13, $14,
-			$15, $16, $17, $18,
-			$19, $20,
-			$21, $22, $23, $24,
-			$25, $26, $27
+			$12,
+			$13, $14, $15, $16,
+			$17, $18,
+			$19, $20, $21, $22,
+			$23, $24, $25
 		)
 	`
 
@@ -70,9 +69,7 @@ func (r *DocumentRepository) Create(ctx context.Context, doc *domain.UserDocumen
 		doc.DetectedSizeBytes,
 		doc.DocumentType,
 		doc.FailureReason,
-		doc.IsVerified,
-		doc.VerifiedAt,
-		doc.VerifiedBy,
+		doc.VerificationStatus,
 		doc.OCRStatus,
 		doc.OCRData,
 		doc.OCRConfidence,
@@ -106,7 +103,7 @@ func (r *DocumentRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain
 			id, user_id, document_type_id, file_name, file_size,
 			mime_type, storage_key, detected_mime_type, detected_size_bytes,
 			document_type, failure_reason,
-			is_verified, verified_at, verified_by,
+			verification_status,
 			ocr_status, ocr_data, ocr_confidence, extracted_data,
 			has_newer_medical_data, medical_update_summary,
 			valid_from, valid_until, document_number, issuing_country,
@@ -129,9 +126,7 @@ func (r *DocumentRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain
 		&doc.DetectedSizeBytes,
 		&doc.DocumentType,
 		&doc.FailureReason,
-		&doc.IsVerified,
-		&doc.VerifiedAt,
-		&doc.VerifiedBy,
+		&doc.VerificationStatus,
 		&doc.OCRStatus,
 		&doc.OCRData,
 		&doc.OCRConfidence,
@@ -150,7 +145,7 @@ func (r *DocumentRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain
 		return nil, domain.ErrDocumentNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("get document by id: %w", err)
+		return nil, fmt.Errorf("query document by id: %w", err)
 	}
 
 	return &doc, nil
@@ -166,7 +161,7 @@ const documentListQuery = `
 		id, user_id, document_type_id, file_name, file_size,
 		mime_type, storage_key, detected_mime_type, detected_size_bytes,
 		document_type, failure_reason,
-		is_verified, verified_at, verified_by,
+		verification_status,
 		ocr_status, ocr_data, ocr_confidence, extracted_data,
 		has_newer_medical_data, medical_update_summary,
 		valid_from, valid_until, document_number, issuing_country,
@@ -175,7 +170,6 @@ const documentListQuery = `
 `
 
 // GetByUserID recupera todos los documentos de un usuario.
-// Soporta filtros opcionales por status y document_type.
 func (r *DocumentRepository) GetByUserID(ctx context.Context, userID uuid.UUID) ([]*domain.UserDocument, error) {
 	query := documentListQuery + ` WHERE user_id = $1 ORDER BY created_at DESC`
 
@@ -247,9 +241,7 @@ func scanDocuments(rows pgx.Rows) ([]*domain.UserDocument, error) {
 			&doc.DetectedSizeBytes,
 			&doc.DocumentType,
 			&doc.FailureReason,
-			&doc.IsVerified,
-			&doc.VerifiedAt,
-			&doc.VerifiedBy,
+			&doc.VerificationStatus,
 			&doc.OCRStatus,
 			&doc.OCRData,
 			&doc.ExtractedData,
@@ -282,7 +274,6 @@ func scanDocuments(rows pgx.Rows) ([]*domain.UserDocument, error) {
 // =============================================================================
 
 // Update persiste los cambios de un documento.
-// Actualiza todos los campos pipeline y de verificación.
 func (r *DocumentRepository) Update(ctx context.Context, doc *domain.UserDocument) error {
 	query := `
 		UPDATE user_documents SET
@@ -295,20 +286,18 @@ func (r *DocumentRepository) Update(ctx context.Context, doc *domain.UserDocumen
 			detected_size_bytes = $8,
 			document_type = $9,
 			failure_reason = $10,
-			is_verified = $11,
-			verified_at = $12,
-			verified_by = $13,
-			ocr_status = $14,
-			ocr_data = $15,
-			ocr_confidence = $16,
-			extracted_data = $17,
-			has_newer_medical_data = $18,
-			medical_update_summary = $19,
-			valid_from = $20,
-			valid_until = $21,
-			document_number = $22,
-			issuing_country = $23,
-			metadata = $24,
+			verification_status = $11,
+			ocr_status = $12,
+			ocr_data = $13,
+			ocr_confidence = $14,
+			extracted_data = $15,
+			has_newer_medical_data = $16,
+			medical_update_summary = $17,
+			valid_from = $18,
+			valid_until = $19,
+			document_number = $20,
+			issuing_country = $21,
+			metadata = $22,
 			updated_at = NOW()
 		WHERE id = $1
 	`
@@ -324,9 +313,7 @@ func (r *DocumentRepository) Update(ctx context.Context, doc *domain.UserDocumen
 		doc.DetectedSizeBytes,
 		doc.DocumentType,
 		doc.FailureReason,
-		doc.IsVerified,
-		doc.VerifiedAt,
-		doc.VerifiedBy,
+		doc.VerificationStatus,
 		doc.OCRStatus,
 		doc.OCRData,
 		doc.OCRConfidence,
@@ -370,7 +357,6 @@ func (r *DocumentRepository) Delete(ctx context.Context, id uuid.UUID) error {
 // =============================================================================
 
 // GetTypes retorna todos los tipos de documento activos del catálogo.
-// Los datos son seed data estáticos insertados por la migración.
 func (r *DocumentRepository) GetTypes(ctx context.Context) ([]domain.DocumentType, error) {
 	query := `
 		SELECT
@@ -415,10 +401,5 @@ func (r *DocumentRepository) GetTypes(ctx context.Context) ([]domain.DocumentTyp
 	return types, nil
 }
 
-// =============================================================================
-// Helpers
-// =============================================================================
-
-// Ensure the json import is used
+// Ensure json import is used
 var _ = json.Marshal
-var _ = time.Now

@@ -19,8 +19,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/ProacTrip/Backend/internal/modules/user/adapters/storage"
 	"github.com/ProacTrip/Backend/internal/modules/user/domain"
 	"github.com/ProacTrip/Backend/internal/shared/eventbus"
+	"github.com/ProacTrip/Backend/internal/shared/sse"
 )
 
 // =============================================================================
@@ -37,7 +39,7 @@ const (
 
 // OCRR2Client es el puerto para interactuar con R2 desde el OCR worker.
 type OCRR2Client interface {
-	Download(ctx context.Context, bucket, key string) (io.ReadCloser, error)
+	GenerateDownloadURL(ctx context.Context, bucket, key string, expiry time.Duration) (string, error)
 	Upload(ctx context.Context, bucket, key string, reader io.Reader, size int64, contentType string) error
 }
 
@@ -191,7 +193,7 @@ func (w *OCRWorker) processMessage(ctx context.Context, msg redis.XMessage) {
 	}
 
 	userIDStr, _ := msg.Values["user_id"].(string)
-	fileMime, _ := msg.Values["detected_mime_type"].(string)
+	_ = msg.Values["detected_mime_type"] // no longer needed — OCR uses presigned URL
 
 	docID, err := uuid.Parse(docIDStr)
 	if err != nil {
@@ -218,31 +220,22 @@ func (w *OCRWorker) processMessage(ctx context.Context, msg redis.XMessage) {
 		return
 	}
 
-	w.publishSSEEvent(ctx, docID, "processing", map[string]interface{}{
+	w.publishSSEEvent(ctx, doc.UserID, docID, "processing", map[string]interface{}{
 		"sub_state": "ocr_processing",
 		"message":   "Extrayendo datos del documento...",
 	})
 
-	// 2. Descargar archivo procesado de R2
-	reader, err := w.r2.Download(ctx, "proactrip-secure", storageKey)
+	// 2. Generar URL prefirmada de descarga desde R2 (TTL 5 minutos)
+	downloadURL, err := w.r2.GenerateDownloadURL(ctx, storage.SecureBucket(), storageKey, 5*time.Minute)
 	if err != nil {
-		slog.Error("doc OCR: download processed file failed", "doc_id", docID, "key", storageKey, "error", err)
+		slog.Error("doc OCR: generate download URL failed", "doc_id", docID, "key", storageKey, "error", err)
 		w.markFailed(ctx, doc, "file_download_error")
 		_ = w.rdb.XAck(ctx, docOCRStream, w.group, msg.ID)
 		return
 	}
-	defer reader.Close()
 
-	fileBytes, err := io.ReadAll(reader)
-	if err != nil {
-		slog.Error("doc OCR: read processed file failed", "doc_id", docID, "error", err)
-		w.markFailed(ctx, doc, "file_read_error")
-		_ = w.rdb.XAck(ctx, docOCRStream, w.group, msg.ID)
-		return
-	}
-
-	// 3. Ejecutar OCR / AI extraction
-	extracted, err := w.ocrService.ExtractFromDocument(ctx, fileBytes, fileMime)
+	// 3. Ejecutar OCR / AI extraction usando la URL prefirmada
+	extracted, err := w.ocrService.ExtractFromDocument(ctx, downloadURL)
 	if err != nil {
 		slog.Error("doc OCR: extraction failed", "doc_id", docID, "error", err)
 		w.markFailed(ctx, doc, fmt.Sprintf("ocr_extraction_error: %v", err))
@@ -253,7 +246,7 @@ func (w *OCRWorker) processMessage(ctx context.Context, msg redis.XMessage) {
 	// 4. Guardar respuesta raw del OCR en R2 results/
 	resultsKey := fmt.Sprintf("results/%s/%s/ocr_raw.json", userID.String(), docID.String())
 	resultsJSON, _ := json.Marshal(extracted)
-	if err := w.r2.Upload(ctx, "proactrip-secure", resultsKey,
+	if err := w.r2.Upload(ctx, storage.SecureBucket(), resultsKey,
 		bytes.NewReader(resultsJSON), int64(len(resultsJSON)), "application/json"); err != nil {
 		slog.Warn("doc OCR: save OCR results to R2 failed", "doc_id", docID, "error", err)
 	}
@@ -261,7 +254,7 @@ func (w *OCRWorker) processMessage(ctx context.Context, msg redis.XMessage) {
 	// 5. Verificar si es un documento de viaje reconocido
 	if !extracted.IsTravelDocument() {
 		w.markRejected(ctx, doc, "not_a_travel_document")
-		w.publishSSEEvent(ctx, docID, "rejected", map[string]interface{}{
+		w.publishSSEEvent(ctx, doc.UserID, docID, "rejected", map[string]interface{}{
 			"failure_reason": "not_a_travel_document",
 			"detail":         "El archivo no contiene un documento de viaje reconocible.",
 		})
@@ -314,7 +307,7 @@ func (w *OCRWorker) processMessage(ctx context.Context, msg redis.XMessage) {
 	w.updateDocStatusCache(ctx, docID, "completed")
 
 	// 10. Publicar SSE: completed
-	w.publishSSEEvent(ctx, docID, "completed", map[string]interface{}{
+	w.publishSSEEvent(ctx, doc.UserID, docID, "completed", map[string]interface{}{
 		"document_type":   extracted.DocumentType,
 		"ocr_confidence":   extracted.OCRConfidence,
 		"message":         "Documento procesado exitosamente.",
@@ -347,7 +340,12 @@ var medicalFieldMap = map[string]string{
 func (w *OCRWorker) compareAndApplyMedicalData(ctx context.Context, doc *domain.UserDocument, extracted *domain.ExtractedData) {
 	userID := doc.UserID
 	docID := doc.ID
-	source := domain.MedicalSourceOCR
+	source := domain.SourceToDetail(domain.MedicalSourceOCR)
+	docIDStr := docID.String()
+	source.DocumentID = &docIDStr
+	if doc.OCRConfidence != nil {
+		source.Confidence = doc.OCRConfidence
+	}
 
 	// Cargar perfil médico actual
 	profile, err := w.medicalRepo.GetByUserID(ctx, userID)
@@ -401,7 +399,7 @@ func (w *OCRWorker) compareAndApplyMedicalData(ctx context.Context, doc *domain.
 			encodedValue := base64.StdEncoding.EncodeToString(encrypted)
 			profile.Data[encKey] = &domain.MedicalFieldValue{
 				Value:     encodedValue,
-				Source:    domain.MedicalSource(source),
+				Source:    source,
 				UpdatedAt: now,
 			}
 			appliedFields = append(appliedFields, profileField)
@@ -485,7 +483,7 @@ func (w *OCRWorker) markFailed(ctx context.Context, doc *domain.UserDocument, re
 	if err := w.docRepo.Update(ctx, doc); err != nil {
 		slog.Error("doc OCR: mark failed update error", "doc_id", doc.ID, "error", err)
 	}
-	w.publishSSEEvent(ctx, doc.ID, "failed", map[string]interface{}{
+	w.publishSSEEvent(ctx, doc.UserID, doc.ID, "failed", map[string]interface{}{
 		"failure_reason": reason,
 		"detail":         "El servicio OCR encontró un error técnico.",
 	})
@@ -511,8 +509,10 @@ func (w *OCRWorker) updateDocStatusCache(ctx context.Context, docID uuid.UUID, s
 	w.rdb.SetEx(ctx, fmt.Sprintf("doc:status:%s", docID.String()), statusJSON, 1*time.Hour)
 }
 
-// publishSSEEvent publica un evento SSE en el stream doc:events:{id}.
-func (w *OCRWorker) publishSSEEvent(ctx context.Context, docID uuid.UUID, event string, data map[string]interface{}) {
+// publishSSEEvent publica un evento SSE en el stream doc:events:{id}
+// y también en el SSE Hub para consumidores conectados vía HTTP.
+func (w *OCRWorker) publishSSEEvent(ctx context.Context, userID, docID uuid.UUID, event string, data map[string]interface{}) {
+	// Redis stream (existing — kept for other consumers)
 	stream := fmt.Sprintf("{events}:doc:events:%s", docID.String())
 
 	payload := map[string]interface{}{
@@ -530,6 +530,13 @@ func (w *OCRWorker) publishSSEEvent(ctx context.Context, docID uuid.UUID, event 
 	}).Result(); err != nil {
 		slog.Warn("doc OCR: publish SSE event failed", "doc_id", docID, "event", event, "error", err)
 	}
+
+	// SSE Hub (new — for HTTP EventSource connections)
+	hubEvent := sse.Event{
+		Type: "doc." + event,
+		Data: payload,
+	}
+	sse.GetHub().Publish(userID, hubEvent)
 }
 
 // =============================================================================

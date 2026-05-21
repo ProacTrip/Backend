@@ -1279,7 +1279,7 @@ var validTravelClass = map[string]bool{
 }
 
 var validTripType = map[string]bool{
-	"round_trip": true, "one_way": true, "multi_city": true,
+	"round_trip": true, "one_way": true,
 }
 
 // =============================================================================

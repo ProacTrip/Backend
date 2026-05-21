@@ -290,7 +290,6 @@ func seedExistingUser(repo *mockUserRepo, email string) *domain.User {
 		Status:         domain.StatusActive,
 		LoginCount:     0,
 		FailedLoginAttempts: 0,
-		MFAEnabled:     false,
 	}
 	repo.users[email] = user
 	return user

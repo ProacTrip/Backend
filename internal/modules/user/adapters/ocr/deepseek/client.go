@@ -7,7 +7,6 @@ package deepseek
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -182,13 +181,10 @@ Reglas:
 - ocr_confidence es 0.0 a 1.0: qué tan seguro estás de la precisión
 - Si no es un documento de viaje reconocible, document_type="unknown"`
 
-// ExtractFromDocument envía el archivo a DeepSeek V4 Flash para OCR.
-func (c *OCRClient) ExtractFromDocument(ctx context.Context, fileBytes []byte, mimeType string) (*domain.ExtractedData, error) {
-	// Construir base64 data URL para el modelo multimodal
-	base64Data := base64.StdEncoding.EncodeToString(fileBytes)
-	dataURL := fmt.Sprintf("data:%s;base64,%s", mimeType, base64Data)
-
-	// Construir mensajes
+// ExtractFromDocument envía la URL prefirmada del documento a DeepSeek V4 Flash para OCR.
+// El modelo multimodal descarga la imagen directamente de la URL (no requiere base64).
+func (c *OCRClient) ExtractFromDocument(ctx context.Context, fileURL string) (*domain.ExtractedData, error) {
+	// Construir mensajes con la URL prefirmada de R2
 	messages := []chatMessage{
 		{
 			Role: "system",
@@ -202,7 +198,7 @@ func (c *OCRClient) ExtractFromDocument(ctx context.Context, fileBytes []byte, m
 				{
 					Type: "image_url",
 					ImageURL: &imageURL{
-						URL:    dataURL,
+						URL:    fileURL, // presigned R2 URL instead of data:base64
 						Detail: "high",
 					},
 				},
@@ -242,7 +238,7 @@ func (c *OCRClient) ExtractFromDocument(ctx context.Context, fileBytes []byte, m
 
 	slog.DebugContext(ctx, "deepseek ocr request",
 		slog.String("model", c.model),
-		slog.Int("file_size_bytes", len(fileBytes)),
+		slog.String("url", fileURL),
 	)
 
 	resp, err := c.httpClient.Do(req)
