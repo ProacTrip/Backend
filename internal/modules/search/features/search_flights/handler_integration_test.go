@@ -175,8 +175,8 @@ func TestHandlerIntegration_AuthenticatedUser_UsesProfilePrefs(t *testing.T) {
 		t.Fatal("provider was never called — usecase didn't execute search")
 	}
 
-	if req.GL != "BR" {
-		t.Errorf("req.GL = %q, want %q (from profile country_code)", req.GL, "BR")
+	if req.GL != "AR" {
+		t.Errorf("req.GL = %q, want %q (config default — country no viene de profile)", req.GL, "AR")
 	}
 	if req.HL != "pt" {
 		t.Errorf("req.HL = %q, want %q (from profile language)", req.HL, "pt")
@@ -290,15 +290,15 @@ func TestHandlerIntegration_AnonymousUser_UsesEnvCache(t *testing.T) {
 		t.Fatal("provider was never called")
 	}
 
-	// Verify env-derived defaults (Japan: JPY/ja/JP)
-	if req.GL != "JP" {
-		t.Errorf("req.GL = %q, want %q (from env cache country_code)", req.GL, "JP")
+	// Verify config defaults (AR/es/EUR) — env cache tier removed (3-tier now)
+	if req.GL != "AR" {
+		t.Errorf("req.GL = %q, want %q (config default)", req.GL, "AR")
 	}
-	if req.HL != "ja" {
-		t.Errorf("req.HL = %q, want %q (from env cache language)", req.HL, "ja")
+	if req.HL != "es" {
+		t.Errorf("req.HL = %q, want %q (config default)", req.HL, "es")
 	}
-	if req.Currency != "JPY" {
-		t.Errorf("req.Currency = %q, want %q (from env cache currency)", req.Currency, "JPY")
+	if req.Currency != "EUR" {
+		t.Errorf("req.Currency = %q, want %q (config default)", req.Currency, "EUR")
 	}
 
 	// Core request fields should be preserved
@@ -430,13 +430,12 @@ func TestHandlerIntegration_SingleExplicitWins(t *testing.T) {
 		t.Errorf("req.Currency = %q, want GBP (explicit)", req.Currency)
 	}
 
-	// GL/HL should be empty because Tier 1 shortcut skips resolution entirely
-	// When ANY explicit param is present, ResolveSearchDefaults returns empty
-	// for non-explicit params (ptrOrEmpty returns "" for nil pointers)
-	if req.GL != "" {
-		t.Errorf("req.GL = %q, want empty (Tier 1 wins, non-explicit params left empty)", req.GL)
+	// GL/HL receive config defaults because per-param resolution fills
+	// non-explicit params with config (3-tier: explicit → profile → config)
+	if req.GL != "AR" {
+		t.Errorf("req.GL = %q, want %q (config default)", req.GL, "AR")
 	}
-	if req.HL != "" {
-		t.Errorf("req.HL = %q, want empty (Tier 1 wins, non-explicit params left empty)", req.HL)
+	if req.HL != "pt" {
+		t.Errorf("req.HL = %q, want %q (profile prefs from cache)", req.HL, "pt")
 	}
 }

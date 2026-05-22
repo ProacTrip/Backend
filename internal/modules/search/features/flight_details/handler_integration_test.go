@@ -201,9 +201,9 @@ func TestHandlerIntegration_FlightDetails_AnonymousUser_UsesEnvCache(t *testing.
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	// Verify env-derived defaults (Japan: JPY)
-	if spy.lastReq.Currency != "JPY" {
-		t.Errorf("lastReq.Currency = %q, want JPY (from env cache)", spy.lastReq.Currency)
+	// Verify config defaults (EUR/es/AR) — env cache tier removed (3-tier now)
+	if spy.lastReq.Currency != "EUR" {
+		t.Errorf("lastReq.Currency = %q, want EUR (config default)", spy.lastReq.Currency)
 	}
 }
 

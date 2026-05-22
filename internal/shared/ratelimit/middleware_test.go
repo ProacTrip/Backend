@@ -491,3 +491,47 @@ func BenchmarkRateLimiterAllow(b *testing.B) {
 		rl.Allow(ctx, "bench:ip", 1000000, 60)
 	}
 }
+
+// =============================================================================
+// Rate limit error format — full RFC 9457 URI (W-2)
+// =============================================================================
+
+func TestRateLimit429_UsesFullRFC9457URI(t *testing.T) {
+	e, rl, _ := setupEchoWithRateLimiter(t, 1)
+	anonMW := ratelimit.AnonymousCookieMiddleware(nil, false)
+	anonRLMW := ratelimit.AnonymousRateLimitMiddleware(rl)
+
+	e.GET("/test-rfc9457", func(c *echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	}, anonMW, anonRLMW)
+
+	req1 := httptest.NewRequest(http.MethodGet, "/test-rfc9457", nil)
+	req1.AddCookie(&http.Cookie{Name: "__Secure-anon_token", Value: "rfc-verify"})
+	rec1 := httptest.NewRecorder()
+	e.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("first request should pass, got %d", rec1.Code)
+	}
+
+	req2 := httptest.NewRequest(http.MethodGet, "/test-rfc9457", nil)
+	req2.AddCookie(&http.Cookie{Name: "__Secure-anon_token", Value: "rfc-verify"})
+	rec2 := httptest.NewRecorder()
+	e.ServeHTTP(rec2, req2)
+
+	if rec2.Code != http.StatusTooManyRequests {
+		t.Fatalf("second request should return 429, got %d", rec2.Code)
+	}
+
+	// Verify Retry-After header is present
+	if rec2.Header().Get("Retry-After") == "" {
+		t.Error("Retry-After header missing on 429 response")
+	}
+
+	// Verify RateLimit headers are present
+	if rec2.Header().Get("RateLimit-Limit") == "" {
+		t.Error("RateLimit-Limit header missing")
+	}
+	if rec2.Header().Get("RateLimit-Remaining") == "" {
+		t.Error("RateLimit-Remaining header missing")
+	}
+}

@@ -472,3 +472,83 @@ func TestHotelDetailsRequestJSONTags(t *testing.T) {
 		t.Error("children_ages should be omitted when nil")
 	}
 }
+
+// =============================================================================
+// PageToken *string — nil omitted, non-nil included (C-6)
+// =============================================================================
+
+func TestHotelSearchRequest_PageToken_NilOmitted(t *testing.T) {
+	req := HotelSearchRequest{
+		Query:       "Madrid",
+		CheckInDate: "2026-06-15",
+		CheckOutDate: "2026-06-20",
+		Adults:      2,
+		PageToken:   nil, // not set
+	}
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	var generic map[string]interface{}
+	if err := json.Unmarshal(data, &generic); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
+	if _, ok := generic["page_token"]; ok {
+		t.Error("page_token should be omitted when nil")
+	}
+}
+
+func TestHotelSearchRequest_PageToken_NonNilIncluded(t *testing.T) {
+	req := HotelSearchRequest{
+		Query:       "Madrid",
+		CheckInDate: "2026-06-15",
+		CheckOutDate: "2026-06-20",
+		Adults:      2,
+		PageToken:   new("abc123"),
+	}
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	var generic map[string]interface{}
+	if err := json.Unmarshal(data, &generic); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
+	v, ok := generic["page_token"]
+	if !ok {
+		t.Fatal("page_token should be present when non-nil")
+	}
+	if v != "abc123" {
+		t.Errorf("page_token: got %v, want %q", v, "abc123")
+	}
+}
+
+func TestHotelPagination_NextToken_NilOmitted(t *testing.T) {
+	p := HotelPagination{
+		NextToken: nil,
+		HasMore:   false,
+	}
+
+	data, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	var generic map[string]interface{}
+	if err := json.Unmarshal(data, &generic); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
+	if _, ok := generic["next_token"]; ok {
+		t.Error("next_token should be omitted when nil")
+	}
+	if hasMore, ok := generic["has_more"]; !ok || hasMore != false {
+		t.Errorf("has_more should be present and false, got %v", generic["has_more"])
+	}
+}
