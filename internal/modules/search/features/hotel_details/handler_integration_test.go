@@ -98,6 +98,7 @@ func newHotelDetailsEchoContext(t *testing.T, body string) (*echo.Context, *http
 func minimalHotelDetailsBody() string {
 	return `{
 		"id": "prop_abc123",
+		"query": "Grand Hotel",
 		"check_in_date": "2026-06-15",
 		"check_out_date": "2026-06-20"
 	}`
@@ -197,7 +198,7 @@ func TestHandlerIntegration_HotelDetails_ExplicitWinsOverProfilePrefs(t *testing
 	})
 
 	// Request WITH explicit currency
-	body := `{"id":"prop_abc123","check_in_date":"2026-06-15","check_out_date":"2026-06-20","currency":"GBP"}`
+	body := `{"id":"prop_abc123","query":"Grand Hotel","check_in_date":"2026-06-15","check_out_date":"2026-06-20","currency":"GBP"}`
 
 	c, rec := newHotelDetailsEchoContext(t, body)
 	c.Set("user_claims", &sharedauth.AccessClaims{UserID: userID})

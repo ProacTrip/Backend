@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
+	searchshared "github.com/ProacTrip/Backend/internal/modules/search/shared"
 )
 
 // =============================================================================
@@ -48,8 +49,12 @@ func (cmd Command) ToDomain() domain.HotelDetailsRequest {
 	}
 }
 
-// Validate checks required fields.
+// Validate checks required fields and parameter constraints.
 func (cmd *Command) Validate() error {
+	// Trim whitespace before checking empty — whitespace-only query is invalid
+	if searchshared.TrimSpaces(cmd.Query) == "" {
+		return fmt.Errorf("%w: query", domain.ErrMissingRequiredField)
+	}
 	if cmd.ID == "" {
 		return fmt.Errorf("%w: id (property_token)", domain.ErrTokenRequired)
 	}
@@ -62,6 +67,20 @@ func (cmd *Command) Validate() error {
 
 	if cmd.Adults < 1 {
 		cmd.Adults = 2
+	}
+
+	// children_ages must match children count
+	if len(cmd.ChildrenAges) > 0 && len(cmd.ChildrenAges) != cmd.Children {
+		return fmt.Errorf("%w: children_ages length must equal children count (%d != %d)",
+			domain.ErrInvalidParameterRange, len(cmd.ChildrenAges), cmd.Children)
+	}
+
+	// children_ages must be in range 1-17
+	for i, age := range cmd.ChildrenAges {
+		if age < 1 || age > 17 {
+			return fmt.Errorf("%w: children_ages[%d]=%d debe estar entre 1 y 17",
+				domain.ErrInvalidParameterRange, i, age)
+		}
 	}
 
 	return nil
