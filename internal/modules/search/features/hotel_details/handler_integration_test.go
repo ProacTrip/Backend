@@ -73,9 +73,8 @@ func setupHotelDetailsIntegrationTest(t *testing.T) (*hotel_details.Handler, *re
 	})
 
 	defaultsCfg := shared.SearchDefaultConfig{
-		Currency:    "EUR",
-		Language:    "es",
-		CountryCode: "AR",
+		Currency: "EUR",
+		Language: "es",
 	}
 
 	handler := hotel_details.NewHandler(uc, rdb, defaultsCfg)

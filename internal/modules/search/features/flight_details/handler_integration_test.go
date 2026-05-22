@@ -69,9 +69,8 @@ func setupFlightDetailsIntegrationTest(t *testing.T) (*flight_details.Handler, *
 	})
 
 	defaultsCfg := shared.SearchDefaultConfig{
-		Currency:    "EUR",
-		Language:    "es",
-		CountryCode: "AR",
+		Currency: "EUR",
+		Language: "es",
 	}
 
 	handler := flight_details.NewHandler(uc, rdb, defaultsCfg)

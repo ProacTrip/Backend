@@ -28,10 +28,8 @@ func TestGetProfilePrefs_CacheHit(t *testing.T) {
 	// Pre-popular el hash con el formato user:prefs:{userID}
 	key := "user:prefs:" + userID
 	fields := map[string]interface{}{
-		"currency":     "ARS",
-		"language":     "es",
-		"country_code": "AR",
-		"timezone":     "America/Argentina/Buenos_Aires",
+		"currency": "ARS",
+		"language": "es",
 	}
 	if err := rdb.HSet(ctx, key, fields).Err(); err != nil {
 		t.Fatalf("HSet failed: %v", err)
@@ -49,12 +47,6 @@ func TestGetProfilePrefs_CacheHit(t *testing.T) {
 	}
 	if prefs.Language != "es" {
 		t.Errorf("Language = %q, want %q", prefs.Language, "es")
-	}
-	if prefs.CountryCode != "AR" {
-		t.Errorf("CountryCode = %q, want %q", prefs.CountryCode, "AR")
-	}
-	if prefs.Timezone != "America/Argentina/Buenos_Aires" {
-		t.Errorf("Timezone = %q, want %q", prefs.Timezone, "America/Argentina/Buenos_Aires")
 	}
 }
 
@@ -155,12 +147,6 @@ func TestGetProfilePrefs_PartialHash(t *testing.T) {
 	if prefs.Currency != "" {
 		t.Errorf("Currency = %q, want empty (field not set)", prefs.Currency)
 	}
-	if prefs.CountryCode != "" {
-		t.Errorf("CountryCode = %q, want empty (field not set)", prefs.CountryCode)
-	}
-	if prefs.Timezone != "" {
-		t.Errorf("Timezone = %q, want empty (field not set)", prefs.Timezone)
-	}
 }
 
 // ===================== SetProfilePrefs — escribe todos los campos =====================
@@ -171,10 +157,8 @@ func TestSetProfilePrefs_WritesAllFields(t *testing.T) {
 	userID := "aa0e8400-e29b-41d4-a716-446655440005"
 
 	prefs := &sharedUser.Prefs{
-		Currency:    "ARS",
-		Language:    "es",
-		CountryCode: "AR",
-		Timezone:    "America/Argentina/Buenos_Aires",
+		Currency: "ARS",
+		Language: "es",
 	}
 	err := sharedUser.SetProfilePrefs(ctx, rdb, userID, prefs)
 	if err != nil {
@@ -194,12 +178,6 @@ func TestSetProfilePrefs_WritesAllFields(t *testing.T) {
 	}
 	if got.Language != "es" {
 		t.Errorf("Language = %q, want %q", got.Language, "es")
-	}
-	if got.CountryCode != "AR" {
-		t.Errorf("CountryCode = %q, want %q", got.CountryCode, "AR")
-	}
-	if got.Timezone != "America/Argentina/Buenos_Aires" {
-		t.Errorf("Timezone = %q, want %q", got.Timezone, "America/Argentina/Buenos_Aires")
 	}
 }
 
@@ -234,7 +212,7 @@ func TestSetProfilePrefs_EmptyFields(t *testing.T) {
 
 	prefs := &sharedUser.Prefs{
 		Currency: "BRL",
-		// Language, CountryCode, Timezone vacíos
+		// Language vacío
 	}
 	err := sharedUser.SetProfilePrefs(ctx, rdb, userID, prefs)
 	if err != nil {

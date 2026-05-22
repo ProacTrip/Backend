@@ -68,9 +68,8 @@ func setupHandlerIntegrationTest(t *testing.T) (*search_flights.Handler, *spyPro
 	})
 
 	defaultsCfg := shared.SearchDefaultConfig{
-		Currency:    "EUR",
-		Language:    "es",
-		CountryCode: "AR",
+		Currency: "EUR",
+		Language: "es",
 	}
 
 	handler := search_flights.NewHandler(uc, rdb, defaultsCfg)
@@ -175,8 +174,8 @@ func TestHandlerIntegration_AuthenticatedUser_UsesProfilePrefs(t *testing.T) {
 		t.Fatal("provider was never called — usecase didn't execute search")
 	}
 
-	if req.GL != "AR" {
-		t.Errorf("req.GL = %q, want %q (config default — country no viene de profile)", req.GL, "AR")
+	if req.GL != "" {
+		t.Errorf("req.GL = %q, want %q (GL no longer from SearchDefaultConfig — Phase 2 ai-discovery-rewrite)", req.GL, "")
 	}
 	if req.HL != "pt" {
 		t.Errorf("req.HL = %q, want %q (from profile language)", req.HL, "pt")
@@ -239,8 +238,8 @@ func TestHandlerIntegration_ProfilePrefsBeatEnvCache(t *testing.T) {
 	if req.Currency != "ARS" {
 		t.Errorf("req.Currency = %q, want ARS (profile prefs beat env cache)", req.Currency)
 	}
-	if req.GL != "AR" {
-		t.Errorf("req.GL = %q, want AR", req.GL)
+	if req.GL != "" {
+		t.Errorf("req.GL = %q, want %q (GL no longer from SearchDefaultConfig — Phase 2 ai-discovery-rewrite)", req.GL, "")
 	}
 	if req.HL != "es" {
 		t.Errorf("req.HL = %q, want es", req.HL)
@@ -291,8 +290,8 @@ func TestHandlerIntegration_AnonymousUser_UsesEnvCache(t *testing.T) {
 	}
 
 	// Verify config defaults (AR/es/EUR) — env cache tier removed (3-tier now)
-	if req.GL != "AR" {
-		t.Errorf("req.GL = %q, want %q (config default)", req.GL, "AR")
+	if req.GL != "" {
+		t.Errorf("req.GL = %q, want %q (GL no longer from SearchDefaultConfig — Phase 2 ai-discovery-rewrite)", req.GL, "")
 	}
 	if req.HL != "es" {
 		t.Errorf("req.HL = %q, want %q (config default)", req.HL, "es")
@@ -331,8 +330,8 @@ func TestHandlerIntegration_EnvCacheMiss_FallsToConfig(t *testing.T) {
 	}
 
 	// Config defaults are AR/es/EUR (see setupHandlerIntegrationTest)
-	if req.GL != "AR" {
-		t.Errorf("req.GL = %q, want AR (config default)", req.GL)
+	if req.GL != "" {
+		t.Errorf("req.GL = %q, want %q (GL no longer from SearchDefaultConfig — Phase 2 ai-discovery-rewrite)", req.GL, "")
 	}
 	if req.HL != "es" {
 		t.Errorf("req.HL = %q, want es (config default)", req.HL)
@@ -432,8 +431,8 @@ func TestHandlerIntegration_SingleExplicitWins(t *testing.T) {
 
 	// GL/HL receive config defaults because per-param resolution fills
 	// non-explicit params with config (3-tier: explicit → profile → config)
-	if req.GL != "AR" {
-		t.Errorf("req.GL = %q, want %q (config default)", req.GL, "AR")
+	if req.GL != "" {
+		t.Errorf("req.GL = %q, want %q (GL no longer from SearchDefaultConfig — Phase 2 ai-discovery-rewrite)", req.GL, "")
 	}
 	if req.HL != "pt" {
 		t.Errorf("req.HL = %q, want %q (profile prefs from cache)", req.HL, "pt")

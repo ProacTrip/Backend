@@ -63,7 +63,7 @@ func (a *resendNotificationAdapter) SendVerificationEmail(ctx context.Context, u
 		VerificationToken: token,
 		FirstName:         "", // El adapter de resend no tiene acceso al first_name
 	}
-	_, err := a.uc.Execute(ctx, cmd)
+	err := a.uc.Execute(ctx, cmd)
 	return err
 }
 
@@ -290,6 +290,11 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	}
 
 	// User Module
+	// User DB migrations — idempotentes
+	if err := userModule.RunMigrations(appCtx, userPool); err != nil {
+		return nil, fmt.Errorf("user migrations: %w", err)
+	}
+
 	encKeyBytes, _ := cfg.Medical.EncryptionKeyBytes()
 
 	// Inicializar R2 Storage si está configurado
@@ -399,9 +404,8 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		RateLimiter:       rateLimiter,
 		RedisClient:       rdb,
 		SearchDefaults: searchShared.SearchDefaultConfig{
-			Currency:    cfg.DefaultCurrency,
-			Language:    cfg.DefaultLanguage,
-			CountryCode: cfg.DefaultCountryCode,
+			Currency: cfg.DefaultCurrency,
+			Language: cfg.DefaultLanguage,
 		},
 		AIInterpreter:     aiInterpreter,
 		SavedSearchProvider: nil,

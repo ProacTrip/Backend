@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -32,7 +33,6 @@ import (
 	searchshared "github.com/ProacTrip/Backend/internal/modules/search/features/shared"
 	"github.com/ProacTrip/Backend/internal/modules/search/shared/airports"
 	sharedEnv "github.com/ProacTrip/Backend/internal/shared/environment"
-	sharedUser "github.com/ProacTrip/Backend/internal/shared/user"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -770,39 +770,9 @@ func (uc *UseCase) resolveLocationHint(ctx context.Context, userID, clientIP str
 
 	var city, country, countryCode, iata string
 
-	if userID != "" {
-		// Authenticated user: get country_code from profile prefs.
-		prefs, err := sharedUser.GetProfilePrefs(ctx, uc.rdb, userID)
-		if err != nil || prefs == nil || prefs.CountryCode == "" {
-			slog.DebugContext(ctx, "resolveLocationHint: auth user has no profile prefs, skipping",
-				slog.String("user_id", userID),
-				slog.Bool("found", prefs != nil),
-			)
-			return ""
-		}
-		countryCode = prefs.CountryCode
-
-		// Resolve country name and main airport IATA from env cache for the client IP.
-		ci, ciErr := sharedEnv.GetCountryInfo(ctx, uc.rdb, clientIP)
-		if ciErr != nil || ci.Country == "" {
-			slog.DebugContext(ctx, "resolveLocationHint: env cache lookup failed for auth user",
-				slog.String("ip", clientIP),
-				slog.String("country_code", countryCode),
-			)
-			return ""
-		}
-		country = ci.Country
-
-		// Try to get main airport IATA for this country.
-		if mainIATA, found := airports.ResolveCountryToIATA(country); found {
-			iata = mainIATA
-			// Try to extract the city from the airport dataset.
-			if entry, err := airports.ResolveIATA(ctx, nil, mainIATA); err == nil && entry != nil {
-				city = entry.City
-			}
-		}
-	} else if clientIP != "" {
-		// Anonymous user: parse env:{ip} Dragonfly cache.
+	// Both auth and anonymous users resolve location from env:{ip} cache.
+	// CountryCode is NO LONGER read from profile prefs (Phase 2 ai-discovery-rewrite).
+	if clientIP != "" {
 		key := sharedEnv.CacheKey(clientIP)
 		raw, err := uc.rdb.Get(ctx, key).Result()
 		if err != nil {
@@ -833,7 +803,7 @@ func (uc *UseCase) resolveLocationHint(ctx context.Context, userID, clientIP str
 
 		// If cache provided usable data, resolve IATA.
 		if city != "" || country != "" || countryCode != "" {
-			// Try to resolve IATA code for the city (anonymous users have city-level data).
+			// Try to resolve IATA code for the city.
 			if city != "" {
 				if entry, err := airports.ResolveIATA(ctx, nil, city); err == nil && entry != nil {
 					iata = entry.IATA
@@ -853,29 +823,32 @@ func (uc *UseCase) resolveLocationHint(ctx context.Context, userID, clientIP str
 		}
 	}
 
-	// Fallback: use DEFAULT_COUNTRY_CODE from config when no location data is available
+	// Fallback: use DEFAULT_COUNTRY_CODE env var when no location data is available
 	// (e.g. first request in local dev where /v1/environment hasn't been called).
-	if city == "" && country == "" && countryCode == "" && uc.defaultsCfg.CountryCode != "" {
-		// Intentar obtener CountryInfo desde la caché de entorno para la IP.
-		ci, ciErr := sharedEnv.GetCountryInfo(ctx, uc.rdb, clientIP)
-		if ciErr == nil && ci.Country != "" {
-			countryCode = uc.defaultsCfg.CountryCode
-			country = ci.Country
-			if mainIATA, found := airports.ResolveCountryToIATA(country); found {
-				iata = mainIATA
-				// Try to get the main city for this country (without the ", Country" suffix).
-				if cityWithCountry, found := airports.ResolveCountryToMainCity(country); found {
-					// Strip ", Country" suffix if present (e.g. "Buenos Aires, Argentina" → "Buenos Aires").
-					parts := strings.SplitN(cityWithCountry, ",", 2)
-					city = strings.TrimSpace(parts[0])
+	// Phase 2 ai-discovery-rewrite: reads env var directly instead of defaultsCfg.CountryCode.
+	if city == "" && country == "" && countryCode == "" {
+		if defaultCC := os.Getenv("DEFAULT_COUNTRY_CODE"); defaultCC != "" {
+			// Intentar obtener CountryInfo desde la caché de entorno para la IP.
+			ci, ciErr := sharedEnv.GetCountryInfo(ctx, uc.rdb, clientIP)
+			if ciErr == nil && ci.Country != "" {
+				countryCode = defaultCC
+				country = ci.Country
+				if mainIATA, found := airports.ResolveCountryToIATA(country); found {
+					iata = mainIATA
+					// Try to get the main city for this country (without the ", Country" suffix).
+					if cityWithCountry, found := airports.ResolveCountryToMainCity(country); found {
+						// Strip ", Country" suffix if present (e.g. "Buenos Aires, Argentina" → "Buenos Aires").
+						parts := strings.SplitN(cityWithCountry, ",", 2)
+						city = strings.TrimSpace(parts[0])
+					}
 				}
+				slog.DebugContext(ctx, "resolveLocationHint: resolved via DEFAULT_COUNTRY_CODE env var",
+					slog.String("country_code", defaultCC),
+					slog.String("country", country),
+					slog.String("city", city),
+					slog.String("iata", iata),
+				)
 			}
-			slog.DebugContext(ctx, "resolveLocationHint: resolved via default country code",
-				slog.String("country_code", uc.defaultsCfg.CountryCode),
-				slog.String("country", country),
-				slog.String("city", city),
-				slog.String("iata", iata),
-			)
 		}
 	}
 

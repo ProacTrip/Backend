@@ -18,9 +18,8 @@ func setupDefaultsTest(t *testing.T) (*redis.Client, *miniredis.Miniredis, Searc
 	t.Cleanup(func() { rdb.Close() })
 
 	cfg := SearchDefaultConfig{
-		Currency:    "EUR",
-		Language:    "es",
-		CountryCode: "AR",
+		Currency: "EUR",
+		Language: "es",
 	}
 	return rdb, mr, cfg
 }
@@ -65,8 +64,8 @@ func TestResolveSearchDefaults_Tier1_SingleExplicitWithConfigFallback(t *testing
 		cfg,
 	)
 
-	if gl != "AR" {
-		t.Errorf("gl = %q, want %q (config default)", gl, "AR")
+	if gl != "" {
+		t.Errorf("gl = %q, want %q (GL no longer resolved by ResolveSearchDefaults — Phase 2 ai-discovery-rewrite)", gl, "")
 	}
 	if hl != "es" {
 		t.Errorf("hl = %q, want %q (config default)", hl, "es")
@@ -105,8 +104,8 @@ func TestResolveSearchDefaults_Tier2_ProfilePrefs(t *testing.T) {
 	)
 
 	// GL comes from config default (country_code is not in the 3-tier for GL)
-	if gl != "AR" {
-		t.Errorf("gl = %q, want %q (config default — country no viene de profile)", gl, "AR")
+	if gl != "" {
+		t.Errorf("gl = %q, want %q (GL no longer resolved by ResolveSearchDefaults — Phase 2 ai-discovery-rewrite)", gl, "")
 	}
 	if hl != "pt" {
 		t.Errorf("hl = %q, want %q (from language)", hl, "pt")
@@ -129,8 +128,8 @@ func TestResolveSearchDefaults_Tier2_ProfilePrefsMiss(t *testing.T) {
 		cfg,
 	)
 
-	if gl != "AR" {
-		t.Errorf("gl = %q, want %q (config default)", gl, "AR")
+	if gl != "" {
+		t.Errorf("gl = %q, want %q (GL no longer resolved by ResolveSearchDefaults — Phase 2 ai-discovery-rewrite)", gl, "")
 	}
 	if hl != "es" {
 		t.Errorf("hl = %q, want %q (config default)", hl, "es")
@@ -152,8 +151,8 @@ func TestResolveSearchDefaults_Tier3_ConfigFallback(t *testing.T) {
 		cfg,
 	)
 
-	if gl != "AR" {
-		t.Errorf("gl = %q, want %q", gl, "AR")
+	if gl != "" {
+		t.Errorf("gl = %q, want %q (GL no longer resolved by ResolveSearchDefaults — Phase 2 ai-discovery-rewrite)", gl, "")
 	}
 	if hl != "es" {
 		t.Errorf("hl = %q, want %q", hl, "es")
@@ -186,8 +185,8 @@ func TestResolveSearchDefaults_PerParam_ExplicitHLOverridesProfile(t *testing.T)
 		cfg,
 	)
 
-	if gl != "AR" {
-		t.Errorf("gl = %q, want %q (config default)", gl, "AR")
+	if gl != "" {
+		t.Errorf("gl = %q, want %q (GL no longer resolved by ResolveSearchDefaults — Phase 2 ai-discovery-rewrite)", gl, "")
 	}
 	if hl != "en" {
 		t.Errorf("hl = %q, want %q (explicit wins)", hl, "en")
@@ -219,8 +218,8 @@ func TestResolveSearchDefaults_DragonflyDown_FallsToConfig(t *testing.T) {
 		cfg,
 	)
 
-	if gl != "AR" {
-		t.Errorf("gl = %q, want %q (config fallback)", gl, "AR")
+	if gl != "" {
+		t.Errorf("gl = %q, want %q (GL no longer resolved by ResolveSearchDefaults — Phase 2 ai-discovery-rewrite)", gl, "")
 	}
 	if hl != "es" {
 		t.Errorf("hl = %q, want %q (config fallback)", hl, "es")

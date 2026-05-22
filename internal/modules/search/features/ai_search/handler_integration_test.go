@@ -30,9 +30,8 @@ import (
 
 // integrationDefaults is the fallback config for handler integration tests.
 var integrationDefaults = shared.SearchDefaultConfig{
-	Currency:    "EUR",
-	Language:    "es",
-	CountryCode: "AR",
+	Currency: "EUR",
+	Language: "es",
 }
 
 // =============================================================================

@@ -3,8 +3,7 @@
 // documentado en S-SPEC-001. Ambos módulos (user y search) usan este paquete para
 // garantizar compatibilidad de formato en tiempo de compilación.
 //
-// Formato de clave: user:prefs:{userID} — hash con campos currency, language,
-// country_code, timezone.
+// Formato de clave: user:prefs:{userID} — hash con campos currency, language.
 package user
 
 import (
@@ -21,11 +20,11 @@ import (
 
 // Prefs contiene las preferencias de perfil del usuario cacheadas en DragonflyDB.
 // Los campos se almacenan como campos individuales de un hash user:prefs:{userID}.
+// CountryCode y Timezone fueron removidos en Phase 2 de ai-discovery-rewrite —
+// esos datos se resuelven exclusivamente desde la caché env:{ip} o DEFAULT_COUNTRY_CODE.
 type Prefs struct {
-	Currency    string `json:"currency"`
-	Language    string `json:"language"`
-	CountryCode string `json:"country_code"`
-	Timezone    string `json:"timezone"`
+	Currency string `json:"currency"`
+	Language string `json:"language"`
 }
 
 // =============================================================================
@@ -35,7 +34,7 @@ type Prefs struct {
 // GetProfilePrefs obtiene las preferencias cacheadas del usuario desde Dragonfly.
 // Retorna nil, nil en cache miss (hash inexistente o vacío).
 // Retorna error solo si Dragonfly falla.
-// Clave: user:prefs:{userID} (hash con campos currency, language, country_code, timezone).
+// Clave: user:prefs:{userID} (hash con campos currency, language).
 func GetProfilePrefs(ctx context.Context, rdb *redis.Client, userID string) (*Prefs, error) {
 	key := "user:prefs:" + userID
 
@@ -50,10 +49,8 @@ func GetProfilePrefs(ctx context.Context, rdb *redis.Client, userID string) (*Pr
 	}
 
 	return &Prefs{
-		Currency:    fields["currency"],
-		Language:    fields["language"],
-		CountryCode: fields["country_code"],
-		Timezone:    fields["timezone"],
+		Currency: fields["currency"],
+		Language: fields["language"],
 	}, nil
 }
 
@@ -63,24 +60,18 @@ func GetProfilePrefs(ctx context.Context, rdb *redis.Client, userID string) (*Pr
 
 // SetProfilePrefs guarda las preferencias del usuario en Dragonfly como un hash.
 // Si prefs es nil o todos los campos están vacíos, no hace nada (no-op).
-// Clave: user:prefs:{userID} — campos: currency, language, country_code, timezone.
+// Clave: user:prefs:{userID} — campos: currency, language.
 func SetProfilePrefs(ctx context.Context, rdb *redis.Client, userID string, prefs *Prefs) error {
 	if prefs == nil {
 		return nil
 	}
 
-	fields := make(map[string]interface{}, 4)
+	fields := make(map[string]interface{}, 2)
 	if prefs.Currency != "" {
 		fields["currency"] = prefs.Currency
 	}
 	if prefs.Language != "" {
 		fields["language"] = prefs.Language
-	}
-	if prefs.CountryCode != "" {
-		fields["country_code"] = prefs.CountryCode
-	}
-	if prefs.Timezone != "" {
-		fields["timezone"] = prefs.Timezone
 	}
 
 	if len(fields) == 0 {
@@ -105,7 +96,7 @@ func SetProfilePrefs(ctx context.Context, rdb *redis.Client, userID string, pref
 // =============================================================================
 
 // DeleteProfilePrefs elimina las preferencias cacheadas del usuario desde DragonflyDB.
-// Se llama después de actualizar timezone, idioma o moneda para forzar re-cache en
+// Se llama después de actualizar idioma o moneda para forzar re-cache en
 // la próxima lectura.
 // Clave: user:prefs:{userID}.
 func DeleteProfilePrefs(ctx context.Context, rdb *redis.Client, userID string) error {

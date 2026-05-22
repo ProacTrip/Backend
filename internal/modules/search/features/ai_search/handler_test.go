@@ -30,9 +30,8 @@ func newEchoContext(body string) (*echo.Context, *httptest.ResponseRecorder) {
 
 // defaultCfg is used in handler tests — ResolveSearchDefaults needs a fallback.
 var defaultCfg = shared.SearchDefaultConfig{
-	Currency:    "EUR",
-	Language:    "es",
-	CountryCode: "AR",
+	Currency: "EUR",
+	Language: "es",
 }
 
 // =============================================================================

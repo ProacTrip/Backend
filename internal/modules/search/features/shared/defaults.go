@@ -46,21 +46,25 @@ func UserIDFromContext(c *echo.Context) string {
 // =============================================================================
 
 // SearchDefaultConfig holds the hardcoded fallback defaults for search params.
+// CountryCode was removed in Phase 2 of ai-discovery-rewrite — country code
+// resolution now comes from the env:{ip} cache or DEFAULT_COUNTRY_CODE env var.
 type SearchDefaultConfig struct {
-	Currency    string // e.g. "EUR"
-	Language    string // e.g. "es"
-	CountryCode string // e.g. "AR"
+	Currency string // e.g. "EUR"
+	Language string // e.g. "es"
 }
 
-// ResolveSearchDefaults resolves GL (country), HL (language), and Currency
-// for search requests. Each parameter is resolved independently:
+// ResolveSearchDefaults resolves HL (language) and Currency for search requests.
+// GL (country code) is NOT resolved here — it comes from the env:{ip} cache or
+// DEFAULT_COUNTRY_CODE env var (see resolveLocationHint in ai_search/usecase.go).
+// Each parameter is resolved independently:
 //
 //	Tier 1: Client-supplied explicit param (non-nil pointer wins for that param)
 //	Tier 2: Authenticated user profile prefs (Dragonfly hash profile:{userID}:prefs)
-//	        — used for HL and Currency only (country code comes from config)
+//	        — used for HL and Currency only
 //	Tier 3: Config fallback defaults
 //
-// Returns the resolved (gl, hl, currency) values.
+// Returns the resolved (gl, hl, currency) values. gl is always empty (no longer
+// resolved by this function — see Phase 2 of ai-discovery-rewrite).
 func ResolveSearchDefaults(
 	ctx context.Context,
 	rdb *redis.Client,
@@ -83,9 +87,8 @@ func ResolveSearchDefaults(
 
 	// Guard: if Redis is nil (tests, AI not configured), skip to Tier 3
 	if rdb == nil {
-		if gl == "" {
-			gl = cfg.CountryCode
-		}
+		// GL is no longer resolved from config defaults — caller must
+		// resolve via env cache or DEFAULT_COUNTRY_CODE env var.
 		if hl == "" {
 			hl = cfg.Language
 		}
@@ -115,9 +118,9 @@ func ResolveSearchDefaults(
 	}
 
 	// Tier 3: Config fallback defaults
-	if gl == "" {
-		gl = cfg.CountryCode
-	}
+	// GL is no longer resolved from config defaults — see Phase 2 of
+	// ai-discovery-rewrite. Country code resolution comes from env:{ip}
+	// cache or DEFAULT_COUNTRY_CODE env var in the usecase layer.
 	if hl == "" {
 		hl = cfg.Language
 	}
