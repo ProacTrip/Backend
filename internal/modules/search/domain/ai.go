@@ -59,6 +59,33 @@ type DiscoveryInterpreter interface {
 	Discover(ctx context.Context, message string, ctxData DiscoveryContext, history []ConversationMessage) (string, error)
 }
 
+// ToolCallStreamer streams chat completions with tool calling support.
+// Returns the assistant's accumulated text and any tool calls requested.
+type ToolCallStreamer interface {
+	ChatWithTools(ctx context.Context, messages []ChatMessage, tools []map[string]interface{}) (*ToolCallStreamResult, error)
+}
+
+// ChatMessage is a simple message struct for the tool calling adapter (avoids import cycle).
+type ChatMessage struct {
+	Role       string     `json:"role"`
+	Content    string     `json:"content,omitzero"`
+	ToolCallID string     `json:"tool_call_id,omitzero"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitzero"`
+}
+
+// ToolCall represents a tool call from the AI model.
+type ToolCall struct {
+	ID        string                 `json:"id"`
+	Name      string                 `json:"name"`
+	Arguments map[string]interface{} `json:"arguments"`
+}
+
+// ToolCallStreamResult wraps the streaming result.
+type ToolCallStreamResult struct {
+	AssistantText string     `json:"assistant_text"`
+	ToolCalls     []ToolCall `json:"tool_calls,omitzero"`
+}
+
 // =============================================================================
 // TravelIntent — structured result of AI interpretation
 // =============================================================================

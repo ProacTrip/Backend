@@ -3,6 +3,14 @@
 // Proporciona funciones para escribir eventos Server-Sent Events (SSE)
 // al http.ResponseWriter. Usado por el handler para enviar respuestas
 // de discovery en tiempo real al frontend.
+//
+// Event types:
+//   - "chunk": {"content": "partial text..."} — AI text delta
+//   - "search": {"destination": "...", "type": "hotels|flights", "data": {...}} — search results
+//   - "filters": {"available": {...}, "active": {...}} — filter options
+//   - "status": {"status": "thinking"} — initial status
+//   - "done": {"conversation_id": "...", "turn_count": N} — stream complete
+//   - "error": {"error": "message"} — error event
 package ai_search
 
 import (
@@ -81,4 +89,46 @@ func streamDiscoveryResponse(w http.ResponseWriter, fullText string) error {
 
 	// Emit final "done" event
 	return writeSSEEventJSON(w, "done", map[string]string{"full_text": fullText})
+}
+
+// =============================================================================
+// Public SSE event writers
+// =============================================================================
+
+// WriteChunkEvent writes an SSE "chunk" event with a text delta.
+func WriteChunkEvent(w http.ResponseWriter, content string) error {
+	return writeSSEEventJSON(w, "chunk", map[string]string{"content": content})
+}
+
+// WriteSearchEvent writes an SSE "search" event with structured search results.
+// destination is a human-readable location (e.g., "Barcelona, España" or "MAD→BCN").
+// searchType is "hotels" or "flights".
+// data is the search response payload.
+func WriteSearchEvent(w http.ResponseWriter, destination, searchType string, data interface{}) error {
+	return writeSSEEventJSON(w, "search", map[string]interface{}{
+		"destination": destination,
+		"type":        searchType,
+		"data":        data,
+	})
+}
+
+// WriteFiltersEvent writes an SSE "filters" event with available and active filters.
+func WriteFiltersEvent(w http.ResponseWriter, available, active interface{}) error {
+	return writeSSEEventJSON(w, "filters", map[string]interface{}{
+		"available": available,
+		"active":    active,
+	})
+}
+
+// WriteDoneEvent writes an SSE "done" event marking the stream as complete.
+func WriteDoneEvent(w http.ResponseWriter, conversationID string, turnCount int) error {
+	return writeSSEEventJSON(w, "done", map[string]interface{}{
+		"conversation_id": conversationID,
+		"turn_count":      turnCount,
+	})
+}
+
+// WriteErrorEvent writes an SSE "error" event.
+func WriteErrorEvent(w http.ResponseWriter, message string) error {
+	return writeSSEEventJSON(w, "error", map[string]string{"error": message})
 }

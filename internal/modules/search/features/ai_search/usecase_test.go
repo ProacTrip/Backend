@@ -3,6 +3,7 @@ package ai_search_test
 import (
 	"context"
 	"errors"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -1275,5 +1276,217 @@ func TestExecuteToolCalls_PartialFailure(t *testing.T) {
 	}
 	if !foundError {
 		t.Error("expected error content in at least one tool result message")
+	}
+}
+
+// =============================================================================
+// Task 3.2-3.3 — Streaming orchestration + multi-turn
+// =============================================================================
+
+// stubToolCallStreamer implements domain.ToolCallStreamer for testing.
+type stubToolCallStreamer struct {
+	calls    int
+	responses []*domain.ToolCallStreamResult
+}
+
+func (s *stubToolCallStreamer) ChatWithTools(ctx context.Context, messages []domain.ChatMessage, tools []map[string]interface{}) (*domain.ToolCallStreamResult, error) {
+	if s.calls < len(s.responses) {
+		resp := s.responses[s.calls]
+		s.calls++
+		return resp, nil
+	}
+	return &domain.ToolCallStreamResult{AssistantText: "done"}, nil
+}
+
+func TestExecuteChatStream_SingleToolCall(t *testing.T) {
+	// RED: ExecuteChatStream does not exist on UseCase yet
+	ctx := t.Context()
+	w := httptest.NewRecorder()
+
+	flightSearcher := &stubFlightSearcher{resp: &search_flights.Response{}}
+
+	streamer := &stubToolCallStreamer{
+		responses: []*domain.ToolCallStreamResult{
+			{
+				AssistantText: "Voy a buscar vuelos.",
+				ToolCalls: []domain.ToolCall{
+					{
+						ID:   "call_1",
+						Name: "search_flights",
+						Arguments: map[string]interface{}{
+							"trip_type":     "round_trip",
+							"departure":     "MAD",
+							"arrival":       "BCN",
+							"outbound_date": "2026-07-01",
+							"return_date":   "2026-07-05",
+						},
+					},
+				},
+			},
+			{
+				// Second AI response (after results injected)
+				AssistantText: "Encontré vuelos de Madrid a Barcelona.",
+			},
+		},
+	}
+
+	uc := ai_search.NewUseCase(ai_search.UseCaseDeps{
+		FlightSearcher:         flightSearcher,
+		HotelSearcher:          &stubHotelSearcher{resp: &search_hotels.Response{}},
+		ToolCallStreamer:       streamer,
+		AnonMaxTurns:           5,
+		AuthMaxTurns:           10,
+	})
+
+	messages := []domain.ChatMessage{
+		{Role: "system", Content: "Eres un asistente de viajes."},
+		{Role: "user", Content: "busco vuelos Madrid-Barcelona"},
+	}
+	tools := []map[string]interface{}{
+		{"type": "function", "function": map[string]interface{}{
+			"name": "search_flights",
+			"parameters": map[string]interface{}{
+				"type": "object", "properties": map[string]interface{}{},
+			},
+		}},
+	}
+
+	turnCount, err := uc.ExecuteChatStream(ctx, w, messages, tools, 3)
+	if err != nil {
+		t.Fatalf("ExecuteChatStream failed: %v", err)
+	}
+
+	if turnCount != 1 {
+		t.Errorf("turnCount = %d, want 1", turnCount)
+	}
+
+	body := w.Body.String()
+
+	// Should emit: chunk* → search → chunk* → done
+	hasChunk := strings.Contains(body, "event: chunk")
+	hasSearch := strings.Contains(body, "event: search")
+	hasDone := strings.Contains(body, "event: done")
+
+	if !hasChunk {
+		t.Error("SSE stream should contain chunk events")
+	}
+	if !hasSearch {
+		t.Error("SSE stream should contain search event")
+	}
+	if !hasDone {
+		t.Error("SSE stream should contain done event")
+	}
+}
+
+func TestExecuteChatStream_MultiTurn(t *testing.T) {
+	// Two rounds of tool calls
+	ctx := t.Context()
+	w := httptest.NewRecorder()
+
+	hotelSearcher := &stubHotelSearcher{resp: &search_hotels.Response{}}
+	flightSearcher := &stubFlightSearcher{resp: &search_flights.Response{}}
+
+	streamer := &stubToolCallStreamer{
+		responses: []*domain.ToolCallStreamResult{
+			{
+				AssistantText: "Busco hoteles...",
+				ToolCalls: []domain.ToolCall{
+					{ID: "call_h", Name: "search_hotels", Arguments: map[string]interface{}{
+						"query": "Barcelona", "check_in_date": "2026-07-01", "check_out_date": "2026-07-05",
+					}},
+				},
+			},
+			{
+				// After hotel results: AI decides to search flights too
+				AssistantText: "Y también busco vuelos...",
+				ToolCalls: []domain.ToolCall{
+					{ID: "call_f", Name: "search_flights", Arguments: map[string]interface{}{
+						"trip_type": "round_trip", "departure": "MAD", "arrival": "BCN",
+						"outbound_date": "2026-07-01", "return_date": "2026-07-05",
+					}},
+				},
+			},
+			{
+				AssistantText: "Resultados completos.",
+			},
+		},
+	}
+
+	uc := ai_search.NewUseCase(ai_search.UseCaseDeps{
+		FlightSearcher:   flightSearcher,
+		HotelSearcher:    hotelSearcher,
+		ToolCallStreamer: streamer,
+		AnonMaxTurns:     5,
+		AuthMaxTurns:     10,
+	})
+
+	messages := []domain.ChatMessage{
+		{Role: "user", Content: "viaje a Barcelona"},
+	}
+	tools := []map[string]interface{}{}
+
+	turnCount, err := uc.ExecuteChatStream(ctx, w, messages, tools, 3)
+	if err != nil {
+		t.Fatalf("ExecuteChatStream failed: %v", err)
+	}
+
+	if turnCount != 2 {
+		t.Errorf("turnCount = %d, want 2 (two tool call rounds)", turnCount)
+	}
+
+	body := w.Body.String()
+	// Should have 2 search events
+	searchCount := strings.Count(body, "event: search")
+	if searchCount != 2 {
+		t.Errorf("expected 2 search events, got %d", searchCount)
+	}
+}
+
+func TestExecuteChatStream_MaxTurnsGuard(t *testing.T) {
+	// AI keeps requesting tool calls — should stop at maxTurns
+	ctx := t.Context()
+	w := httptest.NewRecorder()
+
+	streamer := &stubToolCallStreamer{
+		responses: []*domain.ToolCallStreamResult{
+			{AssistantText: "round 1", ToolCalls: []domain.ToolCall{
+				{ID: "c1", Name: "search_hotels", Arguments: map[string]interface{}{
+					"query": "X", "check_in_date": "2026-01-01", "check_out_date": "2026-01-02",
+				}},
+			}},
+			{AssistantText: "round 2", ToolCalls: []domain.ToolCall{
+				{ID: "c2", Name: "search_hotels", Arguments: map[string]interface{}{
+					"query": "Y", "check_in_date": "2026-01-01", "check_out_date": "2026-01-02",
+				}},
+			}},
+			{AssistantText: "final"},
+		},
+	}
+
+	uc := ai_search.NewUseCase(ai_search.UseCaseDeps{
+		FlightSearcher:   &stubFlightSearcher{resp: &search_flights.Response{}},
+		HotelSearcher:    &stubHotelSearcher{resp: &search_hotels.Response{}},
+		ToolCallStreamer: streamer,
+		AnonMaxTurns:     5,
+		AuthMaxTurns:     10,
+	})
+
+	messages := []domain.ChatMessage{{Role: "user", Content: "x"}}
+	tools := []map[string]interface{}{}
+
+	// maxTurns = 1 — should stop after first tool call round
+	turnCount, err := uc.ExecuteChatStream(ctx, w, messages, tools, 1)
+	if err != nil {
+		t.Fatalf("ExecuteChatStream failed: %v", err)
+	}
+
+	if turnCount != 1 {
+		t.Errorf("turnCount = %d, want 1 (capped by maxTurns)", turnCount)
+	}
+
+	body := w.Body.String()
+	searchCount := strings.Count(body, "event: search")
+	if searchCount > 1 {
+		t.Errorf("expected at most 1 search event with maxTurns=1, got %d", searchCount)
 	}
 }

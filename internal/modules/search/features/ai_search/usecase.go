@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -79,6 +80,7 @@ type UseCase struct {
 	hotelSearcher        HotelSearcher
 	convStore            ConversationStore
 	interpCache          InterpretationCache
+	toolCallStreamer     domain.ToolCallStreamer      // streaming with tool calling
 	iataResolver         func(ctx context.Context, query string) (string, error)
 	rdb                  *redis.Client                    // Dragonfly for location hint resolution (env:{ip}, profile:{userID}:prefs)
 	defaultsCfg          searchshared.SearchDefaultConfig // Fallback defaults (DEFAULT_COUNTRY_CODE, etc.)
@@ -97,7 +99,8 @@ type UseCaseDeps struct {
 	FlightSearcher         FlightSearcher
 	HotelSearcher          HotelSearcher
 	ConvStore              ConversationStore
-	InterpCache            InterpretationCache // nil = no caching (MVP mode)
+	InterpCache            InterpretationCache          // nil = no caching (MVP mode)
+	ToolCallStreamer       domain.ToolCallStreamer      // streaming with tool calling
 	AnonMaxTurns           int
 	AuthMaxTurns           int
 
@@ -141,6 +144,7 @@ func NewUseCase(deps UseCaseDeps) *UseCase {
 		hotelSearcher:        deps.HotelSearcher,
 		convStore:            deps.ConvStore,
 		interpCache:          deps.InterpCache,
+		toolCallStreamer:     deps.ToolCallStreamer,
 		iataResolver:         deps.IATAResolver,
 		rdb:                  deps.RDB,
 		defaultsCfg:          deps.DefaultsCfg,
@@ -1339,4 +1343,102 @@ func BuildToolResultMessages(results []ToolResult) []domain.ConversationMessage 
 		})
 	}
 	return messages
+}
+
+// =============================================================================
+// ExecuteChatStream — Streaming orchestration with tool calling (Phase 3)
+// =============================================================================
+
+// ExecuteChatStream orchestrates a chat-style search stream with tool calling.
+// It sends messages + tools to the AI, streams text chunks, executes tool calls
+// when requested, injects results back, and continues up to maxTurns rounds.
+//
+// Returns the number of tool call rounds executed.
+func (uc *UseCase) ExecuteChatStream(ctx context.Context, w http.ResponseWriter, messages []domain.ChatMessage, tools []map[string]interface{}, maxTurns int) (int, error) {
+	if uc.toolCallStreamer == nil {
+		return 0, fmt.Errorf("tool call streamer: %w", domain.ErrAIUnavailable)
+	}
+	if maxTurns <= 0 {
+		maxTurns = 3
+	}
+
+	turnCount := 0
+
+	for turn := 0; turn < maxTurns; turn++ {
+		// 1. Stream AI response
+		result, err := uc.toolCallStreamer.ChatWithTools(ctx, messages, tools)
+		if err != nil {
+			WriteErrorEvent(w, fmt.Sprintf("AI error: %v", err))
+			return turnCount, fmt.Errorf("chat with tools: %w", err)
+		}
+
+		// 2. Stream accumulated text as chunk events
+		if result.AssistantText != "" {
+			WriteChunkEvent(w, result.AssistantText)
+		}
+
+		// 3. If no tool calls, we're done
+		if len(result.ToolCalls) == 0 {
+			break
+		}
+
+		// 4. Convert domain.ToolCall → ai_search.ToolCall for execution
+		turnCount++
+		toolCalls := make([]ToolCall, len(result.ToolCalls))
+		for i, tc := range result.ToolCalls {
+			toolCalls[i] = ToolCall{
+				ID:        tc.ID,
+				Name:      tc.Name,
+				Arguments: tc.Arguments,
+			}
+		}
+
+		// 5. Execute tool calls concurrently
+		results := uc.ExecuteToolCalls(ctx, toolCalls)
+
+		// 6. Emit search SSE events for each result
+		for _, r := range results {
+			searchType := r.Name
+			switch r.Name {
+			case "search_hotels":
+				searchType = "hotels"
+			case "search_flights":
+				searchType = "flights"
+			}
+
+			var data interface{}
+			if r.Error == nil && r.Content != "" {
+				json.Unmarshal([]byte(r.Content), &data)
+			}
+			WriteSearchEvent(w, r.Destination, searchType, data)
+		}
+
+		// 7. Add assistant message with tool calls to history
+		assistantMsg := domain.ChatMessage{
+			Role:    "assistant",
+			Content: result.AssistantText,
+		}
+		assistantMsg.ToolCalls = make([]domain.ToolCall, len(result.ToolCalls))
+		copy(assistantMsg.ToolCalls, result.ToolCalls)
+		messages = append(messages, assistantMsg)
+
+		// 8. Add tool result messages to history
+		for _, r := range results {
+			content := r.Content
+			if content == "" && r.Error != nil {
+				content = fmt.Sprintf(`{"error": "%s"}`, r.Error.Error())
+			}
+			messages = append(messages, domain.ChatMessage{
+				Role:       "tool",
+				Content:    content,
+				ToolCallID: r.CallID,
+			})
+		}
+	}
+
+	// Emit done event with turn count
+	// conversationID is empty for now — will be populated when conversation persistence is wired
+	WriteDoneEvent(w, "", turnCount)
+
+	return turnCount, nil
 }
