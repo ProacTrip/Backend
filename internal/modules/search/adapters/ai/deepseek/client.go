@@ -22,8 +22,10 @@ const (
 
 // chatMessage represents a message in the OpenAI-compatible chat API.
 type chatMessage struct {
-	Role    string `json:"role"` // "system", "user", "assistant"
-	Content string `json:"content"`
+	Role      string     `json:"role"`                // "system", "user", "assistant", "tool"
+	Content   string     `json:"content,omitzero"`    // text content (empty for tool messages with ToolCallID)
+	ToolCalls []ToolCall `json:"tool_calls,omitzero"` // tool calls requested by assistant
+	ToolCallID string   `json:"tool_call_id,omitzero"` // tool use: which tool call this responds to
 }
 
 // chatCompletionRequest is the request body for /chat/completions (v4 Flash endpoint).
@@ -37,7 +39,8 @@ type chatCompletionRequest struct {
 	Thinking        thinkingConfig  `json:"thinking"`
 	ReasoningEffort string          `json:"reasoning_effort,omitzero"`
 	StreamOptions   *streamOptions  `json:"stream_options,omitzero"`
-	ToolChoice      string          `json:"tool_choice"`
+	Tools           []ToolDef       `json:"tools,omitzero"`       // function definitions for tool calling
+	ToolChoice      string          `json:"tool_choice,omitzero"` // "none", "auto", or specific function name
 	Stream          bool            `json:"stream"`
 }
 
@@ -56,6 +59,26 @@ type streamOptions struct {
 	IncludeUsage bool `json:"include_usage"`
 }
 
+// ToolDef represents a function tool definition for the OpenAI-compatible chat API.
+type ToolDef struct {
+	Type     string       `json:"type"`     // "function"
+	Function ToolFunction `json:"function"`
+}
+
+// ToolFunction describes the function name, description, and JSON Schema parameters.
+type ToolFunction struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitzero"`
+	Parameters  json.RawMessage `json:"parameters,omitzero"`
+}
+
+// ToolCall represents a tool call from the AI model in a chat response.
+type ToolCall struct {
+	ID       string       `json:"id"`
+	Type     string       `json:"type"` // "function"
+	Function ToolFunction `json:"function"`
+}
+
 // ChatCompletionParams holds per-request configurable parameters.
 // Different use cases (exact search vs discovery) tune these differently.
 type ChatCompletionParams struct {
@@ -66,6 +89,8 @@ type ChatCompletionParams struct {
 	Thinking        thinkingConfig
 	ReasoningEffort string  // "high" or "max" for v4 Flash reasoning
 	StreamOptions   *streamOptions
+	Tools           []ToolDef // function definitions for tool calling
+	ToolChoice      string    // "none", "auto", or specific function name
 }
 
 // DefaultExactParams returns params tuned for exact parameter extraction:
@@ -185,7 +210,8 @@ func (c *Client) ChatCompletion(ctx context.Context, messages []chatMessage, par
 		ResponseFormat:  responseFormat{Type: params.ResponseFormat},
 		Thinking:        params.Thinking,
 		ReasoningEffort: params.ReasoningEffort,
-		ToolChoice:      "none",
+		Tools:           params.Tools,
+		ToolChoice:      params.ToolChoice,
 		Stream:          false,
 	}
 
@@ -243,9 +269,11 @@ func (c *Client) ChatCompletion(ctx context.Context, messages []chatMessage, par
 
 // SSEEvent represents a single Server-Sent Event chunk from the streaming API.
 type SSEEvent struct {
-	Delta    string `json:"delta"`               // incremental text from the model
-	Done     bool   `json:"done"`                // true when the stream is complete
-	FullText string `json:"full_text,omitempty"` // accumulated full response (only on final chunk)
+	Delta        string     `json:"delta"`                    // incremental text from the model
+	ToolCalls    []ToolCall `json:"tool_calls,omitzero"`      // accumulated tool calls (on finish_reason: "tool_calls")
+	FinishReason string     `json:"finish_reason,omitzero"`   // "stop", "tool_calls", etc.
+	Done         bool       `json:"done"`                     // true when the stream is complete
+	FullText     string     `json:"full_text,omitempty"`      // accumulated full response (only on final chunk)
 }
 
 // ChatCompletionStream sends a streaming chat completion request.
@@ -262,7 +290,8 @@ func (c *Client) ChatCompletionStream(ctx context.Context, messages []chatMessag
 		Thinking:        params.Thinking,
 		ReasoningEffort: params.ReasoningEffort,
 		StreamOptions:   params.StreamOptions,
-		ToolChoice:      "none",
+		Tools:           params.Tools,
+		ToolChoice:      params.ToolChoice,
 		Stream:          true,
 	}
 
@@ -306,6 +335,15 @@ func (c *Client) ChatCompletionStream(ctx context.Context, messages []chatMessag
 		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 		var fullText strings.Builder
+		var accumulatedToolCalls []ToolCall
+		// toolCallAcc accumulates fragmented tool_call arguments during streaming.
+		type toolCallAccumulator struct {
+			ID        string
+			Type      string
+			FuncName  string
+			Arguments strings.Builder
+		}
+		toolCallAcc := make(map[int]*toolCallAccumulator)
 
 		for scanner.Scan() {
 			select {
@@ -333,7 +371,16 @@ func (c *Client) ChatCompletionStream(ctx context.Context, messages []chatMessag
 			var chunk struct {
 				Choices []struct {
 					Delta struct {
-						Content string `json:"content"`
+						Content   string `json:"content"`
+						ToolCalls []struct {
+							Index    int    `json:"index"`
+							ID       string `json:"id"`
+							Type     string `json:"type"`
+							Function struct {
+								Name      string `json:"name"`
+								Arguments string `json:"arguments"`
+							} `json:"function"`
+						} `json:"tool_calls"`
 					} `json:"delta"`
 					FinishReason *string `json:"finish_reason"`
 				} `json:"choices"`
@@ -356,9 +403,55 @@ func (c *Client) ChatCompletionStream(ctx context.Context, messages []chatMessag
 				ch <- SSEEvent{Delta: delta}
 			}
 
+			// Accumulate tool call deltas
+			for _, tcDelta := range chunk.Choices[0].Delta.ToolCalls {
+				if acc, exists := toolCallAcc[tcDelta.Index]; exists {
+					// Append arguments fragment
+					acc.Arguments.WriteString(tcDelta.Function.Arguments)
+				} else {
+					acc := &toolCallAccumulator{
+						ID:       tcDelta.ID,
+						Type:     tcDelta.Type,
+						FuncName: tcDelta.Function.Name,
+					}
+					acc.Arguments.WriteString(tcDelta.Function.Arguments)
+					toolCallAcc[tcDelta.Index] = acc
+				}
+			}
+
 			// Check if the model signalled finish
 			if chunk.Choices[0].FinishReason != nil {
-				ch <- SSEEvent{Done: true, FullText: fullText.String()}
+				finishReason := *chunk.Choices[0].FinishReason
+
+				// If tool_calls finish reason → resolve accumulated tool calls
+				if finishReason == "tool_calls" {
+					for idx := 0; idx < len(toolCallAcc); idx++ {
+						if acc, ok := toolCallAcc[idx]; ok {
+							tc := ToolCall{
+								ID:   acc.ID,
+								Type: acc.Type,
+								Function: ToolFunction{
+									Name: acc.FuncName,
+								},
+							}
+							// Store the accumulated arguments JSON as a raw message
+							argsJSON := acc.Arguments.String()
+							if argsJSON != "" {
+								tc.Function.Parameters = json.RawMessage(argsJSON)
+							}
+							accumulatedToolCalls = append(accumulatedToolCalls, tc)
+						}
+					}
+					ch <- SSEEvent{
+						Done:         true,
+						FinishReason: finishReason,
+						ToolCalls:    accumulatedToolCalls,
+						FullText:     fullText.String(),
+					}
+					return
+				}
+
+				ch <- SSEEvent{Done: true, FullText: fullText.String(), FinishReason: finishReason}
 				return
 			}
 		}

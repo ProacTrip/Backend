@@ -54,6 +54,76 @@ func NewAdapter(client *Client) *Adapter {
 }
 
 // =============================================================================
+// AdapterToolCallResult — result of a tool-calling chat completion
+// =============================================================================
+
+// AdapterToolCallResult wraps the AI assistant message and any tool calls it requests.
+type AdapterToolCallResult struct {
+	AssistantMessage string              `json:"assistant_message"`
+	ToolCalls        []AdapterToolCall   `json:"tool_calls,omitzero"`
+}
+
+// AdapterToolCall represents a parsed tool call from the AI model.
+type AdapterToolCall struct {
+	ID        string                 `json:"id"`
+	Name      string                 `json:"name"` // "search_hotels" or "search_flights"
+	Arguments map[string]interface{} `json:"arguments"`
+}
+
+// =============================================================================
+// ChatWithTools — streaming chat completion with tool calling
+// =============================================================================
+
+// ChatWithTools sends messages and tool definitions to DeepSeek via streaming.
+// If the AI responds with finish_reason: "tool_calls", the accumulated tool calls
+// are parsed and returned alongside the assistant text.
+//
+// Returns the assistant text message (accumulated from stream) and any tool calls.
+func (a *Adapter) ChatWithTools(ctx context.Context, messages []chatMessage, tools []ToolDef) (*AdapterToolCallResult, error) {
+	params := DefaultDiscoveryParams()
+	params.Tools = tools
+
+	ch, err := a.client.ChatCompletionStream(ctx, messages, params)
+	if err != nil {
+		return nil, fmt.Errorf("deepseek chat with tools: %w", err)
+	}
+
+	result := &AdapterToolCallResult{}
+
+	for event := range ch {
+		if event.Delta != "" {
+			result.AssistantMessage += event.Delta
+		}
+		if event.Done && event.FinishReason == "tool_calls" && len(event.ToolCalls) > 0 {
+			for _, tc := range event.ToolCalls {
+				// Parse the JSON arguments from Parameters (json.RawMessage)
+				var args map[string]interface{}
+				if len(tc.Function.Parameters) > 0 {
+					if err := json.Unmarshal(tc.Function.Parameters, &args); err != nil {
+						args = map[string]interface{}{}
+					}
+				}
+				result.ToolCalls = append(result.ToolCalls, AdapterToolCall{
+					ID:        tc.ID,
+					Name:      tc.Function.Name,
+					Arguments: args,
+				})
+			}
+			break
+		}
+		if event.Done {
+			break
+		}
+	}
+
+	// Drain remaining events (channel still has data after break)
+	for range ch {
+	}
+
+	return result, nil
+}
+
+// =============================================================================
 // DiscoveryPrompt
 // =============================================================================
 

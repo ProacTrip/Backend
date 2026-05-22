@@ -730,3 +730,305 @@ func TestParse_FallbackExtraction_SalvagesTypeField(t *testing.T) {
 		t.Errorf("FollowUp = %q, want '¿Cuándo querés viajar?'", intent.FollowUp)
 	}
 }
+
+// =============================================================================
+// Task 1.2 — Tool support in client.go
+// =============================================================================
+
+func TestChatCompletionRequest_MarshalsWithTools(t *testing.T) {
+	// RED: ToolDef type does not exist yet in deepseek package.
+	req := chatCompletionRequest{
+		Model: "deepseek-chat",
+		Messages: []chatMessage{
+			{Role: "user", Content: "busco hoteles en Barcelona"},
+		},
+		Temperature: 0.7,
+		MaxTokens:   4096,
+		Tools: []ToolDef{
+			{
+				Type: "function",
+				Function: ToolFunction{
+					Name:        "search_hotels",
+					Description: "Busca hoteles",
+					Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}`),
+				},
+			},
+		},
+		Stream: true,
+	}
+
+	payload, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+
+	// Verify tools array is present
+	tools, ok := decoded["tools"].([]interface{})
+	if !ok {
+		t.Fatal("tools field missing or not an array in marshalled JSON")
+	}
+	if len(tools) != 1 {
+		t.Fatalf("tools length = %d, want 1", len(tools))
+	}
+
+	tool0 := tools[0].(map[string]interface{})
+	if tool0["type"] != "function" {
+		t.Errorf("tools[0].type = %v, want 'function'", tool0["type"])
+	}
+
+	fn := tool0["function"].(map[string]interface{})
+	if fn["name"] != "search_hotels" {
+		t.Errorf("tools[0].function.name = %v, want 'search_hotels'", fn["name"])
+	}
+}
+
+func TestChatCompletionRequest_ToolChoiceOmitzero(t *testing.T) {
+	// When ToolChoice is empty (zero value), it should NOT appear in JSON
+	req := chatCompletionRequest{
+		Model:      "deepseek-chat",
+		Messages:   []chatMessage{{Role: "user", Content: "hola"}},
+		MaxTokens:  100,
+		Stream:     false,
+		// ToolChoice intentionally left empty
+	}
+
+	payload, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+
+	var decoded map[string]interface{}
+	json.Unmarshal(payload, &decoded)
+
+	if _, exists := decoded["tool_choice"]; exists {
+		t.Error("tool_choice should be omitted when empty (omitzero)")
+	}
+}
+
+func TestChatCompletionRequest_ToolsOmittedWhenEmpty(t *testing.T) {
+	// Tools slice nil → should be omitted from JSON
+	req := chatCompletionRequest{
+		Model:    "deepseek-chat",
+		Messages: []chatMessage{{Role: "user", Content: "hola"}},
+		MaxTokens: 100,
+		Stream:    false,
+	}
+
+	payload, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+
+	var decoded map[string]interface{}
+	json.Unmarshal(payload, &decoded)
+
+	if _, exists := decoded["tools"]; exists {
+		t.Error("tools should be omitted when nil/empty")
+	}
+}
+
+// =============================================================================
+// Task 1.2 — SSE tool_call delta parsing
+// =============================================================================
+
+func TestSSEStream_ToolCallDeltas(t *testing.T) {
+	// Simulate a tool_call SSE chunk
+	toolCallChunk := `{
+		"choices": [{
+			"index": 0,
+			"delta": {
+				"tool_calls": [{
+					"index": 0,
+					"id": "call_abc123",
+					"function": {
+						"name": "search_hotels",
+						"arguments": "{\"query\":"
+					}
+				}]
+			}
+		}]
+	}`
+
+	var chunk struct {
+		Choices []struct {
+			Delta struct {
+				Content   string `json:"content"`
+				ToolCalls []struct {
+					Index    int    `json:"index"`
+					ID       string `json:"id"`
+					Function struct {
+						Name      string `json:"name"`
+						Arguments string `json:"arguments"`
+					} `json:"function"`
+				} `json:"tool_calls"`
+			} `json:"delta"`
+			FinishReason *string `json:"finish_reason"`
+		} `json:"choices"`
+	}
+
+	// RED: The ToolCalls field in the anonymous struct should be recognized
+	if err := json.Unmarshal([]byte(toolCallChunk), &chunk); err != nil {
+		t.Fatalf("unmarshal tool_call chunk failed: %v", err)
+	}
+
+	if len(chunk.Choices) == 0 {
+		t.Fatal("expected at least one choice")
+	}
+
+	tc := chunk.Choices[0].Delta.ToolCalls
+	if len(tc) == 0 {
+		t.Fatal("expected tool_calls in delta")
+	}
+	if tc[0].ID != "call_abc123" {
+		t.Errorf("tool_call id = %q, want 'call_abc123'", tc[0].ID)
+	}
+	if tc[0].Function.Name != "search_hotels" {
+		t.Errorf("tool_call function name = %q, want 'search_hotels'", tc[0].Function.Name)
+	}
+}
+
+// =============================================================================
+// Task 1.3 — ChatWithTools (streaming tool calling)
+// =============================================================================
+
+// sseToolCallStream returns a handler that simulates a DeepSeek SSE stream
+// with text chunks followed by tool_call deltas ending with finish_reason:"tool_calls".
+func sseToolCallStream(t *testing.T) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		t.Helper()
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("ResponseWriter does not support flushing")
+		}
+
+		// Text chunk before tool call
+		chunks := []string{
+			`{"choices":[{"index":0,"delta":{"content":"Voy a buscar "}}]}`,
+			`{"choices":[{"index":0,"delta":{"content":"hoteles en Barcelona."}}]}`,
+			// Tool call delta: function name
+			`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_test001","type":"function","function":{"name":"search_hotels","arguments":""}}]}}]}`,
+			// Tool call delta: arguments part 1
+			`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"query\":\"Barcelona"}}]}}]}`,
+			// Tool call delta: arguments part 2
+			`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":", España\",\"check_in_date\":\"2026-07-01\",\"check_out_date\":\"2026-07-05\"}"}}]}}]}`,
+			// Finish reason: tool_calls
+			`{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+		}
+
+		for _, chunk := range chunks {
+			_, _ = w.Write([]byte("data: " + chunk + "\n\n"))
+			flusher.Flush()
+		}
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		flusher.Flush()
+	}
+}
+
+func TestChatWithTools_ExtractsToolCalls(t *testing.T) {
+	// RED: ChatWithTools does not exist yet on Adapter
+	adapter, srv := newTestAdapter(sseToolCallStream(t))
+	defer srv.Close()
+
+	ctx := t.Context()
+	messages := []chatMessage{
+		{Role: "system", Content: "Eres un asistente de viajes."},
+		{Role: "user", Content: "busco hoteles en Barcelona en julio"},
+	}
+	tools := []ToolDef{
+		{
+			Type: "function",
+			Function: ToolFunction{
+				Name:        "search_hotels",
+				Description: "Busca hoteles en un destino",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}`),
+			},
+		},
+	}
+
+	result, err := adapter.ChatWithTools(ctx, messages, tools)
+	if err != nil {
+		t.Fatalf("ChatWithTools failed: %v", err)
+	}
+
+	if result.AssistantMessage == "" {
+		t.Error("AssistantMessage should not be empty")
+	}
+	if !containsString(result.AssistantMessage, "Voy a buscar") {
+		t.Errorf("AssistantMessage should contain text chunks, got: %s", result.AssistantMessage)
+	}
+
+	// Should have exactly one tool call
+	if len(result.ToolCalls) != 1 {
+		t.Fatalf("ToolCalls length = %d, want 1", len(result.ToolCalls))
+	}
+
+	tc := result.ToolCalls[0]
+	if tc.ID != "call_test001" {
+		t.Errorf("ToolCall ID = %q, want 'call_test001'", tc.ID)
+	}
+	if tc.Name != "search_hotels" {
+		t.Errorf("ToolCall Name = %q, want 'search_hotels'", tc.Name)
+	}
+	if tc.Arguments == nil {
+		t.Fatal("ToolCall Arguments should not be nil")
+	}
+	if tc.Arguments["query"] != "Barcelona, España" {
+		t.Errorf("Arguments[query] = %v, want 'Barcelona, España'", tc.Arguments["query"])
+	}
+	if tc.Arguments["check_in_date"] != "2026-07-01" {
+		t.Errorf("Arguments[check_in_date] = %v, want '2026-07-01'", tc.Arguments["check_in_date"])
+	}
+}
+
+func TestChatWithTools_NoToolCalls(t *testing.T) {
+	// When AI responds with text only (no tool calls), ToolCalls should be empty
+	adapter, srv := newTestAdapter(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+		chunks := []string{
+			`{"choices":[{"index":0,"delta":{"content":"Hola, ¿en qué puedo ayudarte?"}}]}`,
+			`{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		}
+		for _, chunk := range chunks {
+			_, _ = w.Write([]byte("data: " + chunk + "\n\n"))
+			flusher.Flush()
+		}
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		flusher.Flush()
+	})
+	defer srv.Close()
+
+	ctx := t.Context()
+	messages := []chatMessage{
+		{Role: "user", Content: "hola"},
+	}
+	tools := []ToolDef{}
+
+	result, err := adapter.ChatWithTools(ctx, messages, tools)
+	if err != nil {
+		t.Fatalf("ChatWithTools failed: %v", err)
+	}
+
+	if len(result.ToolCalls) != 0 {
+		t.Errorf("ToolCalls should be empty for text-only response, got %d", len(result.ToolCalls))
+	}
+}
+
+func containsString(s, substr string) bool {
+	return len(s) > 0 && len(substr) > 0 && (s == substr || len(s) >= len(substr) && indexOfSubstring(s, substr) >= 0)
+}
+
+func indexOfSubstring(s, substr string) int {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return i
+		}
+	}
+	return -1
+}
