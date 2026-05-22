@@ -86,7 +86,7 @@ func SaveConversation(ctx context.Context, rdb *redis.Client, conv *domain.Conve
 
 	ttlSeconds := int(ConversationTTL.Seconds())
 
-	// Use pipeline for atomic Hash set + HEXPIRE per field
+	// Use pipeline for atomic Hash set + HEXPIRE per field + user index SADD
 	pipe := rdb.Pipeline()
 
 	// Set all fields
@@ -105,6 +105,14 @@ func SaveConversation(ctx context.Context, rdb *redis.Client, conv *domain.Conve
 	}
 	if len(resultsJSON) > 0 {
 		pipe.HSet(ctx, key, "results", string(resultsJSON))
+	}
+
+	// Maintain user conversation index for conversation listing (GET /v1/search/ai/conversations).
+	// SADD adds the conversation ID to the user's set, EXPIRE resets the TTL on the set key.
+	if conv.UserID != "" {
+		userConvsKey := fmt.Sprintf("user:convs:%s", conv.UserID)
+		pipe.SAdd(ctx, userConvsKey, conv.ID)
+		pipe.Expire(ctx, userConvsKey, ConversationTTL)
 	}
 
 	// Set HEXPIRE for each field independently

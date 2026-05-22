@@ -448,6 +448,24 @@ func (uc *UseCase) runExactSearch(ctx context.Context, cmd Command, userID strin
 		)
 	}
 
+	// Also save in the new Conversation format ({conv}:{id}) so that
+	// ListUserConversations and HandleGetConversation can retrieve it.
+	// This dual-write ensures backward compatibility while maintaining
+	// the user conversation index (user:convs:{userID}) via SADD.
+	if saveErr := uc.convStore.Save(ctx, &Conversation{
+		ID:        conv.ID,
+		UserID:    conv.UserID,
+		Messages:  conv.Messages,
+		TurnCount: conv.TurnCount,
+		MaxTurns:  conv.MaxTurns,
+		CreatedAt: conv.CreatedAt,
+	}); saveErr != nil {
+		slog.ErrorContext(ctx, "ai_search: failed to save new-format conversation",
+			slog.String("conversation_id", conv.ID),
+			slog.String("error", saveErr.Error()),
+		)
+	}
+
 	// 8. Build response
 	slog.DebugContext(ctx, "ai_search.Execute: building response",
 		slog.String("conversation_id", conv.ID),
@@ -537,6 +555,14 @@ func (uc *UseCase) runDiscovery(ctx context.Context, cmd Command, userID string)
 		discCtx.Language = "es"
 	}
 
+	// Create a conversation for the discovery session so the response
+	// includes conversation_id (matching exact search response structure).
+	convID, err := uuid.NewV7()
+	if err != nil {
+		return nil, fmt.Errorf("generate conversation ID: %w", err)
+	}
+	maxTurns := uc.maxTurnsForUser(userID)
+
 	// Call the AI discovery interpreter with conversation history (empty for now).
 	// The AI returns natural language text with recommendations.
 	aiMessage, err := uc.discoveryInterpreter.Discover(ctx, cmd.Message, discCtx, nil)
@@ -552,13 +578,18 @@ func (uc *UseCase) runDiscovery(ctx context.Context, cmd Command, userID string)
 		slog.Int("response_len", len(aiMessage)),
 	)
 
-	// Build response with the AI's natural language message
+	// Build response with the AI's natural language message.
+	// Includes conversation_id, turn_count, and max_turns to match the exact
+	// search response structure expected by the frontend.
 	resp := &Response{
-		Mode:       "discovery",
-		Intent:     string(SearchModeDiscovery),
-		Confidence: 1.0, // AI-handled, always confident
-		Message:    aiMessage,
-		FromCache:  false,
+		ConversationID: convID.String(),
+		TurnCount:      1,
+		MaxTurns:       maxTurns,
+		Mode:           "discovery",
+		Intent:         string(SearchModeDiscovery),
+		Confidence:     1.0, // AI-handled, always confident
+		Message:        aiMessage,
+		FromCache:      false,
 	}
 
 	return resp, nil
@@ -1437,9 +1468,13 @@ func (uc *UseCase) ExecuteChatStream(ctx context.Context, w http.ResponseWriter,
 		}
 	}
 
-	// Emit done event with turn count
-	// conversationID is empty for now — will be populated when conversation persistence is wired
-	WriteDoneEvent(w, "", turnCount)
+	// Emit done event with conversation ID.
+	// Generate a fresh conversation ID for this stream session — the caller
+	// (handler) is responsible for persisting the conversation state.
+	convID, _ := uuid.NewV7()
+	convIDStr := convID.String()
+
+	WriteDoneEvent(w, convIDStr, turnCount)
 
 	return turnCount, nil
 }

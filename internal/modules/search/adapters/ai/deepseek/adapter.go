@@ -305,6 +305,7 @@ OUTPUT FORMAT — return ONLY this JSON structure:
 
 RULES:
 - Map city names to IATA codes: Madrid=MAD, Barcelona=BCN, Buenos Aires=EZE, Paris=CDG, Lima=LIM, London=LHR
+- For hotel_params.query (and any city mention), ALWAYS include the country name: "City, Country" (e.g., "Paris, France", "Madrid, España", "Tokyo, Japan"). NEVER return just the city name — SerpAPI requires country for accurate results.
 - Default adults=1 for BOTH flights and hotels unless user specifies otherwise. NEVER ask "cuántos adultos?" or "how many adults?" — just use 1.
 - Default trip_type=round_trip unless user says "solo ida" or "one way". Don't ask unless completely unclear.
 - If user says "vuelo directo" → stops=nonstop
