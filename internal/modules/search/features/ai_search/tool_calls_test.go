@@ -5,6 +5,8 @@ package ai_search
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/ProacTrip/Backend/internal/modules/search/features/search_flights"
 )
 
 // =============================================================================
@@ -395,5 +397,253 @@ func TestSearchFlightsToolDefinition_RequiredOnly(t *testing.T) {
 		if requiredSet[field] {
 			t.Errorf("field %q should NOT be required (optional per API spec)", field)
 		}
+	}
+}
+
+// =============================================================================
+// Task 2.1 — ParseHotelToolCall / ParseFlightToolCall
+// =============================================================================
+
+func TestParseHotelToolCall_HappyPath(t *testing.T) {
+	// RED: ParseHotelToolCall does not exist yet
+	args := map[string]interface{}{
+		"query":          "Barcelona, España",
+		"check_in_date":  "2026-07-01",
+		"check_out_date": "2026-07-05",
+		"adults":         float64(2),
+		"rating":         float64(8),
+		"free_cancellation": true,
+	}
+
+	cmd, err := ParseHotelToolCall(args)
+	if err != nil {
+		t.Fatalf("ParseHotelToolCall failed: %v", err)
+	}
+
+	if cmd.Query != "Barcelona, España" {
+		t.Errorf("Query = %q, want 'Barcelona, España'", cmd.Query)
+	}
+	if cmd.CheckInDate != "2026-07-01" {
+		t.Errorf("CheckInDate = %q, want '2026-07-01'", cmd.CheckInDate)
+	}
+	if cmd.CheckOutDate != "2026-07-05" {
+		t.Errorf("CheckOutDate = %q, want '2026-07-05'", cmd.CheckOutDate)
+	}
+	if cmd.Adults != 2 {
+		t.Errorf("Adults = %d, want 2", cmd.Adults)
+	}
+	if cmd.Rating == nil || *cmd.Rating != 8 {
+		t.Errorf("Rating = %v, want 8", cmd.Rating)
+	}
+	if !cmd.FreeCancellation {
+		t.Error("FreeCancellation should be true")
+	}
+}
+
+func TestParseHotelToolCall_MissingRequired(t *testing.T) {
+	// RED: missing query should return error
+	args := map[string]interface{}{
+		"check_in_date":  "2026-07-01",
+		"check_out_date": "2026-07-05",
+	}
+
+	_, err := ParseHotelToolCall(args)
+	if err == nil {
+		t.Fatal("expected error for missing query")
+	}
+}
+
+func TestParseHotelToolCall_Defaults(t *testing.T) {
+	// When optional fields are omitted, defaults should be applied
+	args := map[string]interface{}{
+		"query":          "Madrid",
+		"check_in_date":  "2026-08-01",
+		"check_out_date": "2026-08-05",
+	}
+
+	cmd, err := ParseHotelToolCall(args)
+	if err != nil {
+		t.Fatalf("ParseHotelToolCall failed: %v", err)
+	}
+
+	// adults defaults to 2
+	if cmd.Adults != 2 {
+		t.Errorf("Adults default = %d, want 2", cmd.Adults)
+	}
+	// children defaults to 0
+	if cmd.Children != 0 {
+		t.Errorf("Children default = %d, want 0", cmd.Children)
+	}
+	// free_cancellation defaults to false
+	if cmd.FreeCancellation {
+		t.Error("FreeCancellation default should be false")
+	}
+}
+
+func TestParseHotelToolCall_ArrayFields(t *testing.T) {
+	args := map[string]interface{}{
+		"query":          "Barcelona",
+		"check_in_date":  "2026-07-01",
+		"check_out_date": "2026-07-05",
+		"amenities":      []interface{}{float64(35), float64(4), float64(5)},
+		"hotel_classes":  []interface{}{float64(4), float64(5)},
+		"property_types": []interface{}{float64(1), float64(2)},
+	}
+
+	cmd, err := ParseHotelToolCall(args)
+	if err != nil {
+		t.Fatalf("ParseHotelToolCall failed: %v", err)
+	}
+
+	if len(cmd.Amenities) != 3 {
+		t.Errorf("Amenities len = %d, want 3", len(cmd.Amenities))
+	}
+	if cmd.Amenities[0] != 35 || cmd.Amenities[1] != 4 || cmd.Amenities[2] != 5 {
+		t.Errorf("Amenities = %v, want [35, 4, 5]", cmd.Amenities)
+	}
+	if len(cmd.HotelClasses) != 2 {
+		t.Errorf("HotelClasses len = %d, want 2", len(cmd.HotelClasses))
+	}
+}
+
+func TestParseFlightToolCall_HappyPath(t *testing.T) {
+	// RED: ParseFlightToolCall does not exist yet
+	args := map[string]interface{}{
+		"trip_type":     "round_trip",
+		"departure":     "MAD",
+		"arrival":       "BCN",
+		"outbound_date": "2026-07-15",
+		"return_date":   "2026-07-20",
+		"adults":        float64(2),
+		"travel_class":  "business",
+		"stops":         "nonstop",
+		"sort_by":       "price",
+	}
+
+	cmd, err := ParseFlightToolCall(args)
+	if err != nil {
+		t.Fatalf("ParseFlightToolCall failed: %v", err)
+	}
+
+	if cmd.TripType != search_flights.TripTypeRoundTrip {
+		t.Errorf("TripType = %q, want %q", cmd.TripType, search_flights.TripTypeRoundTrip)
+	}
+	if cmd.Departure != "MAD" {
+		t.Errorf("Departure = %q, want 'MAD'", cmd.Departure)
+	}
+	if cmd.Arrival != "BCN" {
+		t.Errorf("Arrival = %q, want 'BCN'", cmd.Arrival)
+	}
+	if cmd.OutboundDate != "2026-07-15" {
+		t.Errorf("OutboundDate = %q, want '2026-07-15'", cmd.OutboundDate)
+	}
+	if cmd.ReturnDate != "2026-07-20" {
+		t.Errorf("ReturnDate = %q, want '2026-07-20'", cmd.ReturnDate)
+	}
+	if cmd.Adults != 2 {
+		t.Errorf("Adults = %d, want 2", cmd.Adults)
+	}
+	if cmd.TravelClass != search_flights.TravelClassBusiness {
+		t.Errorf("TravelClass = %q, want %q", cmd.TravelClass, search_flights.TravelClassBusiness)
+	}
+	if cmd.Stops != search_flights.StopsNonstop {
+		t.Errorf("Stops = %q, want %q", cmd.Stops, search_flights.StopsNonstop)
+	}
+	if cmd.SortBy != search_flights.SortByPrice {
+		t.Errorf("SortBy = %q, want %q", cmd.SortBy, search_flights.SortByPrice)
+	}
+}
+
+func TestParseFlightToolCall_MissingRequired(t *testing.T) {
+	args := map[string]interface{}{
+		"departure":     "MAD",
+		"arrival":       "BCN",
+		"outbound_date": "2026-07-15",
+		// trip_type missing
+	}
+
+	_, err := ParseFlightToolCall(args)
+	if err == nil {
+		t.Fatal("expected error for missing trip_type")
+	}
+}
+
+func TestParseFlightToolCall_Defaults(t *testing.T) {
+	args := map[string]interface{}{
+		"trip_type":     "round_trip",
+		"departure":     "MAD",
+		"arrival":       "BCN",
+		"outbound_date": "2026-07-15",
+		"return_date":   "2026-07-20",
+	}
+
+	cmd, err := ParseFlightToolCall(args)
+	if err != nil {
+		t.Fatalf("ParseFlightToolCall failed: %v", err)
+	}
+
+	// adults defaults to 1
+	if cmd.Adults != 1 {
+		t.Errorf("Adults default = %d, want 1", cmd.Adults)
+	}
+	// travel_class defaults to economy
+	if cmd.TravelClass != search_flights.TravelClassEconomy {
+		t.Errorf("TravelClass default = %q, want %q", cmd.TravelClass, search_flights.TravelClassEconomy)
+	}
+	// stops defaults to any
+	if cmd.Stops != search_flights.StopsAny {
+		t.Errorf("Stops default = %q, want %q", cmd.Stops, search_flights.StopsAny)
+	}
+	// sort_by defaults to top
+	if cmd.SortBy != search_flights.SortByTop {
+		t.Errorf("SortBy default = %q, want %q", cmd.SortBy, search_flights.SortByTop)
+	}
+}
+
+func TestParseFlightToolCall_OneWay(t *testing.T) {
+	args := map[string]interface{}{
+		"trip_type":     "one_way",
+		"departure":     "EZE",
+		"arrival":       "MAD",
+		"outbound_date": "2026-08-01",
+	}
+
+	cmd, err := ParseFlightToolCall(args)
+	if err != nil {
+		t.Fatalf("ParseFlightToolCall failed: %v", err)
+	}
+
+	if cmd.TripType != search_flights.TripTypeOneWay {
+		t.Errorf("TripType = %q, want 'one_way'", cmd.TripType)
+	}
+	if cmd.ReturnDate != "" {
+		t.Error("ReturnDate should be empty for one_way")
+	}
+}
+
+func TestParseFlightToolCall_Arrays(t *testing.T) {
+	args := map[string]interface{}{
+		"trip_type":     "round_trip",
+		"departure":     "MAD",
+		"arrival":       "CDG",
+		"outbound_date": "2026-07-01",
+		"return_date":   "2026-07-10",
+		"include_airlines": []interface{}{"IB", "UX"},
+		"exclude_connections": []interface{}{"LHR", "FRA"},
+	}
+
+	cmd, err := ParseFlightToolCall(args)
+	if err != nil {
+		t.Fatalf("ParseFlightToolCall failed: %v", err)
+	}
+
+	if len(cmd.IncludeAirlines) != 2 {
+		t.Errorf("IncludeAirlines len = %d, want 2", len(cmd.IncludeAirlines))
+	}
+	if cmd.IncludeAirlines[0] != "IB" || cmd.IncludeAirlines[1] != "UX" {
+		t.Errorf("IncludeAirlines = %v, want [IB, UX]", cmd.IncludeAirlines)
+	}
+	if len(cmd.ExcludeConnections) != 2 {
+		t.Errorf("ExcludeConnections len = %d, want 2", len(cmd.ExcludeConnections))
 	}
 }

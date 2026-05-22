@@ -98,9 +98,10 @@ type ConversationState struct {
 
 // ConversationMessage represents one message in a multi-turn AI conversation.
 type ConversationMessage struct {
-	Role      string    `json:"role"`      // "user" or "assistant"
-	Content   string    `json:"content"`
-	Timestamp time.Time `json:"timestamp"`
+	Role       string    `json:"role"`                  // "user", "assistant", "system", "tool"
+	Content    string    `json:"content"`
+	ToolCallID string    `json:"tool_call_id,omitzero"` // for tool messages
+	Timestamp  time.Time `json:"timestamp"`
 }
 
 // =============================================================================

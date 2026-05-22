@@ -3,6 +3,7 @@ package ai_search_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
@@ -1104,5 +1105,175 @@ func TestUseCase_ParamNormalization_NumericToEnums(t *testing.T) {
 	}
 	if flightsSearcher.lastCmd.ReturnDate[:4] != "2026" {
 		t.Errorf("return_date: expected year 2026, got %s", flightsSearcher.lastCmd.ReturnDate)
+	}
+}
+
+// =============================================================================
+// Task 2.2-2.4 — Tool call execution, result messages, partial failures
+// =============================================================================
+
+func TestExecuteToolCalls_ConcurrentDispatch(t *testing.T) {
+	// RED: executeToolCalls method does not exist yet on UseCase
+	ctx := t.Context()
+
+	flightSearcher := &stubFlightSearcher{resp: &search_flights.Response{}}
+	hotelSearcher := &stubHotelSearcher{resp: &search_hotels.Response{}}
+
+	uc := ai_search.NewUseCase(ai_search.UseCaseDeps{
+		FlightSearcher: flightSearcher,
+		HotelSearcher:  hotelSearcher,
+		AnonMaxTurns:   5,
+		AuthMaxTurns:   10,
+	})
+
+	toolCalls := []ai_search.ToolCall{
+		{ID: "call_1", Name: "search_hotels", Arguments: map[string]interface{}{
+			"query":          "Barcelona",
+			"check_in_date":  "2026-07-01",
+			"check_out_date": "2026-07-05",
+		}},
+		{ID: "call_2", Name: "search_flights", Arguments: map[string]interface{}{
+			"trip_type":     "round_trip",
+			"departure":     "MAD",
+			"arrival":       "BCN",
+			"outbound_date": "2026-07-01",
+			"return_date":   "2026-07-05",
+		}},
+	}
+
+	results := uc.ExecuteToolCalls(ctx, toolCalls)
+
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if !flightSearcher.called {
+		t.Error("flight searcher should have been called")
+	}
+	if !hotelSearcher.called {
+		t.Error("hotel searcher should have been called")
+	}
+}
+
+func TestBuildToolResultMessages(t *testing.T) {
+	// RED: BuildToolResultMessages does not exist yet
+	results := []ai_search.ToolResult{
+		{
+			CallID:      "call_1",
+			Name:        "search_hotels",
+			Destination: "Barcelona",
+			Content:     `{"properties": []}`,
+		},
+	}
+
+	messages := ai_search.BuildToolResultMessages(results)
+	if len(messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(messages))
+	}
+	msg := messages[0]
+	if msg.Role != "tool" {
+		t.Errorf("Role = %q, want 'tool'", msg.Role)
+	}
+	if msg.ToolCallID != "call_1" {
+		t.Errorf("ToolCallID = %q, want 'call_1'", msg.ToolCallID)
+	}
+	if msg.Content != `{"properties": []}` {
+		t.Errorf("Content = %q, want the result JSON", msg.Content)
+	}
+}
+
+func TestBuildToolResultMessages_WithError(t *testing.T) {
+	results := []ai_search.ToolResult{
+		{
+			CallID: "call_err",
+			Name:   "search_flights",
+			Error:  errors.New("provider timeout"),
+		},
+	}
+
+	messages := ai_search.BuildToolResultMessages(results)
+	if len(messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(messages))
+	}
+	msg := messages[0]
+
+	// Error should be in the content as JSON
+	if !strings.Contains(msg.Content, "provider timeout") {
+		t.Errorf("Content should contain error, got: %s", msg.Content)
+	}
+}
+
+func TestExecuteToolCalls_PartialFailure(t *testing.T) {
+	// One tool fails, other succeeds — both results collected
+	ctx := t.Context()
+
+	hotelSearcher := &stubHotelSearcher{
+		err:  errors.New("search_hotels unavailable"),
+		resp: &search_hotels.Response{},
+	}
+	flightSearcher := &stubFlightSearcher{
+		resp: &search_flights.Response{BestFlights: []domain.Flight{{
+			Legs: []domain.Leg{{Airline: "IB"}},
+		}}},
+	}
+
+	uc := ai_search.NewUseCase(ai_search.UseCaseDeps{
+		FlightSearcher: flightSearcher,
+		HotelSearcher:  hotelSearcher,
+		AnonMaxTurns:   5,
+		AuthMaxTurns:   10,
+	})
+
+	toolCalls := []ai_search.ToolCall{
+		{ID: "call_h", Name: "search_hotels", Arguments: map[string]interface{}{
+			"query": "Barcelona", "check_in_date": "2026-07-01", "check_out_date": "2026-07-05",
+		}},
+		{ID: "call_f", Name: "search_flights", Arguments: map[string]interface{}{
+			"trip_type": "round_trip", "departure": "MAD", "arrival": "BCN",
+			"outbound_date": "2026-07-01", "return_date": "2026-07-05",
+		}},
+	}
+
+	results := uc.ExecuteToolCalls(ctx, toolCalls)
+
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+
+	// First result should have error (hotel)
+	if results[0].CallID != "call_h" {
+		// The order depends on wg.Go() scheduling, but both should be present
+	}
+
+	// Count errors
+	errCount := 0
+	okCount := 0
+	for _, r := range results {
+		if r.Error != nil {
+			errCount++
+		} else {
+			okCount++
+		}
+	}
+	if errCount != 1 {
+		t.Errorf("expected 1 error result, got %d", errCount)
+	}
+	if okCount != 1 {
+		t.Errorf("expected 1 success result, got %d", okCount)
+	}
+
+	// Build messages from partial results — should produce valid tool messages
+	messages := ai_search.BuildToolResultMessages(results)
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(messages))
+	}
+	// Error message should contain error info
+	foundError := false
+	for _, m := range messages {
+		if strings.Contains(m.Content, "search_hotels unavailable") {
+			foundError = true
+		}
+	}
+	if !foundError {
+		t.Error("expected error content in at least one tool result message")
 	}
 }

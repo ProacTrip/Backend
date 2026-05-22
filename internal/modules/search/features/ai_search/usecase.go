@@ -1222,3 +1222,121 @@ func blake3Hash(message string, history []domain.ConversationMessage) []byte {
 
 	return h.Sum(nil)
 }
+
+// =============================================================================
+// Tool call execution (Phase 2)
+// =============================================================================
+
+// ExecuteToolCalls dispatches multiple tool calls concurrently using wg.Go().
+// Each tool call executes independently; partial failures are collected.
+// Results array preserves the order of the input toolCalls slice.
+func (uc *UseCase) ExecuteToolCalls(ctx context.Context, toolCalls []ToolCall) []ToolResult {
+	results := make([]ToolResult, len(toolCalls))
+
+	var wg sync.WaitGroup
+	for i, tc := range toolCalls {
+		wg.Go(func() {
+			result := uc.executeSingleToolCall(ctx, tc)
+			results[i] = result
+		})
+	}
+	wg.Wait()
+
+	return results
+}
+
+// executeSingleToolCall dispatches a single tool call to the appropriate searcher.
+func (uc *UseCase) executeSingleToolCall(ctx context.Context, tc ToolCall) ToolResult {
+	result := ToolResult{
+		CallID: tc.ID,
+		Name:   tc.Name,
+	}
+
+	switch tc.Name {
+	case "search_hotels":
+		cmd, err := ParseHotelToolCall(tc.Arguments)
+		if err != nil {
+			result.Error = err
+			result.Content = fmt.Sprintf(`{"error": "invalid arguments: %s"}`, err.Error())
+			return result
+		}
+
+		// Set destination
+		result.Destination = cmd.Query
+
+		resp, err := uc.hotelSearcher.Execute(ctx, cmd)
+		if err != nil {
+			if !errors.Is(err, domain.ErrNoResults) {
+				result.Error = err
+				result.Content = fmt.Sprintf(`{"error": "%s"}`, err.Error())
+				return result
+			}
+			result.Content = `{"properties": [], "results_state": "empty"}`
+			return result
+		}
+
+		// Marshal response to JSON
+		data, marshalErr := json.Marshal(resp)
+		if marshalErr != nil {
+			result.Error = marshalErr
+			result.Content = fmt.Sprintf(`{"error": "marshal failed: %s"}`, marshalErr.Error())
+			return result
+		}
+		result.Content = string(data)
+
+	case "search_flights":
+		cmd, err := ParseFlightToolCall(tc.Arguments)
+		if err != nil {
+			result.Error = err
+			result.Content = fmt.Sprintf(`{"error": "invalid arguments: %s"}`, err.Error())
+			return result
+		}
+
+		// Set destination
+		result.Destination = fmt.Sprintf("%s→%s", cmd.Departure, cmd.Arrival)
+
+		resp, err := uc.flightSearcher.Execute(ctx, cmd)
+		if err != nil {
+			if !errors.Is(err, domain.ErrNoResults) {
+				result.Error = err
+				result.Content = fmt.Sprintf(`{"error": "%s"}`, err.Error())
+				return result
+			}
+			result.Content = `{"best_flights": [], "other_flights": [], "results_state": "empty"}`
+			return result
+		}
+
+		data, marshalErr := json.Marshal(resp)
+		if marshalErr != nil {
+			result.Error = marshalErr
+			result.Content = fmt.Sprintf(`{"error": "marshal failed: %s"}`, marshalErr.Error())
+			return result
+		}
+		result.Content = string(data)
+
+	default:
+		result.Error = fmt.Errorf("unknown tool: %s", tc.Name)
+		result.Content = fmt.Sprintf(`{"error": "unknown tool: %s"}`, tc.Name)
+	}
+
+	return result
+}
+
+// BuildToolResultMessages converts ToolResults into domain.ConversationMessage
+// with role "tool" for injection back into the AI conversation.
+func BuildToolResultMessages(results []ToolResult) []domain.ConversationMessage {
+	messages := make([]domain.ConversationMessage, 0, len(results))
+	for _, r := range results {
+		content := r.Content
+		if content == "" && r.Error != nil {
+			content = fmt.Sprintf(`{"error": "%s"}`, r.Error.Error())
+		}
+		messages = append(messages, domain.ConversationMessage{
+			Role:       "tool",
+			Content:    content,
+			ToolCallID: r.CallID,
+			Timestamp:  time.Now(),
+		})
+	}
+	return messages
+}
