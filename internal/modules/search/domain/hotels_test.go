@@ -72,7 +72,7 @@ func TestHotelSearchResponseJSONRoundtrip(t *testing.T) {
 			},
 		},
 		Pagination: HotelPagination{
-			NextToken: "abc123",
+			NextToken: new("abc123"),
 			HasMore:   true,
 		},
 		FromCache: false,
@@ -158,8 +158,8 @@ func TestHotelSearchResponseJSONRoundtrip(t *testing.T) {
 	if restored.Brands[0].Name != "Mariott" {
 		t.Errorf("Brand.Name: got %q, want %q", restored.Brands[0].Name, "Mariott")
 	}
-	if restored.Pagination.NextToken != "abc123" {
-		t.Errorf("Pagination.NextToken: got %q, want %q", restored.Pagination.NextToken, "abc123")
+	if restored.Pagination.NextToken == nil || *restored.Pagination.NextToken != "abc123" {
+		t.Errorf("Pagination.NextToken: got %v, want %q", restored.Pagination.NextToken, "abc123")
 	}
 }
 
@@ -394,7 +394,7 @@ func TestHotelSearchRequestJSONTags(t *testing.T) {
 		EcoCertified:     true,
 		Bedrooms:         new(2),
 		Bathrooms:        new(1),
-		PageToken:        "next-page",
+		PageToken:        new("next-page"),
 	}
 
 	data, err := json.Marshal(req)

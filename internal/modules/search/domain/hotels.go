@@ -33,7 +33,7 @@ type HotelSearchRequest struct {
 	EcoCertified     bool     `json:"eco_certified"`
 	Bedrooms         *int     `json:"bedrooms"`
 	Bathrooms        *int     `json:"bathrooms"`
-	PageToken        string   `json:"page_token"`
+	PageToken        *string  `json:"page_token,omitzero"`
 }
 
 // =============================================================================
@@ -106,7 +106,7 @@ type HotelBrandChain struct {
 
 // HotelPagination contiene el token de página siguiente y si hay más resultados.
 type HotelPagination struct {
-	NextToken string `json:"next_token"`
+	NextToken *string `json:"next_token,omitzero"`
 	HasMore   bool   `json:"has_more"`
 }
 

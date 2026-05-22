@@ -419,7 +419,7 @@ func domainRequestToHotelParams(req domain.HotelSearchRequest) HotelSearchParams
 		EcoCertified:     req.EcoCertified,
 		Bedrooms:         req.Bedrooms,
 		Bathrooms:        req.Bathrooms,
-		PageToken:        req.PageToken,
+		PageToken:        ptrStrDomain(req.PageToken),
 	}
 }
 
@@ -467,8 +467,10 @@ func mapHotelSearchDomainResponse(serpResp *HotelSearchResponse, currency string
 	// El campo Next siempre contiene una URL, incluso en la última página.
 	if serpResp.SerpapiPagination != nil {
 		resp.Pagination = domain.HotelPagination{
-			NextToken: serpResp.SerpapiPagination.NextPageToken,
-			HasMore:   serpResp.SerpapiPagination.NextPageToken != "",
+			HasMore: serpResp.SerpapiPagination.NextPageToken != "",
+		}
+		if serpResp.SerpapiPagination.NextPageToken != "" {
+			resp.Pagination.NextToken = new(serpResp.SerpapiPagination.NextPageToken)
 		}
 	}
 

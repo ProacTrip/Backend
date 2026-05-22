@@ -80,7 +80,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		var resp Response
 		if err := json.Unmarshal([]byte(cached), &resp); err == nil {
 			resp.FromCache = true
-			resp.CachedAt = new(time.Now())
+			// CachedAt is already stored in the cache entry — don't recompute
 			return &resp, nil
 		}
 		slog.WarnContext(ctx, "hotel details cache unmarshal failed, falling through to provider",

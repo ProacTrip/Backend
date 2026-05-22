@@ -39,7 +39,7 @@ type Command struct {
 	EcoCertified    bool     `json:"eco_certified"`
 	Bedrooms        *int     `json:"bedrooms"`
 	Bathrooms       *int     `json:"bathrooms"`
-	PageToken       string   `json:"page_token"`
+	PageToken       *string  `json:"page_token,omitzero"`
 }
 
 // =============================================================================

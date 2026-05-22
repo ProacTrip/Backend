@@ -297,7 +297,7 @@ func TestDomainRequestToHotelParams_ALL(t *testing.T) {
 		EcoCertified:     true,
 		Bedrooms:         new(2),
 		Bathrooms:        new(1),
-		PageToken:        "next-page",
+		PageToken:        new("next-page"),
 	}
 
 	params := domainRequestToHotelParams(req)
