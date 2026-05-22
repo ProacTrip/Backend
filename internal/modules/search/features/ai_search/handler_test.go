@@ -40,16 +40,17 @@ var defaultCfg = shared.SearchDefaultConfig{
 
 // TestHandler_ValidMessage verifies that a POST with a valid message returns 200.
 func TestHandler_ValidMessage(t *testing.T) {
+	convStore := &stubConversationStore{}
 	uc := ai_search.NewUseCase(ai_search.UseCaseDeps{
 		AIInterpreter:  &stubInterpreter{intent: newFlightsIntent()},
 		FlightSearcher: &stubFlightSearcher{},
 		HotelSearcher:  &stubHotelSearcher{},
-		ConvStore:      &stubConversationStore{},
+		ConvStore:      convStore,
 		AnonMaxTurns:   5,
 		AuthMaxTurns:   10,
 	})
 
-	handler := ai_search.NewHandler(uc, nil, defaultCfg, nil)
+	handler := ai_search.NewHandler(uc, convStore, nil, defaultCfg, nil)
 
 	c, rec := newEchoContext(`{"message": "Busco vuelos de Buenos Aires a Madrid"}`)
 
@@ -78,18 +79,16 @@ func TestHandler_ValidMessage(t *testing.T) {
 }
 
 // TestHandler_EmptyMessage verifies that an empty message returns 400.
-// The handler returns a 400 via MapError (without domain error mapping,
-// it falls back to generic 500 via the global handler, but the handler
-// test validates the handler correctly delegates to the usecase).
 func TestHandler_EmptyMessage(t *testing.T) {
+	convStore := &stubConversationStore{}
 	uc := ai_search.NewUseCase(ai_search.UseCaseDeps{
 		AIInterpreter:  &stubInterpreter{},
 		FlightSearcher: &stubFlightSearcher{},
 		HotelSearcher:  &stubHotelSearcher{},
-		ConvStore:      &stubConversationStore{},
+		ConvStore:      convStore,
 	})
 
-	handler := ai_search.NewHandler(uc, nil, defaultCfg, nil)
+	handler := ai_search.NewHandler(uc, convStore, nil, defaultCfg, nil)
 
 	c, rec := newEchoContext(`{"message": ""}`)
 
@@ -125,7 +124,7 @@ func TestHandler_AuthUser(t *testing.T) {
 		AuthMaxTurns:   10,
 	})
 
-	handler := ai_search.NewHandler(uc, nil, defaultCfg, nil)
+	handler := ai_search.NewHandler(uc, convStore, nil, defaultCfg, nil)
 
 	c, rec := newEchoContext(`{"message": "Vuelos baratos"}`)
 
@@ -134,7 +133,6 @@ func TestHandler_AuthUser(t *testing.T) {
 		UserID:    userID,
 		Email:     "test@example.com",
 		RoleID:    uuid.Nil,
-		SessionID: uuid.Nil,
 		JTI:       uuid.Nil,
 	})
 
@@ -170,14 +168,15 @@ func TestHandler_AuthUser(t *testing.T) {
 
 // TestHandler_InvalidJSON verifies that malformed JSON returns 400.
 func TestHandler_InvalidJSON(t *testing.T) {
+	convStore := &stubConversationStore{}
 	uc := ai_search.NewUseCase(ai_search.UseCaseDeps{
 		AIInterpreter:  &stubInterpreter{},
 		FlightSearcher: &stubFlightSearcher{},
 		HotelSearcher:  &stubHotelSearcher{},
-		ConvStore:      &stubConversationStore{},
+		ConvStore:      convStore,
 	})
 
-	handler := ai_search.NewHandler(uc, nil, defaultCfg, nil)
+	handler := ai_search.NewHandler(uc, convStore, nil, defaultCfg, nil)
 
 	c, rec := newEchoContext(`not json`)
 

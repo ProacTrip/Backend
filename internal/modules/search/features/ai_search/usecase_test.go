@@ -90,6 +90,23 @@ func (s *stubConversationStore) SaveConversation(ctx context.Context, conv *doma
 	return nil
 }
 
+// New ConversationStore methods — stubbed for tests.
+func (s *stubConversationStore) Save(ctx context.Context, conv *ai_search.Conversation) error {
+	return nil
+}
+func (s *stubConversationStore) Load(ctx context.Context, convID string) (*ai_search.Conversation, error) {
+	return nil, nil
+}
+func (s *stubConversationStore) Delete(ctx context.Context, convID, userID string) error {
+	return nil
+}
+func (s *stubConversationStore) ListUserConversations(ctx context.Context, userID string) ([]ai_search.ConversationPreview, error) {
+	return nil, nil
+}
+func (s *stubConversationStore) ResetTTL(ctx context.Context, convID string) error {
+	return nil
+}
+
 // =============================================================================
 // Helper: valid flight intent
 // =============================================================================
@@ -787,6 +804,17 @@ func (s *expiringConvStore) SaveConversation(ctx context.Context, conv *domain.C
 	s.saved = conv
 	return nil
 }
+
+// New ConversationStore methods — stubbed.
+func (s *expiringConvStore) Save(ctx context.Context, conv *ai_search.Conversation) error { return nil }
+func (s *expiringConvStore) Load(ctx context.Context, convID string) (*ai_search.Conversation, error) {
+	return nil, nil
+}
+func (s *expiringConvStore) Delete(ctx context.Context, convID, userID string) error { return nil }
+func (s *expiringConvStore) ListUserConversations(ctx context.Context, userID string) ([]ai_search.ConversationPreview, error) {
+	return nil, nil
+}
+func (s *expiringConvStore) ResetTTL(ctx context.Context, convID string) error { return nil }
 
 // TestUseCase_ConversationNotFound_ReturnsError verifies that when a conversation
 // ID is provided but not found (expired or never existed), the use case returns
