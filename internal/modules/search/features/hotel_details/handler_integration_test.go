@@ -1,9 +1,8 @@
-// Integration tests for the hotel_details handler: 4-tier default resolution.
+// Integration tests for the hotel_details handler: 3-tier default resolution.
 // Verifies the handler correctly resolves GL/HL/Currency from:
 //   Tier 1: explicit client params (always win)
 //   Tier 2: authenticated user profile prefs (profile:{userID}:prefs Dragonfly hash)
-//   Tier 3: anonymous IP environment cache (env:{ip})
-//   Tier 4: config fallback
+//   Tier 3: config fallback
 //
 // Uses a cache-hit strategy: the usecase's search-response cache always returns
 // a valid cached response, so the SerpAPI adapter (nil client) is never called.

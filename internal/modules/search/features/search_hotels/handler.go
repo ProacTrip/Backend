@@ -57,7 +57,7 @@ func (h *Handler) Handle(c *echo.Context) error {
 		return httperr.MapError(c, err)
 	}
 
-	// Resolve GL/HL/Currency from the 4-tier priority chain
+	// Resolve GL/HL/Currency from the 3-tier priority chain
 	gl, hl, currency := shared.ResolveSearchDefaults(
 		c.Request().Context(),
 		h.rdb,

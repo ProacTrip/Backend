@@ -1,21 +1,18 @@
 // shared — utility helpers shared across search feature handlers.
-// Provides ResolveSearchDefaults for the 4-tier priority:
-//   1. Explicit client params (always win)
+// Provides ResolveSearchDefaults for 3-tier per-param resolution:
+//   1. Explicit client params (always win per-param)
 //   2. Authenticated profile prefs (profile:{userID}:prefs Dragonfly hash)
-//   3. Anonymous environment cache (env:{ip} Dragonfly key)
-//   4. Config defaults (DEFAULT_CURRENCY, DEFAULT_LANGUAGE, DEFAULT_COUNTRY_CODE)
+//   3. Config defaults (DEFAULT_CURRENCY, DEFAULT_LANGUAGE, DEFAULT_COUNTRY_CODE)
 package shared
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 	"github.com/redis/go-redis/v9"
 
-	sharedEnv "github.com/ProacTrip/Backend/internal/shared/environment"
 	sharedUser "github.com/ProacTrip/Backend/internal/shared/user"
 	searchshared "github.com/ProacTrip/Backend/internal/modules/search/shared"
 )
@@ -45,7 +42,7 @@ func UserIDFromContext(c *echo.Context) string {
 }
 
 // =============================================================================
-// ResolveSearchDefaults — 4-tier priority resolution
+// ResolveSearchDefaults — 3-tier per-param resolution
 // =============================================================================
 
 // SearchDefaultConfig holds the hardcoded fallback defaults for search params.
@@ -56,12 +53,12 @@ type SearchDefaultConfig struct {
 }
 
 // ResolveSearchDefaults resolves GL (country), HL (language), and Currency
-// for search requests according to the 4-tier priority chain:
+// for search requests. Each parameter is resolved independently:
 //
-//	Tier 1: Client-supplied explicit params (any non-nil pointer wins)
+//	Tier 1: Client-supplied explicit param (non-nil pointer wins for that param)
 //	Tier 2: Authenticated user profile prefs (Dragonfly hash profile:{userID}:prefs)
-//	Tier 3: Anonymous environment cache (Dragonfly key env:{ip})
-//	Tier 4: Config fallback defaults
+//	        — used for HL and Currency only (country code comes from config)
+//	Tier 3: Config fallback defaults
 //
 // Returns the resolved (gl, hl, currency) values.
 func ResolveSearchDefaults(
@@ -74,18 +71,31 @@ func ResolveSearchDefaults(
 	explicitCurrency *string,
 	cfg SearchDefaultConfig,
 ) (gl, hl, currency string) {
-	// Tier 1: If ANY explicit param is set, the client wins completely.
-	// This prevents mixed-mode where some defaults bleed through.
-	if explicitGL != nil || explicitHL != nil || explicitCurrency != nil {
-		return searchshared.PtrOrEmpty(explicitGL), searchshared.PtrOrEmpty(explicitHL), searchshared.PtrOrEmpty(explicitCurrency)
+	// Tier 1: explicit params win per-param
+	gl = searchshared.PtrOrEmpty(explicitGL)
+	hl = searchshared.PtrOrEmpty(explicitHL)
+	currency = searchshared.PtrOrEmpty(explicitCurrency)
+
+	// If all three are already explicit, skip remaining tiers
+	if explicitGL != nil && explicitHL != nil && explicitCurrency != nil {
+		return
 	}
 
-	// Guard: if Redis is nil (tests, AI not configured), skip to Tier 4 config fallback.
+	// Guard: if Redis is nil (tests, AI not configured), skip to Tier 3
 	if rdb == nil {
-		return cfg.CountryCode, cfg.Language, cfg.Currency
+		if gl == "" {
+			gl = cfg.CountryCode
+		}
+		if hl == "" {
+			hl = cfg.Language
+		}
+		if currency == "" {
+			currency = cfg.Currency
+		}
+		return
 	}
 
-	// Tier 2: Authenticated user → profile prefs cache
+	// Tier 2: Authenticated user → profile prefs (HL and Currency only)
 	if userID != "" {
 		prefs, err := sharedUser.GetProfilePrefs(ctx, rdb, userID)
 		if err != nil {
@@ -95,55 +105,25 @@ func ResolveSearchDefaults(
 			)
 		}
 		if prefs != nil {
-			// GL = country code, HL = language, Currency = currency
-			return prefs.CountryCode, prefs.Language, prefs.Currency
+			if hl == "" && prefs.Language != "" {
+				hl = prefs.Language
+			}
+			if currency == "" && prefs.Currency != "" {
+				currency = prefs.Currency
+			}
 		}
 	}
 
-	// Tier 3: Anonymous → environment cache env:{ip}
-	if clientIP != "" {
-		if gl, hl, cur, ok := resolveFromEnvCache(ctx, rdb, clientIP); ok {
-			return gl, hl, cur
-		}
+	// Tier 3: Config fallback defaults
+	if gl == "" {
+		gl = cfg.CountryCode
+	}
+	if hl == "" {
+		hl = cfg.Language
+	}
+	if currency == "" {
+		currency = cfg.Currency
 	}
 
-	// Tier 4: Hardcoded config fallback
-	return cfg.CountryCode, cfg.Language, cfg.Currency
-}
-
-// =============================================================================
-// Env cache parsing — uses shared/environment DTO contract
-// =============================================================================
-
-func resolveFromEnvCache(ctx context.Context, rdb *redis.Client, ip string) (gl, hl, currency string, ok bool) {
-	key := sharedEnv.CacheKey(ip)
-
-	raw, err := rdb.Get(ctx, key).Result()
-	if err != nil {
-		if err != redis.Nil {
-			slog.WarnContext(ctx, "resolve defaults: env cache lookup failed",
-				slog.String("ip", ip),
-				slog.String("error", err.Error()),
-			)
-		}
-		return "", "", "", false
-	}
-	if raw == "" {
-		return "", "", "", false
-	}
-
-	var entry sharedEnv.CacheEntry
-	if err := json.Unmarshal([]byte(raw), &entry); err != nil {
-		slog.WarnContext(ctx, "resolve defaults: env cache unmarshal failed",
-			slog.String("error", err.Error()),
-		)
-		return "", "", "", false
-	}
-
-	loc := entry.Location
-	if loc.CountryCode == "" && loc.Currency == "" && loc.Language == "" {
-		return "", "", "", false
-	}
-
-	return loc.CountryCode, loc.Language, loc.Currency, true
+	return
 }

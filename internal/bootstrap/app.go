@@ -480,7 +480,7 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	authGroup.POST("/resend-verification", authMod.ResendVerificationHandler.Handle, anonRateLimitMW)
 
 	// Search routes: /v1/search (públicas con rate limit)
-	searchGroup := e.Group("/v1/search", anonRateLimitMW, authMiddleware.Optional())
+	searchGroup := e.Group("/v1/search", anonRateLimitMW, authRateLimitMW, authMiddleware.Optional())
 	searchGroup.POST("/flights", searchMod.SearchFlightsHandler.Handle)
 	searchGroup.POST("/flight-details", searchMod.FlightDetailsHandler.Handle)
 	searchGroup.POST("/hotels", searchMod.SearchHotelsHandler.Handle)
