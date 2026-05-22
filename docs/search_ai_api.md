@@ -1,6 +1,6 @@
-# AI Search API Documentation (Cookie-Based)
+# Documentación de AI Search API (Cookie-Based)
 
-> **Arquitectura:** Unified search endpoint con interpretación de lenguaje natural.
+> **Arquitectura:** Endpoint de búsqueda unificado con interpretación de lenguaje natural.
 > El usuario envía un mensaje conversacional y el backend interpreta la intención,
 > resuelve parámetros, y ejecuta búsquedas de vuelos y/o hoteles automáticamente.
 
@@ -8,30 +8,28 @@
 
 ## Índice
 
-- [Arquitectura](#arquitectura)
-- [Seguridad de Cookies](#seguridad-de-cookies)
-- [Base URLs](#base-urls)
-- [Errores Estándar](#errores-estándar)
-- [Estrategia de Refresco de Tokens](#estrategia-de-refresco-de-tokens)
-- [AI Search](#ai-search)
-  - [Flujo de Conversación](#flujo-de-conversación)
-  - [Modelo Multi-Turno](#modelo-multi-turno)
-  - [Request](#request)
-  - [Responses](#responses)
-    - [Intento Incompleto (incomplete)](#intento-incompleto-incomplete)
-    - [Intento Ambiguo (ambiguous)](#intento-ambiguo-ambiguous)
-    - [Vuelos (flights)](#vuelos-flights)
-    - [Hoteles (hotels)](#hoteles-hotels)
-    - [Ambos (both)](#ambos-both)
-    - [Partial Failure en Both](#partial-failure-en-both)
-  - [Response Fields Explained](#response-fields-explained)
-  - [Tipos de Intento](#tipos-de-intento)
-  - [Resolución IATA](#resolución-iata)
-  - [Posibles Errores](#posibles-errores-ai-search)
-- [Rate Limiting](#rate-limiting)
-- [Cache](#cache)
-- [Notas de Autenticación](#notas-de-autenticación)
-- [Configuración CORS](#configuración-cors)
+| Sección | Estado |
+|---------|--------|
+| [Arquitectura](#arquitectura) | ✅ |
+| [Seguridad de Cookies](#seguridad-de-cookies) | ✅ |
+| [Base URLs](#base-urls) | ✅ |
+| [Errores Estándar](#errores-estándar) | ✅ |
+| [Estrategia de Refresco de Tokens](#estrategia-de-refresco-de-tokens) | ✅ |
+| [AI Search](#ai-search) | ✅ Implementado |
+| [Flujo de Conversación](#flujo-de-conversación) | ✅ |
+| [Modelo Multi-Turno](#modelo-multi-turno) | ✅ |
+| [Request](#request) | ✅ |
+| [Responses](#responses) | ✅ |
+| [Response Fields](#response-fields-explained) | ✅ |
+| [Tipos de Intento](#tipos-de-intento) | ✅ |
+| [Discovery Mode](#discovery-mode) | ✅ AI-Powered (DeepSeek v4 Flash) |
+| [Resolución IATA](#resolución-iata) | ✅ |
+| [Posibles Errores](#posibles-errores-ai-search) | ✅ |
+| [Rate Limiting](#rate-limiting) | ✅ |
+| [Cache](#cache) | ✅ |
+| [Notas de Autenticación](#notas-de-autenticación) | ✅ |
+| [Configuración CORS](#configuración-cors) | ✅ |
+| [Notas de Seguridad](#notas-de-seguridad) | ✅ |
 
 ---
 
@@ -265,7 +263,13 @@ POST /v1/search/ai
 ```json
 {
   "message": "Quiero viajar a Madrid desde Buenos Aires del 15 al 22 de marzo, 2 adultos",
-  "conversation_id": "019ef5439-cb43-716d-90b5-51dcbe980908"
+  "conversation_id": "019ef5439-cb43-716d-90b5-51dcbe980908",
+  "search_mode": "",
+  "stream": false,
+  "lat": -34.6037,
+  "lng": -58.3816,
+  "country_code": "AR",
+  "timezone": "America/Argentina/Buenos_Aires"
 }
 ```
 
@@ -275,7 +279,12 @@ POST /v1/search/ai
 |-------|------|-----------|-------------|
 | `message` | string | Sí | Mensaje en lenguaje natural describiendo la búsqueda. No puede estar vacío ni ser solo espacios. Ej: `"Busco vuelos baratos a Lima en marzo"`, `"hoteles en Bali con pileta"`, `"vuelo y hotel a Cancún para 2"` |
 | `conversation_id` | string | No | UUID v7 de una conversación existente. Omitir en el primer mensaje — el backend genera uno nuevo y lo devuelve en la respuesta. Usar el mismo ID en turnos subsiguientes |
+| `search_mode` | string | No | Sugerencia de modo: `"discovery"` para descubrir destinos, `"exact"` para búsquedas concretas, `""` (vacío u omitido) para detección automática |
 | `stream` | boolean | No | `true` para recibir la respuesta como SSE (Server-Sent Events) con `Content-Type: text/event-stream`. Cada evento contiene los campos de la respuesta de forma incremental. `false` o ausente → respuesta JSON estándar |
+| `lat` | float64 | No | Latitud del usuario. Proporcionada por el frontend (obtenida de `/v1/environment`). Se usa para contexto de ubicación en el prompt del intérprete AI. Ej: `40.4168` |
+| `lng` | float64 | No | Longitud del usuario. Proporcionada por el frontend (obtenida de `/v1/environment`). Ej: `-3.7038` |
+| `timezone` | string | No | Zona horaria IANA del usuario. Ej: `"Europe/Madrid"`, `"America/Argentina/Buenos_Aires"` |
+| `country_code` | string | No | Código ISO 3166-1 alpha-2 del país del usuario. Ej: `"ES"`, `"AR"` |
 
 ### Ejemplos curl
 
@@ -634,7 +643,7 @@ Cuando el intent es `"both"` y uno de los dos buscadores falla pero el otro tien
 
 > **Nota para el frontend:** Cuando `flights_error` o `hotels_error` están presentes, significa que esa búsqueda falló. Mostrar un mensaje informativo al usuario indicando que esa parte no está disponible. La otra búsqueda (`flights` u `hotels`) contiene resultados válidos.
 
-### Response Fields Explained
+### Campos de la Respuesta
 
 #### Nivel Raíz
 
@@ -652,6 +661,7 @@ Cuando el intent es `"both"` y uno de los dos buscadores falla pero el otro tien
 | `flights_error` | string | Mensaje de error del buscador de vuelos. Solo presente en partial failure de `"both"` |
 | `hotels_error` | string | Mensaje de error del buscador de hoteles. Solo presente en partial failure de `"both"` |
 | `from_cache` | boolean | `true` si la **interpretación** de la AI vino de caché (blake3 hash). `false` si fue fresca. **No** indica si los resultados de búsqueda son cacheados |
+| `cached_at` | string\|null | Timestamp ISO 8601 del momento en que se cacheó la interpretación. `null` si `from_cache` es `false` |
 
 ### Tipos de Intento
 
@@ -665,7 +675,9 @@ Cuando el intent es `"both"` y uno de los dos buscadores falla pero el otro tien
 
 ### Discovery Mode
 
-Cuando el sistema detecta que el usuario quiere descubrir destinos sin criterios específicos (frases como "recomiéndame playa", "a dónde viajar", "barato en verano"), se activa el modo discovery. Este modo **no llama a SerpAPI** — en su lugar, genera recomendaciones de destinos basadas en datos del usuario (favoritos, búsquedas guardadas) y restricciones extraídas del lenguaje natural.
+> **⚡ AI-Powered (DeepSeek v4 Flash).** El modo discovery ahora usa DeepSeek v4 Flash para interpretar consultas abiertas del tipo "recomiéndame playa", "destinos baratos para verano", o "a dónde viajar en diciembre". El intérprete AI recibe la consulta del usuario junto con contexto de ubicación (`lat`, `lng`, `country_code`, `timezone`), preferencias (`currency`, `language`) y la fecha actual, y genera recomendaciones de destinos en lenguaje natural. Ya no usa keyword-matching ni datos de favoritos del usuario.
+>
+> El modo discovery se activa cuando el cliente envía `"search_mode": "discovery"` o cuando la consulta es detectada automáticamente como discovery por el sistema.
 
 #### Request con Discovery Mode
 
@@ -673,34 +685,39 @@ Cuando el sistema detecta que el usuario quiere descubrir destinos sin criterios
 curl -X POST {base_url}/ai \
   -H "Content-Type: application/json" \
   -d '{
-    "message": "recomiéndame playa barato en verano"
+    "message": "recomiéndame un lugar de playa para este verano",
+    "search_mode": "discovery"
   }'
 ```
 
-#### Response con Discovery Mode
+Con streaming SSE (recomendado para respuestas largas):
+
+```bash
+curl -N -X POST {base_url}/ai \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "destinos de naturaleza cerca de mi ubicación",
+    "search_mode": "discovery",
+    "stream": true,
+    "lat": 40.4168,
+    "lng": -3.7038,
+    "country_code": "ES",
+    "timezone": "Europe/Madrid"
+  }'
+```
+
+#### Response (JSON, non-streaming)
 
 ```json
 {
+  "conversation_id": "019ef5439-cb43-716d-90b5-51dcbe980908",
+  "turn_count": 1,
+  "max_turns": 5,
   "mode": "discovery",
   "intent": "discovery",
-  "confidence": 0.65,
-  "message": "Para tu búsqueda \"recomiéndame playa barato en verano\", podrías considerar Punta Cana (República Dominicana), Cancún (México), o Bali (Indonesia) — todos destinos con playa, presupuesto accesible.",
-  "candidates": [
-    {
-      "destination": "Punta Cana",
-      "country": "República Dominicana",
-      "region": "caribbean",
-      "tags": ["beach", "all-inclusive"],
-      "budget_tier": "medium",
-      "best_months": [12, 1, 2, 3, 4],
-      "score": 0.92,
-      "reasons": ["playa caribeña", "presupuesto medio", "temporada seca en verano"],
-      "source": "user_favorite"
-    }
-  ],
-  "total_candidates": 3,
-  "needs_clarification": false,
-  "clarification_question": ""
+  "confidence": 1.0,
+  "message": "¡Claro! Para un verano de playa te recomiendo...\n\n**1. Punta Cana, República Dominicana** 🇩🇴\n- Playas caribeñas de arena blanca\n- Todo incluido disponible\n- Temporada seca de diciembre a abril\n\n**2. Cancún, México** 🇲🇽\n- Aguas turquesas y vida nocturna\n- Presupuesto medio\n- Vuelos directos desde Madrid\n\n**3. Bali, Indonesia** 🇮🇩\n- Paraíso tropical\n- Presupuesto accesible\n- Mejor época: abril a octubre",
+  "from_cache": false
 }
 ```
 
@@ -708,33 +725,62 @@ curl -X POST {base_url}/ai \
 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
-| `mode` | string | `"discovery"` cuando el pipeline de discovery está activo. `"exact"` para búsquedas concretas (vuelos, hoteles). Omitido en respuestas de búsqueda exacta (`omitzero`) |
-| `candidates[]` | array | Lista de destinos candidatos (top 3-5). Cada candidato incluye `destination`, `country`, `region`, `tags`, `budget_tier`, `best_months`, `score`, `reasons`, y `source` |
-| `needs_clarification` | boolean | `true` cuando el sistema necesita más información del usuario antes de recomendar. En este caso, `candidates` estará vacío |
-| `clarification_question` | string | Pregunta de seguimiento generada por el sistema cuando `needs_clarification` es `true`. Ej: "¿Qué presupuesto tenés en mente?" |
-| `total_candidates` | integer | Número total de candidatos encontrados antes del truncado (máx 5) |
-| `confidence` | float | Confianza del detector de intención (0.0 a 1.0) en que la consulta es de tipo discovery |
+| `mode` | string | `"discovery"` cuando el pipeline de discovery está activo. Omitido (`omitzero`) en respuestas de búsqueda exacta |
+| `intent` | string | `"discovery"` — indica que la respuesta es del pipeline de descubrimiento |
+| `confidence` | float64 | Confianza (siempre 1.0 en discovery AI-powered) |
+| `message` | string | Respuesta en lenguaje natural generada por DeepSeek v4 Flash con recomendaciones de destinos, incluyendo detalles como presupuesto, temporada, y razones. Formateada en Markdown |
+| `from_cache` | boolean | `true` si la interpretación vino de caché (blake3 hash de query + contexto). `false` si fue llamada fresh a la AI |
 
-> **Nota:** Discovery mode devuelve recomendaciones de destinos **sin llamar a SerpAPI**. Los candidatos se generan a partir de datos del usuario (favoritos, búsquedas guardadas) o fuentes curadas. Para búsquedas concretas de vuelos y hoteles, el sistema usa el modo exact search estándar que sí llama a SerpAPI.
+> **Nota:** El modo discovery NO devuelve `candidates[]` estructurados en el response JSON. En su lugar, la respuesta de DeepSeek v4 Flash es texto en lenguaje natural dentro del campo `message`. Si se necesita parseo estructurado, el frontend puede extraer destinos del Markdown generado.
 
-#### Discovery + Clarification
+### SSE Streaming (Discovery)
 
-Cuando el sistema no tiene suficiente información para recomendar (consulta muy ambigua, sin restricciones), pide aclaración:
+Cuando `stream: true` y el modo es discovery, el backend responde con `Content-Type: text/event-stream`. El flujo de eventos es:
 
-```json
-{
-  "mode": "discovery",
-  "intent": "discovery",
-  "confidence": 0.45,
-  "message": "¿Qué presupuesto tenés en mente? ¿Algo económico, medio o te das un gusto?",
-  "candidates": [],
-  "total_candidates": 0,
-  "needs_clarification": true,
-  "clarification_question": "¿Qué presupuesto tenés en mente? ¿Algo económico, medio o te das un gusto?"
-}
+```
+event: status
+data: {"status":"thinking"}
+
+event: chunk
+data: {"content":"¡Claro"}
+
+event: chunk
+data: {"content":"! Para un"}
+
+event: chunk
+data: {"content":" verano"}
+
+...
+
+event: done
+data: {"full_text":"¡Claro! Para un verano de playa..."}
 ```
 
-> **Importante para el frontend:** Cuando `needs_clarification` es `true`, mostrar `message` o `clarification_question` como pregunta de seguimiento. Los campos `candidates` estarán vacíos. Cuando el usuario responda, enviar un nuevo request con `conversation_id` para continuar el flujo.
+**Tipos de eventos SSE:**
+
+| Evento | Formato | Cuándo |
+|--------|--------|--------|
+| `status` | `{"status":"thinking"}` | Inmediatamente al recibir el request. Indica que el procesamiento comenzó |
+| `chunk` | `{"content":"..."}` | Fragmento de texto de la respuesta. Se envía en tiempo real a medida que la AI genera |
+| `done` | `{"full_text":"..."}` | Respuesta completa generada. Se envía al finalizar el stream |
+| `error` | `{"error":"mensaje"}` | Error durante el procesamiento (AI no disponible, rate limit, etc.) |
+
+**Formato wire:**
+```
+event: {tipo}\ndata: {json}\n\n
+```
+
+Ejemplo de chunk:
+```
+event: chunk\ndata: {"content":"te recomiendo visitar"}\n\n
+```
+
+Ejemplo de error:
+```
+event: error\ndata: {"error":"AI_UNAVAILABLE: el servicio de IA no está disponible"}\n\n
+```
+
+> **Importante para el frontend:** En modo streaming, usar `EventSource` o `fetch` con `ReadableStream`. El header `Content-Type` de la respuesta será `text/event-stream`. No confundir con las respuestas JSON estándar (no-streaming).
 
 ### Resolución IATA
 
@@ -806,16 +852,26 @@ La AI puede extraer los siguientes parámetros del lenguaje natural:
 
 ### Posibles Errores (AI Search)
 
-| Código | HTTP | Cuándo |
-|--------|------|--------|
-| `VALIDATION_ERROR` | 400 | `message` vacío o solo espacios en blanco |
-| `TURN_LIMIT_EXCEEDED` | 400 | Se alcanzó el límite máximo de turnos en la conversación (5 anónimos, 10 autenticados) |
-| `CONVERSATION_NOT_FOUND` | 400 | El `conversation_id` enviado no existe o expiró |
-| `RATE_LIMIT_EXCEEDED` | 429 | Demasiadas peticiones al proveedor de IA. Ver [Rate Limiting](#rate-limiting) |
-| `AI_PARSE_FAILURE` | 502 | La IA devolvió una respuesta inválida o malformada que no se pudo interpretar |
-| `AI_UNAVAILABLE` | 503 | El servicio de IA no está configurado o no responde. Ver [Configuración](#variables-de-entorno-requeridas) |
-| `PROVIDER_UNAVAILABLE` | 503 | El proveedor externo (SerpAPI) no está disponible (solo en intent `flights` o `hotels`) |
-| `INTERNAL_ERROR` | 500 | Error inesperado del servidor |
+| Código Go | HTTP | Problem Type | Cuándo |
+|-----------|------|-------------|--------|
+| `domain.ErrMissingRequiredField` | 400 | Validation Error | `message` vacío o solo espacios en blanco |
+| `domain.ErrInvalidParameterRange` | 422 | Validation Error | `search_mode` tiene un valor inválido (no es `"discovery"` ni `"exact"`) |
+| `domain.ErrInvalidTripType` | 400 | Bad Request | `trip_type` no es válido (no es `round_trip` ni `one_way`) |
+| `domain.ErrTurnLimitExceeded` | 400 | Bad Request | Se alcanzó el límite máximo de turnos en la conversación (5 anónimos, 10 autenticados) |
+| `domain.ErrConversationNotFound` | 400 | Bad Request | El `conversation_id` enviado no existe o expiró |
+| `domain.ErrTokenInvalid` | 401 | Unauthorized | Token de reserva inválido o expirado |
+| `domain.ErrTokenRequired` | 400 | Bad Request | Token de reserva requerido pero ausente |
+| `domain.ErrBookingTokenExpired` | 404 | Not Found | El token de reserva ha expirado o no es válido |
+| `domain.ErrPropertyNotFound` | 404 | Not Found | La propiedad no fue encontrada |
+| `domain.ErrRateLimitExceeded` | 429 | Too Many Requests | Demasiadas peticiones al proveedor de IA. Ver [Rate Limiting](#rate-limiting) |
+| `domain.ErrAIParseFailure` | 502 | Bad Gateway | La IA devolvió una respuesta inválida o malformada que no se pudo interpretar |
+| `domain.ErrProviderBadRequest` | 502 | Bad Gateway | El proveedor externo (SerpAPI) rechazó la solicitud por parámetros inválidos |
+| `domain.ErrAIUnavailable` | 503 | Service Unavailable | El servicio de IA no está configurado o no responde. Ver [Configuración](#variables-de-entorno-requeridas) |
+| `domain.ErrProviderUnavailable` | 503 | Service Unavailable | El proveedor externo (SerpAPI) no está disponible |
+| `domain.ErrProviderError` | 503 | Service Unavailable | Error interno del proveedor externo |
+| `domain.ErrConversationStoreFailed` | 503 | Service Unavailable | El almacenamiento de conversaciones (DragonflyDB) no está disponible |
+| `domain.ErrDiscoveryDisabled` | 503 | Service Unavailable | El modo discovery no está habilitado |
+| (genérico) | 500 | Internal Server Error | Error inesperado del servidor no capturado por ningún mapper |
 
 > **Diferencia clave entre 502 y 503:** `502 AI_PARSE_FAILURE` significa que la IA respondió pero con un formato inválido (ej: JSON malformado). `503 AI_UNAVAILABLE` significa que la IA no respondió (timeout, conexión rechazada) o no está configurada en el entorno.
 
@@ -955,9 +1011,9 @@ Para que el endpoint `POST /v1/search/ai` funcione, el servicio de IA debe estar
 | Variable | Descripción | Ejemplo |
 |----------|-------------|---------|
 | `AI_PROVIDER` | Proveedor de IA: `deepseek`, `ollama`, `openai` | `deepseek` |
-| `AI_BASE_URL` | URL base del API de IA (omitir para usar default del proveedor) | `https://api.deepseek.com/v1` |
+| `AI_SEARCH_BASE_URL` | URL base del API de IA para search (sin `/v1`, termina en `/chat/completions`) | `https://api.deepseek.com/chat/completions` |
+| `AI_SEARCH_MODEL` | Nombre del modelo para search AI | `deepseek-v4-flash` |
 | `AI_API_KEY` | API key del proveedor (omitir para ollama local) | `sk-xxxxxxxx` |
-| `AI_MODEL` | Nombre del modelo a usar | `deepseek-chat` |
 | `AI_TIMEOUT` | Timeout para requests de IA (formato Go duration) | `30s` |
 | `RATELIMIT_PROVIDER_AI_MAX` | Máximo de requests al proveedor de IA por ventana | `10` |
 | `RATELIMIT_PROVIDER_AI_WINDOW_SEC` | Ventana de rate limiting en segundos | `3600` |

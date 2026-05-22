@@ -341,9 +341,10 @@ docker run -p 8080:8080 --env-file .env proactrip-backend
 | `RATELIMIT_PROVIDER_SERPAPI_WINDOW_SEC`| `3600`            | SerpAPI window (seconds, default: 1h)           |
 | `SEARCH_CACHE_TTL`                      | `5m`              | Cache TTL for flight/hotel search results       |
 | `AI_INTERPRETATION_CACHE_TTL`           | `10m`             | Cache TTL for AI natural language interpretation |
-| `AI_DISCOVERY_ENABLED`                  | `false`           | Enable AI-powered destination discovery         |
 | `DEEPSEEK_API_KEY`                      | *(optional)*      | DeepSeek API key for AI search                  |
-| `DEEPSEEK_BASE_URL`                     | `https://api.deepseek.com/v1` | DeepSeek API base URL              |
+| `AI_SEARCH_BASE_URL`                    | `https://api.deepseek.com/chat/completions` | DeepSeek API base URL for search (sin `/v1`) |
+| `AI_SEARCH_MODEL`                       | `deepseek-v4-flash` | AI model for search interpretation             |
+| `AI_OCR_MODEL`                          | `deepseek-v4-flash` | AI model for OCR (document processing)         |
 | `OLLAMA_BASE_URL`                       | `http://localhost:11434` | Ollama local server URL                    |
 | `DOCUMENT_UPLOAD_RATE_LIMIT`            | `10`              | Max document uploads per user per window        |
 | `DOCUMENT_UPLOAD_RATE_WINDOW`           | `1h`              | Document upload rate window                    |

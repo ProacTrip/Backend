@@ -85,9 +85,6 @@ type UseCase struct {
 	anonMaxTurns         int
 	authMaxTurns         int
 
-	// discoveryEnabled indica si el pipeline de discovery está habilitado.
-	discoveryEnabled bool
-
 	// interpCacheTTL es el TTL configurable para el caché de interpretación de IA.
 	// Default 10*time.Minute si no se configura vía UseCaseDeps.InterpretationCacheTTL.
 	interpCacheTTL time.Duration
@@ -116,9 +113,6 @@ type UseCaseDeps struct {
 	// DefaultsCfg are the hardcoded fallback defaults (DEFAULT_COUNTRY_CODE, DEFAULT_LANGUAGE, DEFAULT_CURRENCY)
 	// from environment config. Used as fallback when Dragonfly env:{ip} cache doesn't exist (first request, local testing).
 	DefaultsCfg searchshared.SearchDefaultConfig
-
-	// DiscoveryEnabled habilita el pipeline de discovery via IA.
-	DiscoveryEnabled bool // AI_DISCOVERY_ENABLED
 
 	// InterpretationCacheTTL es el TTL para el caché de interpretación de IA.
 	// Leído de la variable de entorno AI_INTERPRETATION_CACHE_TTL, default 10m.
@@ -152,7 +146,6 @@ func NewUseCase(deps UseCaseDeps) *UseCase {
 		defaultsCfg:          deps.DefaultsCfg,
 		anonMaxTurns:         deps.AnonMaxTurns,
 		authMaxTurns:         deps.AuthMaxTurns,
-		discoveryEnabled:     deps.DiscoveryEnabled,
 		interpCacheTTL:       interpCacheTTL,
 	}
 }
@@ -183,7 +176,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command, userID string) (*Re
 
 	// 2. Discovery dispatch — if enabled and discovery interpreter is wired,
 	//    route to AI-powered discovery pipeline.
-	if uc.discoveryEnabled && uc.discoveryInterpreter != nil {
+	if uc.discoveryInterpreter != nil {
 		if cmd.SearchModeHint == "discovery" || isDiscoveryQuery(cmd.Message) {
 			return uc.runDiscovery(ctx, cmd, userID)
 		}

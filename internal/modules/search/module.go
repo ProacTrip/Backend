@@ -246,7 +246,6 @@ func NewModule(cfg Config) (*Module, error) {
 			RDB:         cfg.RedisClient,
 			DefaultsCfg: cfg.SearchDefaults,
 			// Discovery feature flag — leído de variable de entorno
-			DiscoveryEnabled:       parseEnvBool("AI_DISCOVERY_ENABLED"),
 			InterpretationCacheTTL: cfg.InterpretationCacheTTL,
 		})
 		aiSearchHandler = ai_search.NewHandler(aiSearchUC, cfg.RedisClient, cfg.SearchDefaults, cfg.UserProfilePort)
@@ -424,18 +423,4 @@ func (c *dragonflyInterpCache) Set(ctx context.Context, key string, intent *doma
 	return c.rdb.Set(ctx, key, raw, ttl).Err()
 }
 
-// =============================================================================
-// Feature flags — lectura de variables de entorno
-// =============================================================================
 
-// parseEnvBool lee una variable de entorno como booleano.
-// "true" y "1" → true, cualquier otro valor → false.
-func parseEnvBool(key string) bool {
-	val := os.Getenv(key)
-	switch val {
-	case "true", "1":
-		return true
-	default:
-		return false
-	}
-}
