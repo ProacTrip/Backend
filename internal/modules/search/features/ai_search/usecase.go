@@ -73,21 +73,20 @@ type InterpretationCache interface {
 
 // UseCase orchestrates AI-powered unified search.
 type UseCase struct {
-	interpreter      domain.AIInterpreter
-	flightSearcher   FlightSearcher
-	hotelSearcher    HotelSearcher
-	convStore        ConversationStore
-	interpCache      InterpretationCache
-	iataResolver     func(ctx context.Context, query string) (string, error)
-	rdb              *redis.Client                   // Dragonfly for location hint resolution (env:{ip}, profile:{userID}:prefs)
-	defaultsCfg      searchshared.SearchDefaultConfig // Fallback defaults (DEFAULT_COUNTRY_CODE, etc.)
-	anonMaxTurns  int
-	authMaxTurns  int
+	interpreter          domain.AIInterpreter
+	discoveryInterpreter domain.DiscoveryInterpreter // AI-powered discovery (nil = disabled)
+	flightSearcher       FlightSearcher
+	hotelSearcher        HotelSearcher
+	convStore            ConversationStore
+	interpCache          InterpretationCache
+	iataResolver         func(ctx context.Context, query string) (string, error)
+	rdb                  *redis.Client                    // Dragonfly for location hint resolution (env:{ip}, profile:{userID}:prefs)
+	defaultsCfg          searchshared.SearchDefaultConfig // Fallback defaults (DEFAULT_COUNTRY_CODE, etc.)
+	anonMaxTurns         int
+	authMaxTurns         int
 
-	// Discovery pipeline fields
-	candidateSources []CandidateSource
+	// discoveryEnabled indica si el pipeline de discovery está habilitado.
 	discoveryEnabled bool
-	clarifyEnabled   bool
 
 	// interpCacheTTL es el TTL configurable para el caché de interpretación de IA.
 	// Default 10*time.Minute si no se configura vía UseCaseDeps.InterpretationCacheTTL.
@@ -96,13 +95,14 @@ type UseCase struct {
 
 // UseCaseDeps bundles dependencies for the AI search use case.
 type UseCaseDeps struct {
-	AIInterpreter  domain.AIInterpreter
-	FlightSearcher FlightSearcher
-	HotelSearcher  HotelSearcher
-	ConvStore      ConversationStore
-	InterpCache    InterpretationCache // nil = no caching (MVP mode)
-	AnonMaxTurns   int
-	AuthMaxTurns   int
+	AIInterpreter          domain.AIInterpreter
+	DiscoveryInterpreter   domain.DiscoveryInterpreter // nil = discovery disabled
+	FlightSearcher         FlightSearcher
+	HotelSearcher          HotelSearcher
+	ConvStore              ConversationStore
+	InterpCache            InterpretationCache // nil = no caching (MVP mode)
+	AnonMaxTurns           int
+	AuthMaxTurns           int
 
 	// IATAResolver resolves city names or partial airport identifiers to IATA codes.
 	// Used to normalize AI-extracted params (e.g., "Madrid" → "MAD").
@@ -117,13 +117,8 @@ type UseCaseDeps struct {
 	// from environment config. Used as fallback when Dragonfly env:{ip} cache doesn't exist (first request, local testing).
 	DefaultsCfg searchshared.SearchDefaultConfig
 
-	// Discovery feature flags — controlled via env vars (default false).
-	DiscoveryEnabled        bool // AI_DISCOVERY_ENABLED
-	DiscoveryClarifyEnabled bool // AI_DISCOVERY_CLARIFICATION_ENABLED
-
-	// CandidateSources para el pipeline de discovery.
-	// Si es nil, el pipeline no puede generar candidatos propios.
-	CandidateSources []CandidateSource
+	// DiscoveryEnabled habilita el pipeline de discovery via IA.
+	DiscoveryEnabled bool // AI_DISCOVERY_ENABLED
 
 	// InterpretationCacheTTL es el TTL para el caché de interpretación de IA.
 	// Leído de la variable de entorno AI_INTERPRETATION_CACHE_TTL, default 10m.
@@ -146,20 +141,19 @@ func NewUseCase(deps UseCaseDeps) *UseCase {
 	}
 
 	return &UseCase{
-		interpreter:       deps.AIInterpreter,
-		flightSearcher:    deps.FlightSearcher,
-		hotelSearcher:     deps.HotelSearcher,
-		convStore:         deps.ConvStore,
-		interpCache:       deps.InterpCache,
-		iataResolver:      deps.IATAResolver,
-		rdb:               deps.RDB,
-		defaultsCfg:       deps.DefaultsCfg,
-		anonMaxTurns:      deps.AnonMaxTurns,
-		authMaxTurns:      deps.AuthMaxTurns,
-		candidateSources:  deps.CandidateSources,
-		discoveryEnabled:  deps.DiscoveryEnabled,
-		clarifyEnabled:    deps.DiscoveryClarifyEnabled,
-		interpCacheTTL:    interpCacheTTL,
+		interpreter:          deps.AIInterpreter,
+		discoveryInterpreter: deps.DiscoveryInterpreter,
+		flightSearcher:       deps.FlightSearcher,
+		hotelSearcher:        deps.HotelSearcher,
+		convStore:            deps.ConvStore,
+		interpCache:          deps.InterpCache,
+		iataResolver:         deps.IATAResolver,
+		rdb:                  deps.RDB,
+		defaultsCfg:          deps.DefaultsCfg,
+		anonMaxTurns:         deps.AnonMaxTurns,
+		authMaxTurns:         deps.AuthMaxTurns,
+		discoveryEnabled:     deps.DiscoveryEnabled,
+		interpCacheTTL:       interpCacheTTL,
 	}
 }
 
@@ -187,11 +181,11 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command, userID string) (*Re
 		return nil, err
 	}
 
-	// 2. Discovery dispatch — if enabled, check intent
-	if uc.discoveryEnabled {
-		intent := ClassifyIntent(cmd.Message)
-		if intent.Mode == SearchModeDiscovery || cmd.SearchModeHint == "discovery" {
-			return uc.runDiscovery(ctx, cmd, userID, intent)
+	// 2. Discovery dispatch — if enabled and discovery interpreter is wired,
+	//    route to AI-powered discovery pipeline.
+	if uc.discoveryEnabled && uc.discoveryInterpreter != nil {
+		if cmd.SearchModeHint == "discovery" || isDiscoveryQuery(cmd.Message) {
+			return uc.runDiscovery(ctx, cmd, userID)
 		}
 	}
 
@@ -489,148 +483,84 @@ func (uc *UseCase) runExactSearch(ctx context.Context, cmd Command, userID strin
 }
 
 // =============================================================================
-// Discovery Pipeline — RunDiscoveryPipeline
+// isDiscoveryQuery — determina si una consulta debe ir al pipeline de discovery
 // =============================================================================
 
-// RunDiscoveryPipeline ejecuta el pipeline simplificado de discovery:
-// 1. Intent detection
-// 2. Constraint extraction
-// 3. Candidate generation via CandidateSources (user data only)
-// 4. Clarification check
-// 5. Resultados en rc.RankedCandidates
-func (uc *UseCase) RunDiscoveryPipeline(ctx context.Context, rc *RecommendationContext) error {
-	// 1. Intent detection (si no está ya seteado por el caller)
-	if rc.SearchMode == "" {
-		intent := ClassifyIntent(rc.Query)
-		rc.SearchMode = intent.Mode
-		rc.IntentConfidence = intent.Confidence
-		rc.RequiresClarification = intent.NeedsClarification
-	}
-	LogIntentDetected(ctx, rc)
-
-	// 2. Constraint extraction
-	rc.ParsedConstraints = ExtractConstraints(rc.Query)
-
-	// 3. Candidate generation via CandidateSources (user data only)
-	if len(rc.Candidates) == 0 && len(uc.candidateSources) > 0 {
-		var allCandidates []Candidate
-		for _, src := range uc.candidateSources {
-			cands, err := src.Generate(ctx, rc)
-			if err != nil {
-				// Log and skip failed sources — non-blocking
-				continue
-			}
-			allCandidates = append(allCandidates, cands...)
-		}
-		// Dedup by destination name
-		rc.Candidates = dedupCandidates(allCandidates)
-		LogCandidatesGenerated(ctx, rc, len(uc.candidateSources))
-	}
-
-	// Si no es Discovery mode, no ejecutar el resto del pipeline
-	if rc.SearchMode != SearchModeDiscovery {
-		return nil
-	}
-
-	// 4. Clarification check
-	if uc.clarifyEnabled {
-		if NeedsClarification(rc) {
-			rc.ClarificationQuestion = GenerateClarificationQuestion(rc)
-			rc.RequiresClarification = true
-			rc.ClarificationRounds++
-			LogDiscoveryClarification(ctx, rc, rc.ClarificationQuestion)
-			rc.Candidates = nil
-		}
-	}
-
-	// 5. Copy to RankedCandidates (no ranking needed — LLM formats from candidates)
-	rc.RankedCandidates = rc.Candidates
-
-	// 6. Cap at max 5 candidates
-	if len(rc.RankedCandidates) > 5 && !rc.RequiresClarification {
-		rc.RankedCandidates = rc.RankedCandidates[:5]
-	}
-
-	LogFormatComplete(ctx, rc)
-
-	return nil
+// isDiscoveryQuery returns true when the query should be routed to the
+// AI-powered discovery pipeline (natural language recommendation requests).
+// Used as a simple heuristic: checks for discovery-intent keywords.
+// The main dispatch mechanism is SearchModeHint="discovery" from the frontend.
+func isDiscoveryQuery(message string) bool {
+	// Only auto-detect when SearchModeHint is not explicitly set.
+	// Keep simple — the frontend should set search_mode="discovery" explicitly.
+	return false
 }
 
 // =============================================================================
-// runDiscovery — ejecuta el pipeline de discovery
+// runDiscovery — AI-powered discovery pipeline
 // =============================================================================
 
-// runDiscovery ejecuta el pipeline completo de discovery:
-// construye el RecommendationContext, corre el pipeline, y construye la respuesta.
-func (uc *UseCase) runDiscovery(ctx context.Context, cmd Command, userID string, intent IntentResult) (*Response, error) {
-	LogDiscoveryRequest(ctx, &RecommendationContext{
-		Query:            cmd.Message,
-		IntentConfidence: intent.Confidence,
-		UserID:           userID,
-	})
+// runDiscovery ejecuta el pipeline de discovery usando DeepSeek v4 Flash.
+// Construye el DiscoveryContext con datos de ubicación y preferencias del usuario,
+// llama al DiscoveryInterpreter, y devuelve la respuesta formateada.
+func (uc *UseCase) runDiscovery(ctx context.Context, cmd Command, userID string) (*Response, error) {
+	slog.InfoContext(ctx, "ai_search: discovery request",
+		slog.String("query", cmd.Message),
+		slog.String("user_id", userID),
+	)
 
-	rc := &RecommendationContext{
-		Query:              cmd.Message,
-		SearchMode:         intent.Mode,
-		IntentConfidence:   intent.Confidence,
-		UserID:             userID,
-		ClientIP:           cmd.ClientIP,
-		GL:                 cmd.GL,
-		HL:                 cmd.HL,
-		Currency:           cmd.Currency,
-		RequiresClarification: intent.NeedsClarification,
+	// Build DiscoveryContext from command env fields + resolved defaults + current date
+	discCtx := domain.DiscoveryContext{
+		Lat:         cmd.Lat,
+		Lng:         cmd.Lng,
+		CountryCode: cmd.CountryCode,
+		Timezone:    cmd.Timezone,
+		Currency:    cmd.Currency,
+		Language:    cmd.HL,
+		Date:        time.Now().Format("2006-01-02"),
 	}
 
-	// Resolve user country from environment cache for context-aware clarification.
-	// Used by GenerateClarificationQuestion to produce questions like
-	// "Estás en Argentina. ¿Buscás destinos dentro de Argentina o preferís viajar al exterior?"
-	if uc.rdb != nil && cmd.ClientIP != "" {
-		if ci, err := sharedEnv.GetCountryInfo(ctx, uc.rdb, cmd.ClientIP); err == nil && ci.Country != "" {
-			rc.DetectedCountry = ci.Country
-			// Get country_code from the cache entry directly for ISO code resolution.
-			// GetCountryInfo returns country name, currency, and language — we need the country code too.
-			// Fall back to reading the full cache entry.
-			if entry := uc.resolveEnvCacheEntry(ctx, cmd.ClientIP); entry != nil {
-				rc.DetectedCountryCode = entry.Location.CountryCode
+	// Override with resolved env cache data if not provided by frontend
+	if discCtx.CountryCode == "" && uc.rdb != nil && cmd.ClientIP != "" {
+		if entry := uc.resolveEnvCacheEntry(ctx, cmd.ClientIP); entry != nil {
+			discCtx.CountryCode = entry.Location.CountryCode
+			if discCtx.Timezone == "" {
+				discCtx.Timezone = entry.Location.Timezone
+			}
+			if discCtx.Lat == 0 && discCtx.Lng == 0 {
+				discCtx.Lat = entry.Location.Latitude
+				discCtx.Lng = entry.Location.Longitude
 			}
 		}
 	}
 
-	// Si el hint fuerza discovery, asegurar que el modo es discovery
-	if cmd.SearchModeHint == "discovery" {
-		rc.SearchMode = SearchModeDiscovery
+	// Fallback language
+	if discCtx.Language == "" {
+		discCtx.Language = "es"
 	}
 
-	// Ejecutar el pipeline
-	if err := uc.RunDiscoveryPipeline(ctx, rc); err != nil {
-		LogDiscoveryFallback(ctx, rc, "pipeline_error")
-		return nil, err
+	// Call the AI discovery interpreter with conversation history (empty for now).
+	// The AI returns natural language text with recommendations.
+	aiMessage, err := uc.discoveryInterpreter.Discover(ctx, cmd.Message, discCtx, nil)
+	if err != nil {
+		slog.ErrorContext(ctx, "ai_search: discovery AI call failed",
+			slog.String("error", err.Error()),
+		)
+		return nil, fmt.Errorf("discovery interpreter: %w", domain.ErrAIUnavailable)
 	}
 
-	// Log de métricas
-	if rc.RequiresClarification {
-		LogDiscoveryClarification(ctx, rc, rc.ClarificationQuestion)
-	} else {
-		LogDiscoveryResponse(ctx, rc, rc.RankedCandidates, "discovery")
-	}
+	slog.InfoContext(ctx, "ai_search: discovery response",
+		slog.String("query", cmd.Message),
+		slog.Int("response_len", len(aiMessage)),
+	)
 
-	// Construir respuesta
+	// Build response with the AI's natural language message
 	resp := &Response{
-		Mode:                 "discovery",
-		Intent:               string(SearchModeDiscovery),
-		Confidence:           rc.IntentConfidence,
-		Message:              buildFallbackMessage(rc),
-		Candidates:           rc.RankedCandidates,
-		TotalCandidates:      len(rc.RankedCandidates),
-		NeedsClarification:   rc.RequiresClarification,
-		ClarificationQuestion: rc.ClarificationQuestion,
-		FromCache:            false,
-	}
-
-	// CRITICAL 3: Cuando se necesita aclaración, no devolver candidatos.
-	if rc.RequiresClarification {
-		resp.Candidates = nil
-		resp.TotalCandidates = 0
+		Mode:       "discovery",
+		Intent:     string(SearchModeDiscovery),
+		Confidence: 1.0, // AI-handled, always confident
+		Message:    aiMessage,
+		FromCache:  false,
 	}
 
 	return resp, nil
@@ -655,23 +585,6 @@ func (uc *UseCase) resolveEnvCacheEntry(ctx context.Context, ip string) *sharedE
 		return nil
 	}
 	return &entry
-}
-
-// =============================================================================
-// dedupCandidates — elimina duplicados por nombre de destino
-// =============================================================================
-
-// dedupCandidates elimina candidatos duplicados manteniendo el primero encontrado.
-func dedupCandidates(candidates []Candidate) []Candidate {
-	seen := make(map[string]bool)
-	var unique []Candidate
-	for _, c := range candidates {
-		if !seen[c.Destination] {
-			seen[c.Destination] = true
-			unique = append(unique, c)
-		}
-	}
-	return unique
 }
 
 // =============================================================================

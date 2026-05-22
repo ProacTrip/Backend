@@ -407,8 +407,9 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 			Currency: cfg.DefaultCurrency,
 			Language: cfg.DefaultLanguage,
 		},
-		AIInterpreter:     aiInterpreter,
-		SavedSearchProvider: nil,
+		AIInterpreter:       aiInterpreter,
+		DiscoveryInterpreter: discoveryInterpreterFrom(aiInterpreter),
+		SavedSearchProvider:  nil,
 	})
 	if err != nil {
 		return nil, err
@@ -719,4 +720,11 @@ func (app *App) Shutdown(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// discoveryInterpreterFrom type-asserts an AIInterpreter to DiscoveryInterpreter.
+// Returns nil if the adapter doesn't support discovery mode (e.g., Ollama).
+func discoveryInterpreterFrom(ai searchDomain.AIInterpreter) searchDomain.DiscoveryInterpreter {
+	di, _ := ai.(searchDomain.DiscoveryInterpreter)
+	return di
 }

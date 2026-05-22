@@ -29,13 +29,34 @@ type AIInterpreter interface {
 
 // AIFormatter is the port for formatting discovery recommendations into
 // natural language Spanish. It takes discovery candidates and returns
-// a human-readable explanation. Used by the discovery pipeline to turn
-// ranked candidates into the response message.
+// a human-readable explanation.
 type AIFormatter interface {
 	// Format formatea una lista de candidatos rankeados en lenguaje natural.
 	// candidates es la lista completa de candidatos provistos por el pipeline.
 	// Retorna un texto en español con las recomendaciones formateadas.
 	Format(ctx context.Context, candidates []any) (string, error)
+}
+
+// =============================================================================
+// DiscoveryInterpreter — Port for AI-powered discovery queries
+// =============================================================================
+
+// DiscoveryContext provides the AI with user context for discovery queries.
+type DiscoveryContext struct {
+	Lat         float64 `json:"lat,omitzero"`
+	Lng         float64 `json:"lng,omitzero"`
+	CountryCode string  `json:"country_code,omitzero"`
+	Timezone    string  `json:"timezone,omitzero"`
+	Currency    string  `json:"currency,omitzero"`
+	Language    string  `json:"language,omitzero"`
+	Date        string  `json:"date"` // current date YYYY-MM-DD
+}
+
+// DiscoveryInterpreter interprets natural language discovery queries
+// using AI. It takes a user message, location context, and conversation
+// history, and returns a natural language response with travel recommendations.
+type DiscoveryInterpreter interface {
+	Discover(ctx context.Context, message string, ctxData DiscoveryContext, history []ConversationMessage) (string, error)
 }
 
 // =============================================================================

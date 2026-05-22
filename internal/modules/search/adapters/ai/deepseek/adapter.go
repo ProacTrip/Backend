@@ -33,10 +33,11 @@ func mustLoadLocation(name string) *time.Location {
 }
 
 // =============================================================================
-// Compile-time interface check
+// Compile-time interface checks
 // =============================================================================
 
 var _ domain.AIInterpreter = (*Adapter)(nil)
+var _ domain.DiscoveryInterpreter = (*Adapter)(nil)
 
 // =============================================================================
 // Adapter
@@ -68,19 +69,69 @@ type DiscoveryPrompt struct {
 }
 
 // =============================================================================
-// Discover — streaming discovery AI interpretation
+// Discover (streaming) — sends discovery prompt and returns SSE channel
 // =============================================================================
 
-// Discover sends a discovery prompt to DeepSeek v4 Flash and returns a channel
+// DiscoverStream sends a discovery prompt to DeepSeek v4 Flash and returns a channel
 // of SSE events for the caller to consume. The system prompt instructs the AI
 // to act as a travel discovery assistant that recommends destinations.
-func (a *Adapter) Discover(ctx context.Context, prompt DiscoveryPrompt) (<-chan SSEEvent, error) {
+func (a *Adapter) DiscoverStream(ctx context.Context, prompt DiscoveryPrompt) (<-chan SSEEvent, error) {
 	sysPrompt := buildDiscoverySystemPrompt(prompt)
 	messages := []chatMessage{
 		{Role: "system", Content: sysPrompt},
 		{Role: "user", Content: prompt.Query},
 	}
 	return a.client.ChatCompletionStream(ctx, messages, DefaultDiscoveryParams())
+}
+
+// =============================================================================
+// Discover — domain.DiscoveryInterpreter implementation
+// =============================================================================
+
+// Discover interprets a natural language discovery query using DeepSeek v4 Flash.
+// It builds a system prompt with location context (lat/lng/country/timezone),
+// conversation history, and user preferences (currency/language/date), then
+// calls the AI for a natural language response.
+//
+// Returns the complete AI response as a string. For streaming, use DiscoverStream
+// and stream the SSE channel at the handler layer.
+func (a *Adapter) Discover(ctx context.Context, message string, ctxData domain.DiscoveryContext, history []domain.ConversationMessage) (string, error) {
+	prompt := DiscoveryPrompt{
+		Query:       message,
+		Lat:         ctxData.Lat,
+		Lng:         ctxData.Lng,
+		CountryCode: ctxData.CountryCode,
+		Timezone:    ctxData.Timezone,
+		Language:    ctxData.Language,
+		Currency:    ctxData.Currency,
+	}
+
+	sysPrompt := buildDiscoverySystemPrompt(prompt)
+
+	// Build messages: system prompt + conversation history + current query
+	messages := []chatMessage{
+		{Role: "system", Content: sysPrompt},
+	}
+
+	for _, h := range history {
+		role := h.Role
+		if role != "user" && role != "assistant" && role != "system" {
+			role = "user"
+		}
+		messages = append(messages, chatMessage{
+			Role:    role,
+			Content: h.Content,
+		})
+	}
+
+	messages = append(messages, chatMessage{
+		Role:    "user",
+		Content: message,
+	})
+
+	// Use non-streaming ChatCompletion for simplicity.
+	// Streaming SSE chunks are handled at the handler layer.
+	return a.client.ChatCompletion(ctx, messages, DefaultDiscoveryParams())
 }
 
 // =============================================================================

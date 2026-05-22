@@ -22,14 +22,17 @@ type Command struct {
 	// Si se especifica un valor inválido, Validate() retorna error.
 	SearchModeHint string `json:"search_mode,omitzero"`
 
+	// Location/env context from frontend (forwarded from /v1/environment).
+	Lat         float64 `json:"lat,omitzero"`
+	Lng         float64 `json:"lng,omitzero"`
+	Timezone    string  `json:"timezone,omitzero"`
+	CountryCode string  `json:"country_code,omitzero"`
+
 	// Resolved search defaults — populated by the handler after calling
 	// shared.ResolveSearchDefaults(). Not part of the JSON API.
 	GL       string `json:"-"`
 	HL       string `json:"-"`
 	Currency string `json:"-"`
-
-	// ClientIP is the user's IP address, set by the handler for IP-based
-	// location detection (anonymous users). Not part of the JSON API.
 	ClientIP string `json:"-"`
 }
 

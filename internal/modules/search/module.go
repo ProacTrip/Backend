@@ -98,7 +98,8 @@ type Config struct {
 	HotelDetailsTTL  time.Duration
 
 	// AI Search
-	AIInterpreter domain.AIInterpreter // AI natural language interpreter (nil = AI disabled)
+	AIInterpreter       domain.AIInterpreter       // AI natural language interpreter (nil = AI disabled)
+	DiscoveryInterpreter domain.DiscoveryInterpreter // AI discovery interpreter (nil = discovery disabled)
 
 	// SavedSearchProvider — provides access to saved searches from the user module.
 	SavedSearchProvider domain.SavedSearchProvider
@@ -223,13 +224,14 @@ func NewModule(cfg Config) (*Module, error) {
 		}
 
 		aiSearchUC = ai_search.NewUseCase(ai_search.UseCaseDeps{
-			AIInterpreter:  cfg.AIInterpreter,
-			FlightSearcher: searchUC,
-			HotelSearcher:  hotelsUC,
-			ConvStore:      convStore,
-			InterpCache:    &dragonflyInterpCache{rdb: cfg.RedisClient},
-			AnonMaxTurns:   5,
-			AuthMaxTurns:   10,
+			AIInterpreter:        cfg.AIInterpreter,
+			DiscoveryInterpreter: cfg.DiscoveryInterpreter,
+			FlightSearcher:       searchUC,
+			HotelSearcher:        hotelsUC,
+			ConvStore:            convStore,
+			InterpCache:          &dragonflyInterpCache{rdb: cfg.RedisClient},
+			AnonMaxTurns:         5,
+			AuthMaxTurns:         10,
 			IATAResolver: func(ctx context.Context, query string) (string, error) {
 				entry, err := airports.ResolveIATA(ctx, nil, query)
 				if err != nil {
@@ -239,10 +241,9 @@ func NewModule(cfg Config) (*Module, error) {
 			},
 			RDB:         cfg.RedisClient,
 			DefaultsCfg: cfg.SearchDefaults,
-			// Discovery feature flags — leídos de variables de entorno
-			DiscoveryEnabled:        parseEnvBool("AI_DISCOVERY_ENABLED"),
-			DiscoveryClarifyEnabled: parseEnvBool("AI_DISCOVERY_CLARIFICATION_ENABLED"),
-			InterpretationCacheTTL:  cfg.InterpretationCacheTTL,
+			// Discovery feature flag — leído de variable de entorno
+			DiscoveryEnabled:       parseEnvBool("AI_DISCOVERY_ENABLED"),
+			InterpretationCacheTTL: cfg.InterpretationCacheTTL,
 		})
 		aiSearchHandler = ai_search.NewHandler(aiSearchUC, cfg.RedisClient, cfg.SearchDefaults)
 		aiSearchHandler.RateLimiter = cfg.RateLimiter

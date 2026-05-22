@@ -87,6 +87,7 @@ func (h *Handler) Handle(c *echo.Context) error {
 		cmd.ClientIP = c.RealIP()
 
 		userID := shared.UserIDFromContext(c)
+		isDiscovery := cmd.SearchModeHint == "discovery"
 
 		// Send "thinking" event so the client knows processing has started
 		sseEvent(c, "status", map[string]string{"status": "thinking"})
@@ -106,6 +107,17 @@ func (h *Handler) Handle(c *echo.Context) error {
 
 		resp.FromCache = false
 
+		// Discovery mode: stream the AI response as word-chunked SSE events
+		if isDiscovery && resp.Mode == "discovery" && resp.Message != "" {
+			if err := streamDiscoveryResponse(c.Response(), resp.Message); err != nil {
+				slog.ErrorContext(c.Request().Context(), "ai_search: SSE stream write failed",
+					slog.String("error", err.Error()),
+				)
+			}
+			return nil
+		}
+
+		// Exact search: send the full JSON response as a single "result" event
 		// Rate limit provider headers
 		if h.RateLimiter != nil {
 			if rlResult, err := h.RateLimiter.ProviderStatus(c.Request().Context(), "serpapi"); err == nil {

@@ -18,37 +18,25 @@ func TestFeatureFlags_DefaultsAreFalse(t *testing.T) {
 	if deps.DiscoveryEnabled != false {
 		t.Errorf("DiscoveryEnabled default = %v, want false", deps.DiscoveryEnabled)
 	}
-	if deps.DiscoveryClarifyEnabled != false {
-		t.Errorf("DiscoveryClarifyEnabled default = %v, want false", deps.DiscoveryClarifyEnabled)
-	}
 }
 
 func TestFeatureFlags_CanBeSetTrue(t *testing.T) {
 	deps := ai_search.UseCaseDeps{
-		DiscoveryEnabled:        true,
-		DiscoveryClarifyEnabled: true,
+		DiscoveryEnabled: true,
 	}
 
 	if !deps.DiscoveryEnabled {
 		t.Error("DiscoveryEnabled should be true")
-	}
-	if !deps.DiscoveryClarifyEnabled {
-		t.Error("DiscoveryClarifyEnabled should be true")
 	}
 }
 
 func TestFeatureFlags_Mixed(t *testing.T) {
-	// Discovery activo pero clarificación no → el pipeline puede correr sin clarificación
 	deps := ai_search.UseCaseDeps{
-		DiscoveryEnabled:        true,
-		DiscoveryClarifyEnabled: false,
+		DiscoveryEnabled: false,
 	}
 
-	if !deps.DiscoveryEnabled {
-		t.Error("DiscoveryEnabled should be true")
-	}
-	if deps.DiscoveryClarifyEnabled {
-		t.Error("DiscoveryClarifyEnabled should be false")
+	if deps.DiscoveryEnabled {
+		t.Error("DiscoveryEnabled should be false")
 	}
 }
 
