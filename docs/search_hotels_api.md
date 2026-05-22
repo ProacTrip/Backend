@@ -7,33 +7,19 @@
 
 ## Índice
 
-- [Arquitectura](#arquitectura)
-- [Seguridad de Cookies](#seguridad-de-cookies)
-- [Base URLs](#base-urls)
-- [Errores Estándar](#errores-estándar)
-- [Estrategia de Refresco de Tokens](#estrategia-de-refresco-de-tokens)
-- [Search Hotels](#search-hotels)
-  - [Flujo de Búsqueda](#flujo-de-búsqueda)
-  - [Request](#request)
-  - [Responses](#responses)
-    - [Hotels (matching)](#hotels-matching)
-    - [Vacation Rentals (matching)](#vacation-rentals-matching)
-    - [Empty / non_matching_only](#empty--non_matching_only)
-  - [Response Fields Explained](#response-fields-explained)
-  - [Paginación](#paginación)
-  - [Posibles Errores](#posibles-errores-search-hotels)
-- [Hotel Details](#hotel-details)
-  - [Request](#request-hotel-details)
-  - [Responses](#responses-hotel-details)
-    - [Hotel Detail](#hotel-detail)
-    - [Vacation Rental Detail](#vacation-rental-detail)
-  - [Response Fields Explained](#response-fields-explained-hotel-details)
-  - [Diferencias Clave Hotel vs VR](#diferencias-clave-entre-hotel-y-vacation-rental)
-  - [Posibles Errores](#posibles-errores-hotel-details)
-- [Configuración CORS](#configuración-cors)
-- [Rate Limiting](#rate-limiting)
-- [Cache](#cache)
-- [Notas de Seguridad](#notas-de-seguridad)
+| Sección | Estado |
+|---------|--------|
+| [Arquitectura](#arquitectura) | ✅ |
+| [Seguridad de Cookies](#seguridad-de-cookies) | ✅ |
+| [Base URLs](#base-urls) | ✅ |
+| [Errores Estándar](#errores-estándar) | ✅ |
+| [Estrategia de Refresco de Tokens](#estrategia-de-refresco-de-tokens) | ✅ |
+| [Search Hotels](#search-hotels) | ✅ Implementado |
+| [Hotel Details](#hotel-details) | ✅ Implementado |
+| [Configuración CORS](#configuración-cors) | ✅ |
+| [Rate Limiting](#rate-limiting) | ✅ |
+| [Cache](#cache) | ✅ |
+| [Notas de Seguridad](#notas-de-seguridad) | ✅ |
 
 ---
 
@@ -205,7 +191,7 @@ Busca hoteles y alquileres vacacionales estructuradamente usando SerpAPI (Google
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-### Request
+### Solicitud
 
 ```
 POST /v1/search/hotels
@@ -268,7 +254,7 @@ POST /v1/search/hotels
 | `children_ages` | integer[] | `[]` | Edades de los niños (1-17). Debe coincidir con `children` |
 | `gl` | string\|null | `null` | Código ISO 3166-1 alpha-2. Ej: `"ES"`, `"PE"`. Personaliza resultados al país. Debe tener relación con `query` |
 | `hl` | string\|null | `null` | Código de idioma ISO 639-1. Ej: `"es"`, `"en"`, `"fr"` |
-| `currency` | string | Resuelto por el backend | Código ISO 4217. Ej: `"EUR"`, `"GBP"`. Si no se envía, el backend resuelve por perfil, IP o default de configuración |
+| `currency` | string\|null | Resuelto por el backend | Código ISO 4217. Ej: `"EUR"`, `"GBP"`. Si no se envía, el backend resuelve por perfil de usuario autenticado o default de configuración |
 | `min_price` | number\|null | `null` | Precio mínimo por noche |
 | `max_price` | number\|null | `null` | Precio máximo por noche |
 | `sort_by` | integer\|null | `null` | Orden de resultados. Ver tabla de ordenamiento |
@@ -511,7 +497,7 @@ curl -X POST {base_url}/hotels \
   }'
 ```
 
-### Responses
+### Respuestas
 
 #### Hotels (matching)
 
@@ -636,10 +622,11 @@ curl -X POST {base_url}/hotels \
 
 **Response Headers:**
 
-```
-X-Trace-Id: 019ef5439-cb43-716d-90b5-51dcbe980908
-traceparent: 00-019ef5439cb43716d90b551dcbe980908-a1b2c3d4e5f67890-01
-```
+| Header | Valor | Descripción |
+|--------|-------|-------------|
+| `Cache-Control` | `public, max-age=300, s-maxage=300, stale-while-revalidate=300` | Resultados cacheados por 5 minutos en CDN y browser |
+| `X-Trace-Id` | UUID v7 (ej: `019ef5439-cb43-716d-90b5-51dcbe980908`) | Trazabilidad de la request |
+| `traceparent` | W3C Trace Context (ej: `00-019ef5439cb43716d90b551dcbe980908-a1b2c3d4e5f67890-01`) | Propagación de traza distribuida |
 
 > Si el usuario está autenticado y la sesión fue refrescada, se incluyen nuevos `Set-Cookie` headers con los tokens rotados.
 
@@ -804,7 +791,9 @@ Cuando los filtros son demasiado restrictivos, el proveedor devuelve resultados 
 
 > **Nota para el frontend:** Cuando `results_state` es `"non_matching_only"`, mostrar al usuario: *"No encontramos resultados exactos con tus filtros. Mostrando los alojamientos más cercanos."*
 
-### Response Fields Explained
+### Campos de la Respuesta
+
+> Los campos con `omitzero` se omiten de la respuesta cuando tienen su valor cero (`null`, `""`, `0`, `false`).
 
 #### Nivel Raíz
 
@@ -819,7 +808,7 @@ Cuando los filtros son demasiado restrictivos, el proveedor devuelve resultados 
 | `from_cache` | boolean | `true` si la respuesta vino de caché |
 | `cached_at` | string\|null | Timestamp ISO 8601 del momento en que se cacheó. `null` si no es de caché |
 
-#### Property Object (Hotel)
+#### Objeto Property (Hotel)
 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
@@ -858,7 +847,7 @@ Cuando los filtros son demasiado restrictivos, el proveedor devuelve resultados 
 | `reviews_breakdown[].negative` | integer | Reseñas con sentimiento negativo en esta categoría |
 | `reviews_breakdown[].neutral` | integer | Reseñas con sentimiento neutral en esta categoría |
 
-#### Property Object (Vacation Rental)
+#### Objeto Property (Vacation Rental)
 
 Todos los campos de Hotel más (incluye `ratings` y `reviews_breakdown`, heredados de Hotel):
 
@@ -885,11 +874,19 @@ Y los siguientes campos están **ausentes** en VR:
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
 | `name` | string | Nombre del lugar cercano |
+| `category` | string\|null | Categoría del lugar. Ej: `"Airport"`, `"Seafood restaurant"`, `"Point of interest"` |
+| `description` | string\|null | Descripción del lugar |
+| `rating` | number\|null | Puntuación del lugar (0-5) |
+| `total_reviews` | integer\|null | Total de reseñas del lugar |
+| `thumbnail_url` | string\|null | URL de la miniatura |
+| `maps_url` | string\|null | URL de Google Maps |
+| `gps.lat` | number | Latitud |
+| `gps.lng` | number | Longitud |
 | `transport` | array | Medios de transporte disponibles |
 | `transport[].type` | string | Tipo: `"Walking"`, `"Taxi"`, `"Public transport"` |
 | `transport[].duration` | string | Duración estimada. Ej: `"1 min"`, `"20 min"` |
 
-#### Brands Object (solo Hotels)
+#### Objeto Brands (solo Hotels)
 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
@@ -912,14 +909,15 @@ Cuando una búsqueda devuelve más resultados de los que caben en una página, l
 
 ### Posibles Errores (Search Hotels)
 
-| Código | HTTP | Cuándo |
-|--------|------|--------|
-| `VALIDATION_ERROR` | 400 | Body inválido, falta `query`, fechas mal formateadas, `children_ages` no coincide con `children` |
-| `INVALID_PARAM_RANGE` | 422 | Parámetros fuera de rango (`bedrooms`, `bathrooms` negativos, `adults` < 1) |
-| `PROVIDER_UNAVAILABLE` | 503 | El proveedor externo (SerpAPI) no está disponible |
-| `TOKEN_INVALID` | 401 | Cookie de sesión inválida o expirada (solo si el usuario estaba autenticado) |
-| `RATE_LIMIT_EXCEEDED` | 429 | Demasiadas peticiones (RFC 9457 Problem JSON). Ver [Rate Limiting](#rate-limiting) |
-| `INTERNAL_ERROR` | 500 | Error inesperado del servidor |
+| Código | HTTP | Problem Type | Cuándo |
+|--------|------|-------------|--------|
+| `ErrMissingRequiredField` | 400 | `validation-error` | Falta `query`, `check_in_date` o `check_out_date` |
+| `ErrInvalidParameterRange` | 422 | `validation-error` | Fechas con formato inválido, `children_ages` no coincide con `children`, edades fuera de rango 1-17, parámetros numéricos negativos |
+| `ErrProviderUnavailable` | 503 | `service-unavailable` | El proveedor externo (SerpAPI) no está disponible |
+| `ErrProviderBadRequest` | 502 | `bad-gateway` | El proveedor rechazó la solicitud por parámetros inválidos |
+| `ErrProviderError` | 503 | `service-unavailable` | Error inesperado del proveedor externo |
+| `ErrTokenInvalid` | 401 | `unauthorized` | Cookie de sesión inválida o expirada (solo si el usuario estaba autenticado) |
+| `ErrRateLimitExceeded` | 429 | `https://api.proactrip.com/errors/rate-limit-exceeded` | Demasiadas peticiones. Ver [Rate Limiting](#rate-limiting) |
 
 ---
 
@@ -927,7 +925,7 @@ Cuando una búsqueda devuelve más resultados de los que caben en una página, l
 
 Devuelve los detalles completos de una propiedad específica — hotel o vacation rental — usando el `id` obtenido de `POST /v1/search/hotels`.
 
-### Request (Hotel Details)
+### Solicitud
 
 ```
 POST /v1/search/hotel-details
@@ -946,6 +944,7 @@ POST /v1/search/hotel-details
 ```json
 {
   "id": "ChcI9NCGtf-jlI0BGgsvZy8xdGpoMW50cxAB",
+  "query": "Bali",
   "check_in_date": "2026-03-16",
   "check_out_date": "2026-03-20",
   "adults": 2,
@@ -962,6 +961,7 @@ POST /v1/search/hotel-details
 
 | Campo | Tipo | Requerido | Default | Descripción |
 |-------|------|-----------|---------|-------------|
+| `query` | string\|null | Sí | — | Destino de búsqueda. Ej: `"Bali"`, `"Paris France"`. Requerido por el proveedor SerpAPI |
 | `id` | string | Sí | — | Identificador opaco de la propiedad. Es el campo `id` (`property_token`) del resultado de búsqueda |
 | `check_in_date` | string | Sí | — | Fecha de entrada. Formato `YYYY-MM-DD` |
 | `check_out_date` | string | Sí | — | Fecha de salida. Formato `YYYY-MM-DD` |
@@ -970,7 +970,7 @@ POST /v1/search/hotel-details
 | `children_ages` | integer[] | No | `[]` | Edades de los niños (1-17) |
 | `gl` | string\|null | No | `null` | Código ISO 3166-1 alpha-2. Ej: `"ES"`, `"PE"` |
 | `hl` | string\|null | No | `null` | Código de idioma ISO 639-1. Ej: `"es"`, `"en"` |
-| `currency` | string | No | `"USD"` | Código ISO 4217 |
+| `currency` | string\|null | No | Resuelto por el backend (EUR por defecto) | Código ISO 4217 |
 | `vacation_rentals` | boolean | No | `false` | `true` si el `id` pertenece a una vacation rental |
 
 > **Importante sobre `id`:** Es el `property_token` de SerpAPI — el campo `id` que el backend normaliza en la respuesta de búsqueda. Es opaco e inmutable. El frontend debe conservarlo tal cual y reenviarlo.
@@ -985,6 +985,7 @@ curl -X POST {base_url}/hotel-details \
   -b "__Secure-access_token=v4.local.eyJ...; __Secure-refresh_token=v4.local.eyJ..." \
   -d '{
     "id": "ChcI9NCGtf-jlI0BGgsvZy8xdGpoMW50cxAB",
+    "query": "Bali",
     "check_in_date": "2026-03-16",
     "check_out_date": "2026-03-20",
     "adults": 2,
@@ -1002,6 +1003,7 @@ curl -X POST {base_url}/hotel-details \
   -H "Content-Type: application/json" \
   -d '{
     "id": "ChoQnPq_qJbm2PL6ARoNL2cvMTF0eHFsenpzNhAC",
+    "query": "Bali",
     "check_in_date": "2026-03-16",
     "check_out_date": "2026-03-20",
     "adults": 2,
@@ -1012,9 +1014,15 @@ curl -X POST {base_url}/hotel-details \
   }'
 ```
 
-### Responses (Hotel Details)
+### Respuestas
 
-#### Hotel Detail
+**Response Headers:**
+
+| Header | Valor | Descripción |
+|--------|-------|-------------|
+| `Cache-Control` | `public, max-age=300, s-maxage=300, stale-while-revalidate=300` | Resultados cacheados por 5 minutos en CDN y browser |
+
+#### Detalle de Hotel
 
 ```json
 {
@@ -1250,7 +1258,7 @@ curl -X POST {base_url}/hotel-details \
 }
 ```
 
-#### Vacation Rental Detail
+#### Detalle de Vacation Rental
 
 ```json
 {
@@ -1268,7 +1276,6 @@ curl -X POST {base_url}/hotel-details \
   "hotel_class": null,
   "check_in": "14:00",
   "check_out": "12:00",
-  "price_range": null,
   "price": {
     "currency": "EUR",
     "per_night": {
@@ -1383,9 +1390,10 @@ curl -X POST {base_url}/hotel-details \
 }
 ```
 
-### Response Fields Explained (Hotel Details)
+### Campos de la Respuesta
 
 > **Leyenda:** **H** = exclusivo de Hotels, **VR** = exclusivo de Vacation Rentals, sin marca = común a ambos.
+> Los campos con `omitzero` se omiten de la respuesta cuando tienen su valor cero (`null`, `""`, `0`, `false`).
 
 #### Campos Base
 
@@ -1403,6 +1411,8 @@ curl -X POST {base_url}/hotel-details \
 | `hotel_class` **H** | integer\|null | Número de estrellas (2–5). `null` en VR |
 | `check_in` | string\|null | Hora de entrada. Ej: `"14:00"` |
 | `check_out` | string\|null | Hora de salida. Ej: `"12:00"` |
+| `free_cancellation` | boolean\|null | Cancelación gratuita disponible. `null` si no aplica |
+| `special_offer` | boolean\|null | Oferta especial activa. `null` si no aplica |
 
 #### Precios
 
@@ -1525,15 +1535,16 @@ curl -X POST {base_url}/hotel-details \
 
 ### Posibles Errores (Hotel Details)
 
-| Código | HTTP | Cuándo |
-|--------|------|--------|
-| `VALIDATION_ERROR` | 400 | `id` vacío o ausente, fechas inválidas, falta `check_in_date` o `check_out_date` |
-| `PROPERTY_NOT_FOUND` | 404 | La propiedad con ese `id` no fue encontrada por el proveedor |
-| `INVALID_PARAM_RANGE` | 422 | Parámetros fuera de rango (`adults` < 1, `children_ages` no coincide con `children`) |
-| `PROVIDER_UNAVAILABLE` | 503 | El proveedor externo no está disponible |
-| `TOKEN_INVALID` | 401 | Cookie de sesión inválida o expirada (solo si el usuario estaba autenticado) |
-| `RATE_LIMIT_EXCEEDED` | 429 | Demasiadas peticiones (RFC 9457 Problem JSON). Ver [Rate Limiting](#rate-limiting) |
-| `INTERNAL_ERROR` | 500 | Error inesperado del servidor |
+| Código | HTTP | Problem Type | Cuándo |
+|--------|------|-------------|--------|
+| `ErrTokenRequired` | 400 | `bad-request` | `id` (property_token) vacío o ausente |
+| `ErrMissingRequiredField` | 400 | `validation-error` | Falta `check_in_date` o `check_out_date` |
+| `ErrPropertyNotFound` | 404 | `not-found` | La propiedad con ese `id` no fue encontrada por el proveedor |
+| `ErrInvalidParameterRange` | 422 | `validation-error` | `children_ages` no coincide con `children`, edades fuera de rango |
+| `ErrProviderUnavailable` | 503 | `service-unavailable` | El proveedor externo no está disponible |
+| `ErrProviderBadRequest` | 502 | `bad-gateway` | El proveedor rechazó la solicitud |
+| `ErrTokenInvalid` | 401 | `unauthorized` | Cookie de sesión inválida o expirada |
+| `ErrRateLimitExceeded` | 429 | `https://api.proactrip.com/errors/rate-limit-exceeded` | Demasiadas peticiones. Ver [Rate Limiting](#rate-limiting) |
 
 ---
 
@@ -1541,9 +1552,9 @@ curl -X POST {base_url}/hotel-details \
 
 | Setting | Valor |
 |---------|-------|
-| Allowed Origins | `https://proactrip.com`, `http://localhost:3000` |
+| Allowed Origins | Resuelto dinámicamente desde `FRONTEND_URL_DEV` o `FRONTEND_URL_PROD` según `SERVER_ENV` |
 | Allowed Methods | `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS` |
-| Allowed Headers | `Content-Type`, `Accept`, `X-Request-Id`, `X-Trace-Id`, `Idempotency-Key` |
+| Allowed Headers | `Content-Type`, `Accept`, `Authorization`, `X-Request-Id`, `X-Trace-Id`, `Idempotency-Key` |
 | Allow Credentials | `true` |
 | Max Age | `86400` |
 
@@ -1555,13 +1566,14 @@ curl -X POST {base_url}/hotel-details \
 
 Rate limiting multi-tier con DragonflyDB y scripts Lua atómicos. Distribuido y seguro en entornos multi-instancia. Todos los límites son configurables vía variables de entorno.
 
-### Tiers
+El grupo `/v1/search` aplica rate limiting por tiers según el tipo de usuario. Los middlewares se ejecutan en orden: anónimo primero (5 req/min), luego autenticado (10 req/min) que sobreescribe el límite cuando se detecta una sesión activa.
 
-| Tier | Scope | Límite | Aplica a |
-|------|-------|--------|----------|
-| **Tier 1 — Global** | IP | 100 req/min | Todos los endpoints (DDoS shield) |
-| **Tier 2 — Authenticated** | UUID del usuario | 10 req/min | Usuarios autenticados que realizan búsquedas |
-| **Tier 3 — Anonymous** | Cookie `__Secure-anon_token` | 5 req/min | Usuarios no autenticados (la mayoría de las búsquedas) |
+| Tier | Límite | Variable de Entorno | Aplica a |
+|------|--------|---------------------|----------|
+| **Anónimo** | 5 req/min | `RATELIMIT_ANON_PER_MINUTE` | Usuarios sin sesión activa (sin cookie `__Secure-access_token`) |
+| **Autenticado** | 10 req/min | `RATELIMIT_AUTH_PER_MINUTE` | Usuarios con sesión activa (cookie `__Secure-access_token` válida) |
+
+> Ambos límites son configurables en `.env`. Ver `.env.example` para los valores por defecto.
 
 ### Provider-Aware Rate Limiting
 
@@ -1594,7 +1606,7 @@ Formato **RFC 9457 Problem Details**:
 
 ```json
 {
-  "type": "rate_limit_exceeded",
+  "type": "https://api.proactrip.com/errors/rate-limit-exceeded",
   "title": "Too Many Requests",
   "status": 429,
   "detail": "Demasiadas peticiones. Esperá 60 segundos antes de reintentar.",
