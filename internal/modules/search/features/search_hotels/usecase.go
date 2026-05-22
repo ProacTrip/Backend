@@ -186,10 +186,10 @@ func generateCacheKey(req domain.HotelSearchRequest) string {
 	raw, err := json.Marshal(req)
 	if err != nil {
 		// Fallback: limited key
-		return fmt.Sprintf("hotels:v2:fallback:%s:%s:%s:%s",
+		return fmt.Sprintf("hotels:fallback:%s:%s:%s:%s",
 			req.Query, req.CheckInDate, req.CheckOutDate, searchshared.PtrOrEmpty(req.Currency))
 	}
-	return "{search}:hotels:v2:" + domain.HashKey(raw)
+	return "{search}:hotels:" + domain.HashKey(raw)
 }
 
 // =============================================================================
