@@ -15,11 +15,9 @@ import (
 )
 
 const (
-	defaultBaseURL     = "https://api.deepseek.com/v1"
-	defaultModel       = "deepseek-chat"
-	defaultTimeout     = 30 * time.Second
-	defaultMaxTokens   = 4096
-	defaultTemperature = 0
+	defaultBaseURL   = "https://api.deepseek.com"
+	defaultTimeout   = 30 * time.Second
+	defaultMaxTokens = 4096
 )
 
 // chatMessage represents a message in the OpenAI-compatible chat API.
@@ -28,16 +26,19 @@ type chatMessage struct {
 	Content string `json:"content"`
 }
 
-// chatCompletionRequest is the request body for /v1/chat/completions.
+// chatCompletionRequest is the request body for /chat/completions (v4 Flash endpoint).
 type chatCompletionRequest struct {
-	Model          string         `json:"model"`
-	Messages       []chatMessage  `json:"messages"`
-	Temperature    float64        `json:"temperature"`
-	MaxTokens      int            `json:"max_tokens"`
-	ResponseFormat responseFormat `json:"response_format"`
-	Thinking       thinkingMode   `json:"thinking"`
-	ToolChoice     string         `json:"tool_choice"`
-	Stream         bool           `json:"stream"`
+	Model           string          `json:"model"`
+	Messages        []chatMessage   `json:"messages"`
+	Temperature     float64         `json:"temperature"`
+	MaxTokens       int             `json:"max_tokens"`
+	TopP            float64         `json:"top_p,omitzero"`
+	ResponseFormat  responseFormat  `json:"response_format"`
+	Thinking        thinkingConfig  `json:"thinking"`
+	ReasoningEffort string          `json:"reasoning_effort,omitzero"`
+	StreamOptions   *streamOptions  `json:"stream_options,omitzero"`
+	ToolChoice      string          `json:"tool_choice"`
+	Stream          bool            `json:"stream"`
 }
 
 // responseFormat requests JSON output from the model (when supported).
@@ -45,9 +46,52 @@ type responseFormat struct {
 	Type string `json:"type"` // "json_object" or "text"
 }
 
-// thinkingMode controls DeepSeek's reasoning/thinking capability.
-type thinkingMode struct {
+// thinkingConfig controls DeepSeek's reasoning/thinking capability.
+type thinkingConfig struct {
 	Type string `json:"type"` // "enabled" or "disabled"
+}
+
+// streamOptions controls streaming behavior (v4 Flash).
+type streamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
+}
+
+// ChatCompletionParams holds per-request configurable parameters.
+// Different use cases (exact search vs discovery) tune these differently.
+type ChatCompletionParams struct {
+	Temperature     float64
+	MaxTokens       int
+	TopP            float64
+	ResponseFormat  string // "json_object" or "text"
+	Thinking        thinkingConfig
+	ReasoningEffort string  // "high" or "max" for v4 Flash reasoning
+	StreamOptions   *streamOptions
+}
+
+// DefaultExactParams returns params tuned for exact parameter extraction:
+// low temperature, JSON output, thinking disabled.
+func DefaultExactParams() ChatCompletionParams {
+	return ChatCompletionParams{
+		Temperature:    0.1,
+		MaxTokens:      defaultMaxTokens,
+		ResponseFormat: "json_object",
+		Thinking:       thinkingConfig{Type: "disabled"},
+		ReasoningEffort: "high",
+	}
+}
+
+// DefaultDiscoveryParams returns params tuned for creative discovery:
+// higher temperature, text output, thinking enabled, streaming support.
+func DefaultDiscoveryParams() ChatCompletionParams {
+	return ChatCompletionParams{
+		Temperature:     0.7,
+		MaxTokens:       defaultMaxTokens,
+		TopP:            0.9,
+		ResponseFormat:  "text",
+		Thinking:        thinkingConfig{Type: "enabled"},
+		ReasoningEffort: "high",
+		StreamOptions:   &streamOptions{IncludeUsage: true},
+	}
 }
 
 // chatCompletionChoice is a single choice in the response.
@@ -119,7 +163,7 @@ func NewClient(apiKey string, timeout time.Duration, opts ...ClientOpt) *Client 
 	c := &Client{
 		baseURL: defaultBaseURL,
 		apiKey:  apiKey,
-		model:   defaultModel,
+		model:   "", // set via WithModel option or left empty
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
@@ -131,16 +175,18 @@ func NewClient(apiKey string, timeout time.Duration, opts ...ClientOpt) *Client 
 }
 
 // ChatCompletion sends a chat completion request and returns the assistant's response text.
-func (c *Client) ChatCompletion(ctx context.Context, messages []chatMessage) (string, error) {
+func (c *Client) ChatCompletion(ctx context.Context, messages []chatMessage, params ChatCompletionParams) (string, error) {
 	reqBody := chatCompletionRequest{
-		Model:          c.model,
-		Messages:       messages,
-		Temperature:    defaultTemperature,
-		MaxTokens:      defaultMaxTokens,
-		ResponseFormat: responseFormat{Type: "json_object"},
-		Thinking:       thinkingMode{Type: "disabled"},
-		ToolChoice:     "none",
-		Stream:         false,
+		Model:           c.model,
+		Messages:        messages,
+		Temperature:     params.Temperature,
+		MaxTokens:       params.MaxTokens,
+		TopP:            params.TopP,
+		ResponseFormat:  responseFormat{Type: params.ResponseFormat},
+		Thinking:        params.Thinking,
+		ReasoningEffort: params.ReasoningEffort,
+		ToolChoice:      "none",
+		Stream:          false,
 	}
 
 	payload, err := json.Marshal(reqBody)
@@ -205,16 +251,19 @@ type SSEEvent struct {
 // ChatCompletionStream sends a streaming chat completion request.
 // Returns a channel of SSE events that the caller reads until the channel is closed.
 // The caller MUST read the channel to completion or cancel the context to avoid leaks.
-func (c *Client) ChatCompletionStream(ctx context.Context, messages []chatMessage) (<-chan SSEEvent, error) {
+func (c *Client) ChatCompletionStream(ctx context.Context, messages []chatMessage, params ChatCompletionParams) (<-chan SSEEvent, error) {
 	reqBody := chatCompletionRequest{
-		Model:          c.model,
-		Messages:       messages,
-		Temperature:    defaultTemperature,
-		MaxTokens:      defaultMaxTokens,
-		ResponseFormat: responseFormat{Type: "json_object"},
-		Thinking:       thinkingMode{Type: "disabled"},
-		ToolChoice:     "none",
-		Stream:         true,
+		Model:           c.model,
+		Messages:        messages,
+		Temperature:     params.Temperature,
+		MaxTokens:       params.MaxTokens,
+		TopP:            params.TopP,
+		ResponseFormat:  responseFormat{Type: params.ResponseFormat},
+		Thinking:        params.Thinking,
+		ReasoningEffort: params.ReasoningEffort,
+		StreamOptions:   params.StreamOptions,
+		ToolChoice:      "none",
+		Stream:          true,
 	}
 
 	payload, err := json.Marshal(reqBody)

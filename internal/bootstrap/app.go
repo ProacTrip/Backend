@@ -365,8 +365,8 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	// Search Module — create AI interpreter if configured
 	var aiInterpreter searchDomain.AIInterpreter
 	if cfg.AI.Provider == "deepseek" && cfg.AI.APIKey != "" {
-		baseURL := cmp.Or(cfg.AI.BaseURL, "https://api.deepseek.com/v1")
-		model := cmp.Or(cfg.AI.Model, "deepseek-chat")
+		baseURL := cmp.Or(cfg.AI.BaseURL, "https://api.deepseek.com")
+		model := cmp.Or(cfg.AI.Model, "deepseek-v4-flash")
 		client := ai_deepseek.NewClient(cfg.AI.APIKey, cfg.AI.Timeout,
 			ai_deepseek.WithBaseURL(baseURL),
 			ai_deepseek.WithModel(model),

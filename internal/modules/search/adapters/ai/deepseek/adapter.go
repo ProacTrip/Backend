@@ -53,7 +53,96 @@ func NewAdapter(client *Client) *Adapter {
 }
 
 // =============================================================================
-// System Prompt
+// DiscoveryPrompt
+// =============================================================================
+
+// DiscoveryPrompt carries location and preference context for discovery queries.
+type DiscoveryPrompt struct {
+	Query       string  `json:"query"`
+	Lat         float64 `json:"lat,omitzero"`
+	Lng         float64 `json:"lng,omitzero"`
+	CountryCode string  `json:"country_code,omitzero"`
+	Timezone    string  `json:"timezone,omitzero"`
+	Language    string  `json:"language"`
+	Currency    string  `json:"currency,omitzero"`
+}
+
+// =============================================================================
+// Discover — streaming discovery AI interpretation
+// =============================================================================
+
+// Discover sends a discovery prompt to DeepSeek v4 Flash and returns a channel
+// of SSE events for the caller to consume. The system prompt instructs the AI
+// to act as a travel discovery assistant that recommends destinations.
+func (a *Adapter) Discover(ctx context.Context, prompt DiscoveryPrompt) (<-chan SSEEvent, error) {
+	sysPrompt := buildDiscoverySystemPrompt(prompt)
+	messages := []chatMessage{
+		{Role: "system", Content: sysPrompt},
+		{Role: "user", Content: prompt.Query},
+	}
+	return a.client.ChatCompletionStream(ctx, messages, DefaultDiscoveryParams())
+}
+
+// =============================================================================
+// Discovery System Prompt
+// =============================================================================
+
+const discoverySystemPrompt = `Eres un asistente de descubrimiento de viajes. Tu trabajo es recomendar destinos y experiencias de viaje basándote en las preferencias y contexto del usuario.
+
+Contexto del usuario:
+- Ubicación: {location_info}
+- Moneda preferida: {currency}
+- Idioma: {language}
+
+Tu respuesta debe ser en lenguaje natural, atractiva y útil. Estructura tus recomendaciones así:
+1. Un resumen de lo que entendiste sobre las preferencias del usuario
+2. 3-5 recomendaciones de destinos o experiencias, cada una con:
+   - Nombre del destino
+   - Por qué coincide con las preferencias del usuario
+   - Mejor época para visitar
+   - Rango de presupuesto estimado en {currency}
+3. Una sugerencia final o pregunta para refinar la búsqueda
+
+Reglas:
+- Sé específico con nombres de lugares reales (ciudades, regiones, parques nacionales)
+- Adapta las recomendaciones a la ubicación del usuario (destinos cercanos o bien conectados)
+- Considera la temporada actual al recomendar
+- Si el usuario no especificó preferencias claras, recomienda destinos populares y variados
+- Responde SIEMPRE en {language}
+- No inventes precios exactos, usa rangos: $, $$, $$$`
+
+// buildDiscoverySystemPrompt fills placeholders in the discovery system prompt
+// with actual location and preference values.
+func buildDiscoverySystemPrompt(prompt DiscoveryPrompt) string {
+	locInfo := "No especificada"
+	if prompt.Lat != 0 || prompt.Lng != 0 {
+		locInfo = fmt.Sprintf("Lat: %.4f, Lng: %.4f", prompt.Lat, prompt.Lng)
+		if prompt.CountryCode != "" {
+			locInfo += fmt.Sprintf(", País: %s", prompt.CountryCode)
+		}
+		if prompt.Timezone != "" {
+			locInfo += fmt.Sprintf(", Zona horaria: %s", prompt.Timezone)
+		}
+	}
+
+	lang := "español"
+	if prompt.Language == "en" {
+		lang = "English"
+	}
+
+	currency := prompt.Currency
+	if currency == "" {
+		currency = "EUR"
+	}
+
+	s := strings.ReplaceAll(discoverySystemPrompt, "{location_info}", locInfo)
+	s = strings.ReplaceAll(s, "{currency}", currency)
+	s = strings.ReplaceAll(s, "{language}", lang)
+	return s
+}
+
+// =============================================================================
+// System Prompt (Exact Search — parameter extraction)
 // =============================================================================
 
 // systemPrompt is the complete system prompt for DeepSeek (~30 lines).
@@ -134,7 +223,7 @@ func (a *Adapter) Parse(ctx context.Context, message string, history []domain.Co
 	messages := buildMessages(message, history, language)
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
-		raw, err := a.client.ChatCompletion(ctx, messages)
+		raw, err := a.client.ChatCompletion(ctx, messages, DefaultExactParams())
 		if err != nil {
 			return nil, fmt.Errorf("deepseek parse: %w", err)
 		}

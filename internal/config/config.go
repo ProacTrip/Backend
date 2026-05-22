@@ -128,11 +128,12 @@ type EmailConfig struct {
 // AIConfig contiene la configuración del intérprete de lenguaje natural.
 // Soporta múltiples proveedores (deepseek, ollama, openai, etc.).
 type AIConfig struct {
-	Provider string        // "deepseek" | "ollama" | "openai"
-	BaseURL  string        // API endpoint base
-	APIKey   string        // API key (omit for ollama local)
-	Model    string        // e.g. "deepseek-chat", "dolphin-mistral"
-	Timeout  time.Duration // timeout for AI requests
+	Provider        string        // "deepseek" | "ollama" | "openai"
+	BaseURL         string        // API endpoint base
+	APIKey          string        // API key (omit for ollama local)
+	Model           string        // e.g. "deepseek-v4-flash" for exact search
+	DiscoveryModel  string        // model override for discovery (defaults to Model if empty)
+	Timeout         time.Duration // timeout for AI requests
 }
 
 // AIOCRConfig contiene la configuración del servicio OCR para documentos.
@@ -346,17 +347,18 @@ func Load() *Config {
 		DefaultLanguage:    getEnv("DEFAULT_LANGUAGE", "es"),
 		DefaultCountryCode: getEnv("DEFAULT_COUNTRY_CODE", "ES"),
 		AI: AIConfig{
-			Provider: getEnv("AI_SEARCH_PROVIDER", ""),
-			BaseURL:  getEnv("AI_SEARCH_BASE_URL", ""),
-			APIKey:   getEnv("AI_SEARCH_API_KEY", ""),
-			Model:    getEnv("AI_SEARCH_MODEL", ""),
-			Timeout:  getEnvDuration("AI_SEARCH_TIMEOUT", 30*time.Second),
+			Provider:       getEnv("AI_SEARCH_PROVIDER", ""),
+			BaseURL:        getEnv("AI_SEARCH_BASE_URL", ""),
+			APIKey:         getEnv("AI_SEARCH_API_KEY", ""),
+			Model:          getEnv("AI_SEARCH_MODEL", ""),
+			DiscoveryModel: getEnv("AI_SEARCH_DISCOVERY_MODEL", ""),
+			Timeout:        getEnvDuration("AI_SEARCH_TIMEOUT", 30*time.Second),
 		},
 		OCR: AIOCRConfig{
 			Provider: getEnv("AI_OCR_PROVIDER", ""),
 			BaseURL:  getEnv("AI_OCR_BASE_URL", ""),
 			APIKey:   getEnv("AI_OCR_API_KEY", ""),
-			Model:    getEnv("AI_OCR_MODEL", "deepseek-chat"),
+			Model:    getEnv("AI_OCR_MODEL", "deepseek-v4-flash"),
 			Timeout:  getEnvDuration("AI_OCR_TIMEOUT", 60*time.Second),
 		},
 		Medical: MedicalConfig{
