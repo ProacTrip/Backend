@@ -69,14 +69,14 @@ type ChatCompletionParams struct {
 }
 
 // DefaultExactParams returns params tuned for exact parameter extraction:
-// low temperature, JSON output, thinking disabled.
+// low temperature, JSON output, thinking disabled, no reasoning_effort
+// (DeepSeek v4 rejects reasoning_effort when thinking is disabled).
 func DefaultExactParams() ChatCompletionParams {
 	return ChatCompletionParams{
 		Temperature:    0.1,
 		MaxTokens:      defaultMaxTokens,
 		ResponseFormat: "json_object",
 		Thinking:       thinkingConfig{Type: "disabled"},
-		ReasoningEffort: "high",
 	}
 }
 
