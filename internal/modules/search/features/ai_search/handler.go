@@ -3,6 +3,7 @@
 package ai_search
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/shared"
 	serrors "github.com/ProacTrip/Backend/internal/shared/errors"
+	sharedEnv "github.com/ProacTrip/Backend/internal/shared/environment"
 	httperr "github.com/ProacTrip/Backend/internal/shared/http"
 	"github.com/ProacTrip/Backend/internal/shared/ratelimit"
 )
@@ -29,12 +31,14 @@ type Handler struct {
 	usecase     *UseCase
 	rdb         *redis.Client
 	defaultsCfg shared.SearchDefaultConfig
+	userProfile domain.UserProfilePort
 	RateLimiter *ratelimit.RateLimiter
 }
 
 // NewHandler creates a new AI search handler.
-func NewHandler(usecase *UseCase, rdb *redis.Client, defaultsCfg shared.SearchDefaultConfig) *Handler {
-	return &Handler{usecase: usecase, rdb: rdb, defaultsCfg: defaultsCfg}
+// userProfile may be nil for anonymous-only deployments or tests.
+func NewHandler(usecase *UseCase, rdb *redis.Client, defaultsCfg shared.SearchDefaultConfig, userProfile domain.UserProfilePort) *Handler {
+	return &Handler{usecase: usecase, rdb: rdb, defaultsCfg: defaultsCfg, userProfile: userProfile}
 }
 
 // Handle processes the AI search request.
@@ -72,19 +76,8 @@ func (h *Handler) Handle(c *echo.Context) error {
 			return nil
 		}
 
-		// Resolve defaults
-		gl, hl, currency := shared.ResolveSearchDefaults(
-			c.Request().Context(),
-			h.rdb,
-			shared.UserIDFromContext(c),
-			c.RealIP(),
-			nil, nil, nil,
-			h.defaultsCfg,
-		)
-		cmd.GL = gl
-		cmd.HL = hl
-		cmd.Currency = currency
-		cmd.ClientIP = c.RealIP()
+		// Resolve user prefs + env data + fallback defaults
+		h.resolveContext(c, &cmd)
 
 		userID := shared.UserIDFromContext(c)
 		isDiscovery := cmd.SearchModeHint == "discovery"
@@ -146,22 +139,8 @@ func (h *Handler) Handle(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
-	// Resolve GL/HL/Currency from 4-tier priority chain.
-	// The AI search doesn't expose explicit client params for these,
-	// so Tier 1 is always skipped. Tiers 2-4 apply (profile prefs →
-	// environment cache → config defaults).
-	gl, hl, currency := shared.ResolveSearchDefaults(
-		c.Request().Context(),
-		h.rdb,
-		shared.UserIDFromContext(c),
-		c.RealIP(),
-		nil, nil, nil, // no explicit client params in AI search
-		h.defaultsCfg,
-	)
-	cmd.GL = gl
-	cmd.HL = hl
-	cmd.Currency = currency
-	cmd.ClientIP = c.RealIP()
+	// Resolve user prefs + env data + fallback defaults
+	h.resolveContext(c, &cmd)
 
 	// Extract userID from context (set by auth middleware).
 	// Empty string for anonymous users.
@@ -190,6 +169,87 @@ func (h *Handler) Handle(c *echo.Context) error {
 
 	c.Response().Header().Set("Cache-Control", "no-store")
 	return c.JSON(http.StatusOK, resp)
+}
+
+// =============================================================================
+// Context resolution — user prefs, env cache, fallback defaults
+// =============================================================================
+
+// resolveContext populates cmd with resolved user preferences (currency, language)
+// from the UserProfilePort, environmental data (lat, lng, timezone, country_code)
+// from the env:{ip} cache when not provided by the client, and falls back to
+// config defaults for currency/language.
+//
+// Resolution order per field:
+//
+//	Currency / HL:  user profile prefs (auth users) → config defaults
+//	Lat / Lng:       client-provided (omitzero=0) → env:{ip} cache
+//	Timezone:         client-provided → env:{ip} cache
+//	CountryCode:      client-provided → env:{ip} cache
+func (h *Handler) resolveContext(c *echo.Context, cmd *Command) {
+	ctx := c.Request().Context()
+	userID := shared.UserIDFromContext(c)
+	clientIP := c.RealIP()
+
+	// Resolve currency/language from user profile port (auth users only)
+	if userID != "" && h.userProfile != nil {
+		if curr, lang, err := h.userProfile.GetPreferences(ctx, userID); err == nil {
+			if cmd.Currency == "" {
+				cmd.Currency = curr
+			}
+			if cmd.HL == "" {
+				cmd.HL = lang
+			}
+		}
+	}
+
+	// Resolve environment data from env:{ip} cache when client didn't provide it
+	needEnv := cmd.Lat == 0 && cmd.Lng == 0 || cmd.Timezone == "" || cmd.CountryCode == ""
+	if needEnv && h.rdb != nil && clientIP != "" {
+		if entry := h.resolveEnvCacheEntry(ctx, clientIP); entry != nil {
+			if cmd.Lat == 0 && cmd.Lng == 0 {
+				cmd.Lat = entry.Location.Latitude
+				cmd.Lng = entry.Location.Longitude
+			}
+			if cmd.Timezone == "" {
+				cmd.Timezone = entry.Location.Timezone
+			}
+			if cmd.CountryCode == "" {
+				cmd.CountryCode = entry.Location.CountryCode
+			}
+		}
+	}
+
+	// Fallback to config defaults for currency/language
+	if cmd.Currency == "" {
+		cmd.Currency = h.defaultsCfg.Currency
+	}
+	if cmd.HL == "" {
+		cmd.HL = h.defaultsCfg.Language
+	}
+
+	cmd.ClientIP = clientIP
+}
+
+// resolveEnvCacheEntry reads the full env:{ip} cache entry from DragonflyDB.
+// Returns nil if the cache is unavailable or cannot be parsed.
+func (h *Handler) resolveEnvCacheEntry(ctx context.Context, ip string) *sharedEnv.CacheEntry {
+	if h.rdb == nil {
+		return nil
+	}
+	key := sharedEnv.CacheKey(ip)
+	raw, err := h.rdb.Get(ctx, key).Result()
+	if err != nil {
+		return nil
+	}
+	if raw == "" {
+		return nil
+	}
+	var entry sharedEnv.CacheEntry
+	if err := json.Unmarshal([]byte(raw), &entry); err != nil {
+		return nil
+	}
+	return &entry
 }
 
 // sseEvent sends a named SSE event with JSON payload.

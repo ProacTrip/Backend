@@ -49,7 +49,7 @@ func TestHandler_ValidMessage(t *testing.T) {
 		AuthMaxTurns:   10,
 	})
 
-	handler := ai_search.NewHandler(uc, nil, defaultCfg)
+	handler := ai_search.NewHandler(uc, nil, defaultCfg, nil)
 
 	c, rec := newEchoContext(`{"message": "Busco vuelos de Buenos Aires a Madrid"}`)
 
@@ -89,7 +89,7 @@ func TestHandler_EmptyMessage(t *testing.T) {
 		ConvStore:      &stubConversationStore{},
 	})
 
-	handler := ai_search.NewHandler(uc, nil, defaultCfg)
+	handler := ai_search.NewHandler(uc, nil, defaultCfg, nil)
 
 	c, rec := newEchoContext(`{"message": ""}`)
 
@@ -125,7 +125,7 @@ func TestHandler_AuthUser(t *testing.T) {
 		AuthMaxTurns:   10,
 	})
 
-	handler := ai_search.NewHandler(uc, nil, defaultCfg)
+	handler := ai_search.NewHandler(uc, nil, defaultCfg, nil)
 
 	c, rec := newEchoContext(`{"message": "Vuelos baratos"}`)
 
@@ -177,7 +177,7 @@ func TestHandler_InvalidJSON(t *testing.T) {
 		ConvStore:      &stubConversationStore{},
 	})
 
-	handler := ai_search.NewHandler(uc, nil, defaultCfg)
+	handler := ai_search.NewHandler(uc, nil, defaultCfg, nil)
 
 	c, rec := newEchoContext(`not json`)
 

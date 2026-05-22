@@ -108,6 +108,10 @@ type Config struct {
 	// Leído de AI_INTERPRETATION_CACHE_TTL, default 10m.
 	// 0 = usar default 10m en el use case.
 	InterpretationCacheTTL time.Duration
+
+	// UserProfilePort — adapter for resolving user currency/language prefs.
+	// Nil disables user profile resolution (anonymous-only or tests).
+	UserProfilePort domain.UserProfilePort
 }
 
 // =============================================================================
@@ -245,11 +249,11 @@ func NewModule(cfg Config) (*Module, error) {
 			DiscoveryEnabled:       parseEnvBool("AI_DISCOVERY_ENABLED"),
 			InterpretationCacheTTL: cfg.InterpretationCacheTTL,
 		})
-		aiSearchHandler = ai_search.NewHandler(aiSearchUC, cfg.RedisClient, cfg.SearchDefaults)
+		aiSearchHandler = ai_search.NewHandler(aiSearchUC, cfg.RedisClient, cfg.SearchDefaults, cfg.UserProfilePort)
 		aiSearchHandler.RateLimiter = cfg.RateLimiter
 	} else {
 		// Handler with nil usecase → Handle() returns 503 "AI not configured"
-		aiSearchHandler = ai_search.NewHandler(nil, cfg.RedisClient, cfg.SearchDefaults)
+		aiSearchHandler = ai_search.NewHandler(nil, cfg.RedisClient, cfg.SearchDefaults, cfg.UserProfilePort)
 		aiSearchHandler.RateLimiter = cfg.RateLimiter
 	}
 

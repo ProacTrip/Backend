@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ProacTrip/Backend/internal/adapters"
 	"github.com/ProacTrip/Backend/internal/config"
 	authModule "github.com/ProacTrip/Backend/internal/modules/auth"
 	authmiddleware "github.com/ProacTrip/Backend/internal/modules/auth/adapters/middleware"
@@ -388,6 +389,10 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		slog.Info("AI interpreter: ollama configured", slog.String("model", model))
 	}
 
+	// User profile port — adapter that resolves currency/language from Dragonfly hash
+	// user:prefs:{userID} using shared/user.GetProfilePrefs.
+	userProfilePort := adapters.NewUserProfileAdapter(rdb)
+
 	// Conversation PG store for auth users
 	searchMod, err := searchModule.NewModule(searchModule.Config{
 		Provider:          nil, // created from SerpAPIKey/SerpAPITimeout
@@ -407,9 +412,10 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 			Currency: cfg.DefaultCurrency,
 			Language: cfg.DefaultLanguage,
 		},
-		AIInterpreter:       aiInterpreter,
+		AIInterpreter:        aiInterpreter,
 		DiscoveryInterpreter: discoveryInterpreterFrom(aiInterpreter),
 		SavedSearchProvider:  nil,
+		UserProfilePort:      userProfilePort,
 	})
 	if err != nil {
 		return nil, err

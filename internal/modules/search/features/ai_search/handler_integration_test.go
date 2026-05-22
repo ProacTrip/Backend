@@ -176,7 +176,7 @@ func TestIntegration_FullConversationFlow(t *testing.T) {
 		AuthMaxTurns:   10,
 	})
 
-	handler := ai_search.NewHandler(uc, nil, integrationDefaults)
+	handler := ai_search.NewHandler(uc, nil, integrationDefaults, nil)
 
 	// ---- Turn 1: Incomplete message ----
 	c1, rec1 := newAIEchoContext(`{"message": "Quiero viajar"}`)
@@ -308,7 +308,7 @@ func TestIntegration_SearchOrchestration_Flights(t *testing.T) {
 		AuthMaxTurns:   10,
 	})
 
-	handler := ai_search.NewHandler(uc, nil, integrationDefaults)
+	handler := ai_search.NewHandler(uc, nil, integrationDefaults, nil)
 
 	c, rec := newAIEchoContext(`{"message": "Vuelos de Buenos Aires a Madrid"}`)
 	err := handler.Handle(c)
@@ -348,7 +348,7 @@ func TestIntegration_SearchOrchestration_Hotels(t *testing.T) {
 		AuthMaxTurns:   10,
 	})
 
-	handler := ai_search.NewHandler(uc, nil, integrationDefaults)
+	handler := ai_search.NewHandler(uc, nil, integrationDefaults, nil)
 
 	c, rec := newAIEchoContext(`{"message": "Hoteles en Barcelona"}`)
 	err := handler.Handle(c)
@@ -388,7 +388,7 @@ func TestIntegration_SearchOrchestration_Both(t *testing.T) {
 		AuthMaxTurns:   10,
 	})
 
-	handler := ai_search.NewHandler(uc, nil, integrationDefaults)
+	handler := ai_search.NewHandler(uc, nil, integrationDefaults, nil)
 
 	c, rec := newAIEchoContext(`{"message": "Viaje completo a Barcelona con vuelo y hotel"}`)
 	err := handler.Handle(c)
@@ -442,7 +442,7 @@ func TestIntegration_TurnLimit_Anonymous(t *testing.T) {
 		AuthMaxTurns:   10,
 	})
 
-	handler := ai_search.NewHandler(uc, nil, integrationDefaults)
+	handler := ai_search.NewHandler(uc, nil, integrationDefaults, nil)
 
 	c, rec := newAIEchoContext(`{"message": "Quiero más opciones", "conversation_id": "conv_anon_full"}`)
 
@@ -503,7 +503,7 @@ func TestIntegration_TurnLimit_Authenticated(t *testing.T) {
 		AuthMaxTurns:   10,
 	})
 
-	handler := ai_search.NewHandler(uc, nil, integrationDefaults)
+	handler := ai_search.NewHandler(uc, nil, integrationDefaults, nil)
 
 	c, rec := newAIEchoContext(`{"message": "Una consulta más", "conversation_id": "conv_auth_full"}`)
 
@@ -556,7 +556,7 @@ func TestIntegration_ErrorHandling_AIUnavailable(t *testing.T) {
 		AuthMaxTurns:   10,
 	})
 
-	handler := ai_search.NewHandler(uc, nil, integrationDefaults)
+	handler := ai_search.NewHandler(uc, nil, integrationDefaults, nil)
 
 	c, rec := newAIEchoContext(`{"message": "Vuelos baratos"}`)
 
@@ -595,7 +595,7 @@ func TestIntegration_ErrorHandling_AIParseFailure(t *testing.T) {
 		AuthMaxTurns:   10,
 	})
 
-	handler := ai_search.NewHandler(uc, nil, integrationDefaults)
+	handler := ai_search.NewHandler(uc, nil, integrationDefaults, nil)
 
 	c, rec := newAIEchoContext(`{"message": "malformed query !@#$%"}`)
 
@@ -635,7 +635,7 @@ func TestIntegration_ErrorHandling_InvalidConversationID(t *testing.T) {
 		AuthMaxTurns:   10,
 	})
 
-	handler := ai_search.NewHandler(uc, nil, integrationDefaults)
+	handler := ai_search.NewHandler(uc, nil, integrationDefaults, nil)
 
 	c, rec := newAIEchoContext(`{"message": "Vuelos a Madrid", "conversation_id": "nonexistent-conv-999"}`)
 
@@ -670,7 +670,7 @@ func TestIntegration_ErrorHandling_EmptyMessage(t *testing.T) {
 		AuthMaxTurns:   10,
 	})
 
-	handler := ai_search.NewHandler(uc, nil, integrationDefaults)
+	handler := ai_search.NewHandler(uc, nil, integrationDefaults, nil)
 
 	c, rec := newAIEchoContext(`{"message": ""}`)
 
@@ -698,7 +698,7 @@ func TestIntegration_ErrorHandling_EmptyMessage(t *testing.T) {
 // returns 503 Service Unavailable with RFC 9457 format instead of 404.
 func TestIntegration_NilUseCase_Returns503(t *testing.T) {
 	// Create handler with nil usecase (simulates AI not configured)
-	handler := ai_search.NewHandler(nil, nil, integrationDefaults)
+	handler := ai_search.NewHandler(nil, nil, integrationDefaults, nil)
 
 	c, rec := newAIEchoContext(`{"message": "Busco vuelos a Madrid"}`)
 
@@ -750,7 +750,7 @@ func TestIntegration_NewConversation_EmptyConversationID(t *testing.T) {
 		AuthMaxTurns:   10,
 	})
 
-	handler := ai_search.NewHandler(uc, nil, integrationDefaults)
+	handler := ai_search.NewHandler(uc, nil, integrationDefaults, nil)
 
 	// No conversation_id at all — first request
 	c, rec := newAIEchoContext(`{"message": "Quiero viajar a Barcelona"}`)
@@ -791,7 +791,7 @@ func TestIntegration_NewConversation_RejectsProvidedConversationID(t *testing.T)
 		AuthMaxTurns:   10,
 	})
 
-	handler := ai_search.NewHandler(uc, nil, integrationDefaults)
+	handler := ai_search.NewHandler(uc, nil, integrationDefaults, nil)
 
 	// User provides a conversation_id that doesn't exist
 	c, rec := newAIEchoContext(`{"message": "Busco vuelos a Madrid", "conversation_id": "conv-nonexistent"}`)
@@ -844,7 +844,7 @@ func TestIntegration_ContinueConversation_ValidConversationID(t *testing.T) {
 		AuthMaxTurns:   10,
 	})
 
-	handler := ai_search.NewHandler(uc, nil, integrationDefaults)
+	handler := ai_search.NewHandler(uc, nil, integrationDefaults, nil)
 
 	// Continue existing conversation
 	c, rec := newAIEchoContext(`{"message": "Vuelos a Madrid", "conversation_id": "conv-valid-123"}`)
@@ -896,7 +896,7 @@ func TestIntegration_NonExistentConversationID_Returns400(t *testing.T) {
 		AuthMaxTurns:   10,
 	})
 
-	handler := ai_search.NewHandler(uc, nil, integrationDefaults)
+	handler := ai_search.NewHandler(uc, nil, integrationDefaults, nil)
 
 	c, rec := newAIEchoContext(`{"message": "Busco hoteles", "conversation_id": "conv-deleted-or-expired"}`)
 
