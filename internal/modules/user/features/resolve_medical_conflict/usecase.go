@@ -27,8 +27,8 @@ type MedicalPendingRepo interface {
 
 // MedicalProfileRepo permite leer y actualizar el perfil médico.
 type MedicalProfileRepo interface {
-	GetByUserID(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfileV2, error)
-	Update(ctx context.Context, profile *domain.MedicalProfileV2) error
+	GetByUserID(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfile, error)
+	Update(ctx context.Context, profile *domain.MedicalProfile) error
 }
 
 // EncryptionSvc permite encriptar valores médicos.
@@ -190,7 +190,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*ResolveResponse, 
 
 // setMedicalField establece un campo en el perfil médico.
 // Los campos de texto se encriptan, blood_type se guarda en texto plano.
-func (uc *UseCase) setMedicalField(mp *domain.MedicalProfileV2, fieldName, value, sourceType string, sourceDocumentID *uuid.UUID, now time.Time) error {
+func (uc *UseCase) setMedicalField(mp *domain.MedicalProfile, fieldName, value, sourceType string, sourceDocumentID *uuid.UUID, now time.Time) error {
 	// Construir source detail
 	source := domain.SourceToDetail(domain.MedicalSource(sourceType))
 	if sourceDocumentID != nil {

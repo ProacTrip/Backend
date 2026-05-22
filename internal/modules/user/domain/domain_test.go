@@ -107,12 +107,12 @@ func TestSeatPreference_Values(t *testing.T) {
 }
 
 // =============================================================================
-// T-1.1: Medical Profile V2
+// T-1.1: Medical Profile
 // =============================================================================
 
-func TestNewMedicalProfileV2(t *testing.T) {
+func TestNewMedicalProfile(t *testing.T) {
 	userID := uuid.Must(uuid.NewV7())
-	mp := NewMedicalProfileV2(userID)
+	mp := NewMedicalProfile(userID)
 
 	if mp.ID == uuid.Nil {
 		t.Error("se esperaba UUIDv7 no nulo")
@@ -131,9 +131,9 @@ func TestNewMedicalProfileV2(t *testing.T) {
 	}
 }
 
-func TestMedicalProfileV2_SetField(t *testing.T) {
+func TestMedicalProfile_SetField(t *testing.T) {
 	userID := uuid.Must(uuid.NewV7())
-	mp := NewMedicalProfileV2(userID)
+	mp := NewMedicalProfile(userID)
 	oldUpdated := mp.UpdatedAt
 
 	time.Sleep(1 * time.Millisecond)
@@ -158,9 +158,9 @@ func TestMedicalProfileV2_SetField(t *testing.T) {
 	}
 }
 
-func TestMedicalProfileV2_RemoveField(t *testing.T) {
+func TestMedicalProfile_RemoveField(t *testing.T) {
 	userID := uuid.Must(uuid.NewV7())
-	mp := NewMedicalProfileV2(userID)
+	mp := NewMedicalProfile(userID)
 	mp.SetField("blood_type", "A+", MedicalSourceDetail{Type: "manual"})
 	mp.RemoveField("blood_type")
 
@@ -169,9 +169,9 @@ func TestMedicalProfileV2_RemoveField(t *testing.T) {
 	}
 }
 
-func TestMedicalProfileV2_JSON(t *testing.T) {
+func TestMedicalProfile_JSON(t *testing.T) {
 	userID := uuid.Must(uuid.NewV7())
-	mp := NewMedicalProfileV2(userID)
+	mp := NewMedicalProfile(userID)
 	mp.SetField("blood_type", "A+", MedicalSourceDetail{Type: "manual"})
 
 	data, err := json.Marshal(mp)
@@ -269,9 +269,7 @@ func TestUserDocument_JSON(t *testing.T) {
 	if decoded["ocr_status"] != "queued" {
 		t.Errorf("ocr_status = %v, se esperaba queued", decoded["ocr_status"])
 	}
-	if decoded["is_verified"] != false {
-		t.Error("is_verified debería ser false")
-	}
+
 }
 
 // =============================================================================

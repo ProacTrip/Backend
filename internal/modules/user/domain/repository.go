@@ -38,9 +38,9 @@ type TravelPrefsRepository interface {
 // =============================================================================
 
 type MedicalProfileRepository interface {
-	Create(ctx context.Context, profile *MedicalProfileV2) error
-	GetByUserID(ctx context.Context, userID uuid.UUID) (*MedicalProfileV2, error)
-	Update(ctx context.Context, profile *MedicalProfileV2) error
+	Create(ctx context.Context, profile *MedicalProfile) error
+	GetByUserID(ctx context.Context, userID uuid.UUID) (*MedicalProfile, error)
+	Update(ctx context.Context, profile *MedicalProfile) error
 }
 
 // =============================================================================

@@ -20,24 +20,24 @@ import (
 // =============================================================================
 
 type mockMedicalProfileRepo struct {
-	getByUserIDFn func(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfileV2, error)
-	createFn      func(ctx context.Context, profile *domain.MedicalProfileV2) error
-	updateFn      func(ctx context.Context, profile *domain.MedicalProfileV2) error
+	getByUserIDFn func(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfile, error)
+	createFn      func(ctx context.Context, profile *domain.MedicalProfile) error
+	updateFn      func(ctx context.Context, profile *domain.MedicalProfile) error
 }
 
-func (m *mockMedicalProfileRepo) Create(ctx context.Context, p *domain.MedicalProfileV2) error {
+func (m *mockMedicalProfileRepo) Create(ctx context.Context, p *domain.MedicalProfile) error {
 	if m.createFn != nil {
 		return m.createFn(ctx, p)
 	}
 	return nil
 }
-func (m *mockMedicalProfileRepo) GetByUserID(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfileV2, error) {
+func (m *mockMedicalProfileRepo) GetByUserID(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfile, error) {
 	if m.getByUserIDFn != nil {
 		return m.getByUserIDFn(ctx, userID)
 	}
 	return nil, nil
 }
-func (m *mockMedicalProfileRepo) Update(ctx context.Context, p *domain.MedicalProfileV2) error {
+func (m *mockMedicalProfileRepo) Update(ctx context.Context, p *domain.MedicalProfile) error {
 	if m.updateFn != nil {
 		return m.updateFn(ctx, p)
 	}
@@ -114,7 +114,7 @@ func TestGetMedicalProfile_HappyPath(t *testing.T) {
 	allergiesPlain := "Penicilina, Polen"
 	medicationsPlain := "Loratadina 10mg"
 
-	mp := &domain.MedicalProfileV2{
+	mp := &domain.MedicalProfile{
 		ID:       uuid.Must(uuid.NewV7()),
 		UserID:   userID,
 		IsShared: true,
@@ -141,7 +141,7 @@ func TestGetMedicalProfile_HappyPath(t *testing.T) {
 
 	uc := NewUseCase(UseCaseDeps{
 		MedicalProfileRepo: &mockMedicalProfileRepo{
-			getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.MedicalProfileV2, error) {
+			getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.MedicalProfile, error) {
 				return mp, nil
 			},
 		},
@@ -210,7 +210,7 @@ func TestGetMedicalProfile_EmptyProfile(t *testing.T) {
 	userID := uuid.Must(uuid.NewV7())
 	now := time.Now()
 
-	mp := &domain.MedicalProfileV2{
+	mp := &domain.MedicalProfile{
 		ID:        uuid.Must(uuid.NewV7()),
 		UserID:    userID,
 		IsShared:  false,
@@ -221,7 +221,7 @@ func TestGetMedicalProfile_EmptyProfile(t *testing.T) {
 
 	uc := NewUseCase(UseCaseDeps{
 		MedicalProfileRepo: &mockMedicalProfileRepo{
-			getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.MedicalProfileV2, error) {
+			getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.MedicalProfile, error) {
 				return mp, nil
 			},
 		},
@@ -253,7 +253,7 @@ func TestGetMedicalProfile_EmptyProfile(t *testing.T) {
 func TestGetMedicalProfile_MedicalProfileNotFound(t *testing.T) {
 	uc := NewUseCase(UseCaseDeps{
 		MedicalProfileRepo: &mockMedicalProfileRepo{
-			getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.MedicalProfileV2, error) {
+			getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.MedicalProfile, error) {
 				return nil, domain.ErrMedicalProfileNotFound
 			},
 		},
@@ -276,7 +276,7 @@ func TestGetMedicalProfile_DecryptionError(t *testing.T) {
 	now := time.Now()
 
 	// Perfil con dato encriptado corrupto (no es base64 válido)
-	mp := &domain.MedicalProfileV2{
+	mp := &domain.MedicalProfile{
 		ID:       uuid.Must(uuid.NewV7()),
 		UserID:   userID,
 		IsShared: false,
@@ -293,7 +293,7 @@ func TestGetMedicalProfile_DecryptionError(t *testing.T) {
 
 	uc := NewUseCase(UseCaseDeps{
 		MedicalProfileRepo: &mockMedicalProfileRepo{
-			getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.MedicalProfileV2, error) {
+			getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.MedicalProfile, error) {
 				return mp, nil
 			},
 		},
@@ -315,7 +315,7 @@ func TestGetMedicalProfile_NoPendingConflicts(t *testing.T) {
 	userID := uuid.Must(uuid.NewV7())
 	now := time.Now()
 
-	mp := &domain.MedicalProfileV2{
+	mp := &domain.MedicalProfile{
 		ID:       uuid.Must(uuid.NewV7()),
 		UserID:   userID,
 		IsShared: false,
@@ -332,7 +332,7 @@ func TestGetMedicalProfile_NoPendingConflicts(t *testing.T) {
 
 	uc := NewUseCase(UseCaseDeps{
 		MedicalProfileRepo: &mockMedicalProfileRepo{
-			getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.MedicalProfileV2, error) {
+			getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.MedicalProfile, error) {
 				return mp, nil
 			},
 		},

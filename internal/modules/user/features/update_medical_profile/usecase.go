@@ -22,8 +22,8 @@ import (
 
 // MedicalProfileRepo permite leer y actualizar el perfil médico.
 type MedicalProfileRepo interface {
-	GetByUserID(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfileV2, error)
-	Update(ctx context.Context, profile *domain.MedicalProfileV2) error
+	GetByUserID(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfile, error)
+	Update(ctx context.Context, profile *domain.MedicalProfile) error
 }
 
 // EncryptionSvc permite encriptar valores médicos.

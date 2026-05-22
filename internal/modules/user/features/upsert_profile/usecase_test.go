@@ -58,19 +58,19 @@ func (m *mockTravelPrefsRepo) GetByUserID(_ context.Context, _ uuid.UUID) (*doma
 func (m *mockTravelPrefsRepo) Update(_ context.Context, _ *domain.TravelPreferences) error { return nil }
 
 type mockMedicalRepo struct {
-	createFn func(ctx context.Context, profile *domain.MedicalProfileV2) error
+	createFn func(ctx context.Context, profile *domain.MedicalProfile) error
 }
 
-func (m *mockMedicalRepo) Create(ctx context.Context, p *domain.MedicalProfileV2) error {
+func (m *mockMedicalRepo) Create(ctx context.Context, p *domain.MedicalProfile) error {
 	if m.createFn != nil {
 		return m.createFn(ctx, p)
 	}
 	return nil
 }
-func (m *mockMedicalRepo) GetByUserID(_ context.Context, _ uuid.UUID) (*domain.MedicalProfileV2, error) {
+func (m *mockMedicalRepo) GetByUserID(_ context.Context, _ uuid.UUID) (*domain.MedicalProfile, error) {
 	return nil, nil
 }
-func (m *mockMedicalRepo) Update(_ context.Context, _ *domain.MedicalProfileV2) error { return nil }
+func (m *mockMedicalRepo) Update(_ context.Context, _ *domain.MedicalProfile) error { return nil }
 
 // =============================================================================
 // Helper: setup miniredis
@@ -216,7 +216,7 @@ func TestUpsertProfile_CreatesAllDefaults(t *testing.T) {
 			},
 		},
 		&mockMedicalRepo{
-			createFn: func(_ context.Context, p *domain.MedicalProfileV2) error {
+			createFn: func(_ context.Context, p *domain.MedicalProfile) error {
 				medicalCreated = true
 				return nil
 			},

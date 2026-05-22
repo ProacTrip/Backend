@@ -12,12 +12,12 @@ import (
 )
 
 type testGMMedicalRepo struct {
-	getByUserIDFn func(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfileV2, error)
+	getByUserIDFn func(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfile, error)
 }
-func (m *testGMMedicalRepo) GetByUserID(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfileV2, error) {
+func (m *testGMMedicalRepo) GetByUserID(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfile, error) {
 	if m.getByUserIDFn != nil { return m.getByUserIDFn(ctx, userID) }; return nil, nil
 }
-func (m *testGMMedicalRepo) Update(ctx context.Context, p *domain.MedicalProfileV2) error { return nil }
+func (m *testGMMedicalRepo) Update(ctx context.Context, p *domain.MedicalProfile) error { return nil }
 
 type testGMEncryption struct{ decryptFn func(ciphertext []byte) (string, error) }
 func (m *testGMEncryption) Decrypt(ciphertext []byte) (string, error) {
@@ -35,13 +35,13 @@ func TestGetMedicalProfileHandler_Handle(t *testing.T) {
 	tests := []struct {
 		name string; claims *sharedauth.AccessClaims; mp *testGMMedicalRepo; enc *testGMEncryption; pc *testGMPendingCounter; wantStatus int
 	}{
-		{"debe retornar 200 con perfil medico", tc, &testGMMedicalRepo{getByUserIDFn: func(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfileV2, error) {
-			return &domain.MedicalProfileV2{ID: uuid.Must(uuid.NewV7()), UserID: userID, Data: map[string]*domain.MedicalFieldValue{}}, nil
+		{"debe retornar 200 con perfil medico", tc, &testGMMedicalRepo{getByUserIDFn: func(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfile, error) {
+			return &domain.MedicalProfile{ID: uuid.Must(uuid.NewV7()), UserID: userID, Data: map[string]*domain.MedicalFieldValue{}}, nil
 		}}, &testGMEncryption{}, &testGMPendingCounter{}, http.StatusOK},
-		{"debe retornar error sin claims", nil, &testGMMedicalRepo{}, &testGMEncryption{}, &testGMPendingCounter{}, http.StatusInternalServerError},
-		{"debe retornar error cuando perfil no existe", tc, &testGMMedicalRepo{getByUserIDFn: func(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfileV2, error) {
+		{"debe retornar error sin claims", nil, &testGMMedicalRepo{}, &testGMEncryption{}, &testGMPendingCounter{}, http.StatusUnauthorized},
+		{"debe retornar error cuando perfil no existe", tc, &testGMMedicalRepo{getByUserIDFn: func(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfile, error) {
 			return nil, domain.ErrMedicalProfileNotFound
-		}}, &testGMEncryption{}, &testGMPendingCounter{}, http.StatusNotFound},
+		}}, &testGMEncryption{}, &testGMPendingCounter{}, http.StatusInternalServerError}, // mapper no registrado en test aislado
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

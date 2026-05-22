@@ -17,6 +17,7 @@ import (
 
 	"github.com/ProacTrip/Backend/internal/modules/user/domain"
 	"github.com/ProacTrip/Backend/internal/modules/user/pipeline"
+	sse "github.com/ProacTrip/Backend/internal/shared/sse"
 )
 
 // =============================================================================
@@ -93,17 +94,17 @@ func (m *ocrMockDocRepo) Update(ctx context.Context, doc *domain.UserDocument) e
 
 type ocrMockMedicalRepo struct {
 	mu       sync.Mutex
-	profiles map[uuid.UUID]*domain.MedicalProfileV2
+	profiles map[uuid.UUID]*domain.MedicalProfile
 	getErr   error
 	updErr   error
 	creatErr error
 }
 
 func newOCRMockMedicalRepo() *ocrMockMedicalRepo {
-	return &ocrMockMedicalRepo{profiles: make(map[uuid.UUID]*domain.MedicalProfileV2)}
+	return &ocrMockMedicalRepo{profiles: make(map[uuid.UUID]*domain.MedicalProfile)}
 }
 
-func (m *ocrMockMedicalRepo) GetByUserID(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfileV2, error) {
+func (m *ocrMockMedicalRepo) GetByUserID(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfile, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.getErr != nil {
@@ -116,7 +117,7 @@ func (m *ocrMockMedicalRepo) GetByUserID(ctx context.Context, userID uuid.UUID) 
 	return profile, nil
 }
 
-func (m *ocrMockMedicalRepo) Update(ctx context.Context, profile *domain.MedicalProfileV2) error {
+func (m *ocrMockMedicalRepo) Update(ctx context.Context, profile *domain.MedicalProfile) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.updErr != nil {
@@ -127,7 +128,7 @@ func (m *ocrMockMedicalRepo) Update(ctx context.Context, profile *domain.Medical
 	return nil
 }
 
-func (m *ocrMockMedicalRepo) Create(ctx context.Context, profile *domain.MedicalProfileV2) error {
+func (m *ocrMockMedicalRepo) Create(ctx context.Context, profile *domain.MedicalProfile) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.creatErr != nil {
@@ -203,6 +204,7 @@ func createOCRWorker(t *testing.T, rdb *redis.Client, r2 *ocrMockR2, ocs *ocrMoc
 // =============================================================================
 
 func TestOCRWorker_ProcesaPasaporte(t *testing.T) {
+	sse.Init()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -231,7 +233,7 @@ func TestOCRWorker_ProcesaPasaporte(t *testing.T) {
 	}
 
 	medRepo := newOCRMockMedicalRepo()
-	medRepo.profiles[userID] = &domain.MedicalProfileV2{
+	medRepo.profiles[userID] = &domain.MedicalProfile{
 		ID:        uuid.Must(uuid.NewV7()),
 		UserID:    userID,
 		Data:      make(map[string]*domain.MedicalFieldValue),
@@ -289,6 +291,7 @@ func TestOCRWorker_ProcesaPasaporte(t *testing.T) {
 // =============================================================================
 
 func TestOCRWorker_DocumentoNoViaje_Rechazado(t *testing.T) {
+	sse.Init()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -360,6 +363,7 @@ func TestOCRWorker_DocumentoNoViaje_Rechazado(t *testing.T) {
 // =============================================================================
 
 func TestOCRWorker_AplicaDatosMedicos_EmergencyContactInsurance(t *testing.T) {
+	sse.Init()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -392,7 +396,7 @@ func TestOCRWorker_AplicaDatosMedicos_EmergencyContactInsurance(t *testing.T) {
 
 	// Perfil médico existente (vacío)
 	medRepo := newOCRMockMedicalRepo()
-	medRepo.profiles[userID] = &domain.MedicalProfileV2{
+	medRepo.profiles[userID] = &domain.MedicalProfile{
 		ID:        uuid.Must(uuid.NewV7()),
 		UserID:    userID,
 		Data:      make(map[string]*domain.MedicalFieldValue),
@@ -468,6 +472,7 @@ func TestOCRWorker_AplicaDatosMedicos_EmergencyContactInsurance(t *testing.T) {
 // =============================================================================
 
 func TestOCRWorker_ConflictoMedico_CreaPendingUpdate(t *testing.T) {
+	sse.Init()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -500,7 +505,7 @@ func TestOCRWorker_ConflictoMedico_CreaPendingUpdate(t *testing.T) {
 	// Perfil médico existente CON blood_type = "O+"
 	// El valor debe estar en formato base64 (simulando cómo el OCR worker almacena)
 	medRepo := newOCRMockMedicalRepo()
-	medRepo.profiles[userID] = &domain.MedicalProfileV2{
+	medRepo.profiles[userID] = &domain.MedicalProfile{
 		ID:     uuid.Must(uuid.NewV7()),
 		UserID: userID,
 		Data: map[string]*domain.MedicalFieldValue{
@@ -612,6 +617,7 @@ func TestOCRWorker_FaltaDocumentID_RechazaInmediato(t *testing.T) {
 // =============================================================================
 
 func TestOCRWorker_FalloExtraccion_DocumentoFailed(t *testing.T) {
+	sse.Init()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

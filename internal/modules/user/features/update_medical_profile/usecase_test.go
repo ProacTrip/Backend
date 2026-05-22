@@ -20,18 +20,18 @@ import (
 // =============================================================================
 
 type mockMedicalProfileRepo struct {
-	getByUserIDFn func(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfileV2, error)
-	updateFn      func(ctx context.Context, profile *domain.MedicalProfileV2) error
+	getByUserIDFn func(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfile, error)
+	updateFn      func(ctx context.Context, profile *domain.MedicalProfile) error
 }
 
-func (m *mockMedicalProfileRepo) Create(ctx context.Context, p *domain.MedicalProfileV2) error { return nil }
-func (m *mockMedicalProfileRepo) GetByUserID(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfileV2, error) {
+func (m *mockMedicalProfileRepo) Create(ctx context.Context, p *domain.MedicalProfile) error { return nil }
+func (m *mockMedicalProfileRepo) GetByUserID(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfile, error) {
 	if m.getByUserIDFn != nil {
 		return m.getByUserIDFn(ctx, userID)
 	}
 	return nil, nil
 }
-func (m *mockMedicalProfileRepo) Update(ctx context.Context, p *domain.MedicalProfileV2) error {
+func (m *mockMedicalProfileRepo) Update(ctx context.Context, p *domain.MedicalProfile) error {
 	if m.updateFn != nil {
 		return m.updateFn(ctx, p)
 	}
@@ -65,8 +65,8 @@ func (m *mockEncryptionService) Decrypt(ciphertext []byte) (string, error) {
 // Helper: construir perfil médico de base
 // =============================================================================
 
-func makeBaseMedicalProfile(userID uuid.UUID) *domain.MedicalProfileV2 {
-	return &domain.MedicalProfileV2{
+func makeBaseMedicalProfile(userID uuid.UUID) *domain.MedicalProfile {
+	return &domain.MedicalProfile{
 		ID:        uuid.Must(uuid.NewV7()),
 		UserID:    userID,
 		IsShared:  false,
@@ -88,13 +88,13 @@ func TestUpdateMedicalProfile_HappyPath(t *testing.T) {
 	bloodType := "A+"
 	isShared := true
 
-	var updatedProfile *domain.MedicalProfileV2
+	var updatedProfile *domain.MedicalProfile
 	uc := NewUseCase(UseCaseDeps{
 		MedicalProfileRepo: &mockMedicalProfileRepo{
-			getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.MedicalProfileV2, error) {
+			getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.MedicalProfile, error) {
 				return makeBaseMedicalProfile(userID), nil
 			},
-			updateFn: func(ctx context.Context, p *domain.MedicalProfileV2) error {
+			updateFn: func(ctx context.Context, p *domain.MedicalProfile) error {
 				updatedProfile = p
 				return nil
 			},
@@ -158,13 +158,13 @@ func TestUpdateMedicalProfile_SkipNilFields(t *testing.T) {
 	// Solo actualizar blood_type, el resto nil
 	bloodType := "O-"
 
-	var updatedProfile *domain.MedicalProfileV2
+	var updatedProfile *domain.MedicalProfile
 	uc := NewUseCase(UseCaseDeps{
 		MedicalProfileRepo: &mockMedicalProfileRepo{
-			getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.MedicalProfileV2, error) {
+			getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.MedicalProfile, error) {
 				return makeBaseMedicalProfile(userID), nil
 			},
-			updateFn: func(ctx context.Context, p *domain.MedicalProfileV2) error {
+			updateFn: func(ctx context.Context, p *domain.MedicalProfile) error {
 				updatedProfile = p
 				return nil
 			},
@@ -196,7 +196,7 @@ func TestUpdateMedicalProfile_InvalidBloodType(t *testing.T) {
 
 	uc := NewUseCase(UseCaseDeps{
 		MedicalProfileRepo: &mockMedicalProfileRepo{
-			getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.MedicalProfileV2, error) {
+			getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.MedicalProfile, error) {
 				return makeBaseMedicalProfile(userID), nil
 			},
 		},
@@ -226,10 +226,10 @@ func TestUpdateMedicalProfile_ValidBloodTypes(t *testing.T) {
 		t.Run(bt, func(t *testing.T) {
 			uc := NewUseCase(UseCaseDeps{
 				MedicalProfileRepo: &mockMedicalProfileRepo{
-					getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.MedicalProfileV2, error) {
+					getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.MedicalProfile, error) {
 						return makeBaseMedicalProfile(userID), nil
 					},
-					updateFn: func(ctx context.Context, p *domain.MedicalProfileV2) error {
+					updateFn: func(ctx context.Context, p *domain.MedicalProfile) error {
 						return nil
 					},
 				},
@@ -259,13 +259,13 @@ func TestUpdateMedicalProfile_EncryptsMultipleFields(t *testing.T) {
 	emergencyContact := "María +54911"
 	insuranceInfo := "Póliza 12345"
 
-	var updatedProfile *domain.MedicalProfileV2
+	var updatedProfile *domain.MedicalProfile
 	uc := NewUseCase(UseCaseDeps{
 		MedicalProfileRepo: &mockMedicalProfileRepo{
-			getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.MedicalProfileV2, error) {
+			getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.MedicalProfile, error) {
 				return makeBaseMedicalProfile(userID), nil
 			},
-			updateFn: func(ctx context.Context, p *domain.MedicalProfileV2) error {
+			updateFn: func(ctx context.Context, p *domain.MedicalProfile) error {
 				updatedProfile = p
 				return nil
 			},
@@ -305,7 +305,7 @@ func TestUpdateMedicalProfile_EncryptsMultipleFields(t *testing.T) {
 func TestUpdateMedicalProfile_ProfileNotFound(t *testing.T) {
 	uc := NewUseCase(UseCaseDeps{
 		MedicalProfileRepo: &mockMedicalProfileRepo{
-			getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.MedicalProfileV2, error) {
+			getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.MedicalProfile, error) {
 				return nil, domain.ErrMedicalProfileNotFound
 			},
 		},

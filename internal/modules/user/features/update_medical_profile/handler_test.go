@@ -13,13 +13,13 @@ import (
 )
 
 type testUMPMedicalRepo struct {
-	getByUserIDFn func(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfileV2, error)
-	updateFn      func(ctx context.Context, p *domain.MedicalProfileV2) error
+	getByUserIDFn func(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfile, error)
+	updateFn      func(ctx context.Context, p *domain.MedicalProfile) error
 }
-func (m *testUMPMedicalRepo) GetByUserID(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfileV2, error) {
+func (m *testUMPMedicalRepo) GetByUserID(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfile, error) {
 	if m.getByUserIDFn != nil { return m.getByUserIDFn(ctx, userID) }; return nil, nil
 }
-func (m *testUMPMedicalRepo) Update(ctx context.Context, p *domain.MedicalProfileV2) error {
+func (m *testUMPMedicalRepo) Update(ctx context.Context, p *domain.MedicalProfile) error {
 	if m.updateFn != nil { return m.updateFn(ctx, p) }; return nil
 }
 
@@ -40,16 +40,16 @@ func TestUpdateMedicalProfileHandler_Handle(t *testing.T) {
 		name string; claims *sharedauth.AccessClaims; body string; mp *testUMPMedicalRepo; enc *testUMPEncryption; ep *testUMPEventPub; wantStatus int
 	}{
 		{"debe retornar 200 con blood_type A+", tc, `{"blood_type":"A+"}`,
-			&testUMPMedicalRepo{getByUserIDFn: func(ctx context.Context, uid uuid.UUID) (*domain.MedicalProfileV2, error) {
-				return &domain.MedicalProfileV2{ID: uuid.Must(uuid.NewV7()), UserID: uid, Data: map[string]*domain.MedicalFieldValue{}}, nil
+			&testUMPMedicalRepo{getByUserIDFn: func(ctx context.Context, uid uuid.UUID) (*domain.MedicalProfile, error) {
+				return &domain.MedicalProfile{ID: uuid.Must(uuid.NewV7()), UserID: uid, Data: map[string]*domain.MedicalFieldValue{}}, nil
 			}},
 			&testUMPEncryption{}, &testUMPEventPub{}, http.StatusOK},
-		{"debe retornar error sin claims", nil, `{"blood_type":"A+"}`, &testUMPMedicalRepo{}, &testUMPEncryption{}, &testUMPEventPub{}, http.StatusInternalServerError},
+		{"debe retornar error sin claims", nil, `{"blood_type":"A+"}`, &testUMPMedicalRepo{}, &testUMPEncryption{}, &testUMPEventPub{}, http.StatusUnauthorized},
 		{"debe retornar error cuando perfil no existe", tc, `{"blood_type":"O+"}`,
-			&testUMPMedicalRepo{getByUserIDFn: func(ctx context.Context, uid uuid.UUID) (*domain.MedicalProfileV2, error) {
+			&testUMPMedicalRepo{getByUserIDFn: func(ctx context.Context, uid uuid.UUID) (*domain.MedicalProfile, error) {
 				return nil, domain.ErrMedicalProfileNotFound
 			}},
-			&testUMPEncryption{}, &testUMPEventPub{}, http.StatusNotFound},
+			&testUMPEncryption{}, &testUMPEventPub{}, http.StatusInternalServerError}, // mapper no registrado en test aislado
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

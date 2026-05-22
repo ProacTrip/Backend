@@ -50,9 +50,9 @@ type OCRDocUpdater interface {
 
 // MedicalProfileManager gestiona el perfil médico durante el OCR.
 type MedicalProfileManager interface {
-	GetByUserID(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfileV2, error)
-	Update(ctx context.Context, profile *domain.MedicalProfileV2) error
-	Create(ctx context.Context, profile *domain.MedicalProfileV2) error
+	GetByUserID(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfile, error)
+	Update(ctx context.Context, profile *domain.MedicalProfile) error
+	Create(ctx context.Context, profile *domain.MedicalProfile) error
 }
 
 // MedicalPendingCreator crea actualizaciones médicas pendientes.
@@ -353,7 +353,7 @@ func (w *OCRWorker) compareAndApplyMedicalData(ctx context.Context, doc *domain.
 		if err == domain.ErrMedicalProfileNotFound {
 			// Crear perfil médico nuevo con los datos extraídos
 			now := time.Now()
-			profile = &domain.MedicalProfileV2{
+			profile = &domain.MedicalProfile{
 				ID:        uuid.Must(uuid.NewV7()),
 				UserID:    userID,
 				Data:      make(map[string]*domain.MedicalFieldValue),

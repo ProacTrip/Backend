@@ -50,13 +50,13 @@ type MedicalFieldValue struct {
 }
 
 // =============================================================================
-// MedicalProfileV2 — Perfil médico v2 (JSONB flexible)
+// MedicalProfile — Perfil médico (JSONB flexible)
 // =============================================================================
 
-// MedicalProfileV2 representa el perfil médico del usuario.
+// MedicalProfile representa el perfil médico del usuario.
 // Alineado con la migración user_medical_profiles.
 // Los datos se almacenan como JSONB (map[string]*MedicalFieldValue).
-type MedicalProfileV2 struct {
+type MedicalProfile struct {
 	ID        uuid.UUID                         `json:"id"`
 	UserID    uuid.UUID                         `json:"user_id"`
 	Data      map[string]*MedicalFieldValue     `json:"data"`
@@ -65,10 +65,10 @@ type MedicalProfileV2 struct {
 	UpdatedAt time.Time                         `json:"updated_at"`
 }
 
-// NewMedicalProfileV2 crea un nuevo perfil médico vacío.
-func NewMedicalProfileV2(userID uuid.UUID) *MedicalProfileV2 {
+// NewMedicalProfile crea un nuevo perfil médico vacío.
+func NewMedicalProfile(userID uuid.UUID) *MedicalProfile {
 	now := time.Now()
-	return &MedicalProfileV2{
+	return &MedicalProfile{
 		ID:        uuid.Must(uuid.NewV7()),
 		UserID:    userID,
 		Data:      make(map[string]*MedicalFieldValue),
@@ -79,7 +79,7 @@ func NewMedicalProfileV2(userID uuid.UUID) *MedicalProfileV2 {
 }
 
 // SetField establece o actualiza un campo médico.
-func (mp *MedicalProfileV2) SetField(fieldName, value string, source MedicalSourceDetail) {
+func (mp *MedicalProfile) SetField(fieldName, value string, source MedicalSourceDetail) {
 	mp.Data[fieldName] = &MedicalFieldValue{
 		Value:     value,
 		Source:    source,
@@ -89,7 +89,7 @@ func (mp *MedicalProfileV2) SetField(fieldName, value string, source MedicalSour
 }
 
 // RemoveField elimina un campo del perfil médico.
-func (mp *MedicalProfileV2) RemoveField(fieldName string) {
+func (mp *MedicalProfile) RemoveField(fieldName string) {
 	delete(mp.Data, fieldName)
 	mp.UpdatedAt = time.Now()
 }

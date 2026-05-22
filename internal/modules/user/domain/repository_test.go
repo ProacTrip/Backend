@@ -70,18 +70,18 @@ var _ TravelPrefsRepository = (*travelPrefsRepoStub)(nil)
 
 // medicalProfileRepoStub satisface MedicalProfileRepository
 type medicalProfileRepoStub struct {
-	createFn      func(context.Context, *MedicalProfileV2) error
-	getByUserIDFn func(context.Context, uuid.UUID) (*MedicalProfileV2, error)
-	updateFn      func(context.Context, *MedicalProfileV2) error
+	createFn      func(context.Context, *MedicalProfile) error
+	getByUserIDFn func(context.Context, uuid.UUID) (*MedicalProfile, error)
+	updateFn      func(context.Context, *MedicalProfile) error
 }
 
-func (s *medicalProfileRepoStub) Create(ctx context.Context, mp *MedicalProfileV2) error {
+func (s *medicalProfileRepoStub) Create(ctx context.Context, mp *MedicalProfile) error {
 	return s.createFn(ctx, mp)
 }
-func (s *medicalProfileRepoStub) GetByUserID(ctx context.Context, id uuid.UUID) (*MedicalProfileV2, error) {
+func (s *medicalProfileRepoStub) GetByUserID(ctx context.Context, id uuid.UUID) (*MedicalProfile, error) {
 	return s.getByUserIDFn(ctx, id)
 }
-func (s *medicalProfileRepoStub) Update(ctx context.Context, mp *MedicalProfileV2) error {
+func (s *medicalProfileRepoStub) Update(ctx context.Context, mp *MedicalProfile) error {
 	return s.updateFn(ctx, mp)
 }
 

@@ -19,7 +19,7 @@ import (
 
 // MedicalProfileRepo permite leer el perfil médico.
 type MedicalProfileRepo interface {
-	GetByUserID(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfileV2, error)
+	GetByUserID(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfile, error)
 }
 
 // EncryptionSvc permite desencriptar valores médicos.

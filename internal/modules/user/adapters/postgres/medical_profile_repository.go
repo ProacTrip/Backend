@@ -40,7 +40,7 @@ func NewMedicalProfileRepository(db *pgxpool.Pool) *MedicalProfileRepository {
 
 // Create inserta un nuevo perfil médico para el usuario.
 // El campo data se serializa a JSONB. Si Data es nil, se usa '{}'.
-func (r *MedicalProfileRepository) Create(ctx context.Context, profile *domain.MedicalProfileV2) error {
+func (r *MedicalProfileRepository) Create(ctx context.Context, profile *domain.MedicalProfile) error {
 	dataJSON, err := marshalMedicalData(profile.Data)
 	if err != nil {
 		return fmt.Errorf("create medical profile: marshal data: %w", err)
@@ -74,14 +74,14 @@ func (r *MedicalProfileRepository) Create(ctx context.Context, profile *domain.M
 
 // GetByUserID recupera el perfil médico del usuario.
 // Retorna ErrMedicalProfileNotFound si no existe.
-func (r *MedicalProfileRepository) GetByUserID(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfileV2, error) {
+func (r *MedicalProfileRepository) GetByUserID(ctx context.Context, userID uuid.UUID) (*domain.MedicalProfile, error) {
 	query := `
 		SELECT id, user_id, data, is_shared, created_at, updated_at
 		FROM user_medical_profiles
 		WHERE user_id = $1
 	`
 
-	var mp domain.MedicalProfileV2
+	var mp domain.MedicalProfile
 	var dataBytes []byte
 
 	err := r.db.QueryRow(ctx, query, userID).Scan(
@@ -114,7 +114,7 @@ func (r *MedicalProfileRepository) GetByUserID(ctx context.Context, userID uuid.
 
 // Update persiste los cambios del perfil médico.
 // Serializa Data a JSONB y actualiza is_shared y updated_at.
-func (r *MedicalProfileRepository) Update(ctx context.Context, profile *domain.MedicalProfileV2) error {
+func (r *MedicalProfileRepository) Update(ctx context.Context, profile *domain.MedicalProfile) error {
 	dataJSON, err := marshalMedicalData(profile.Data)
 	if err != nil {
 		return fmt.Errorf("update medical profile: marshal data: %w", err)

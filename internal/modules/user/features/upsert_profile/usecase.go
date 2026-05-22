@@ -114,7 +114,7 @@ func (uc *UseCase) createDefaults(ctx context.Context, userID uuid.UUID) {
 	}
 
 	if uc.medicalRepo != nil {
-		medicalProfile := domain.NewMedicalProfileV2(userID)
+		medicalProfile := domain.NewMedicalProfile(userID)
 		if err := uc.medicalRepo.Create(ctx, medicalProfile); err != nil {
 			slog.WarnContext(ctx, "create medical profile default failed",
 				slog.String("user_id", userID.String()),
