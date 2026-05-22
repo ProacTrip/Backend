@@ -72,10 +72,10 @@ func TestSecurityHeaders_TodosLosHeaders_Presentes(t *testing.T) {
 }
 
 // =============================================================================
-// T4.3.2: hsts_include_subdomains — verificar que HSTS contiene includeSubDomains
+// T4.3.2: hsts_max_age — verificar que HSTS tiene max-age sin includeSubDomains
 // =============================================================================
 
-func TestSecurityHeaders_HSTS_ContieneIncludeSubDomains(t *testing.T) {
+func TestSecurityHeaders_HSTS_MaxAge_SinIncludeSubDomains(t *testing.T) {
 	e, c, rec := newSecurityHeadersTestContext()
 	defer func() { _ = e }()
 
@@ -89,8 +89,8 @@ func TestSecurityHeaders_HSTS_ContieneIncludeSubDomains(t *testing.T) {
 	}
 
 	hsts := rec.Header().Get("Strict-Transport-Security")
-	if hsts != "max-age=31536000; includeSubDomains" {
-		t.Errorf("Strict-Transport-Security = %q, want %q", hsts, "max-age=31536000; includeSubDomains")
+	if hsts != "max-age=31536000" {
+		t.Errorf("Strict-Transport-Security = %q, want %q", hsts, "max-age=31536000")
 	}
 }
 
@@ -162,7 +162,7 @@ func TestSecurityHeaders_HeadersPersistenEnRespuestaFinal(t *testing.T) {
 	assertHeader("X-Content-Type-Options", "nosniff")
 	assertHeader("X-Frame-Options", "DENY")
 	assertHeader("Referrer-Policy", "strict-origin-when-cross-origin")
-	assertHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+	assertHeader("Strict-Transport-Security", "max-age=31536000")
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("status code = %d, want %d", rec.Code, http.StatusOK)

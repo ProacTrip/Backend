@@ -68,12 +68,8 @@ func (uc *UseCase) Wait() {
 
 // Execute retrieves hotel details with caching.
 func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) {
-	// 1. Validate
-	if err := cmd.Validate(); err != nil {
-		return nil, err
-	}
-
-	// 2. Convert to domain request
+	// 1. Convert to domain request
+	// Validate() ya se ejecutó en el handler — no se repite acá.
 	domainReq := cmd.ToDomain()
 
 	// 3. Generate cache key
