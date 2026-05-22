@@ -12,21 +12,14 @@ import (
 // Command is the input DTO for AI-powered unified search.
 // The user sends a natural language message; the AI interprets it
 // and the UseCase orchestrates flight and/or hotel searches.
+//
+// Backend resolves location (from c.RealIP() → env:{ip} cache),
+// currency/language (from UserProfilePort), and AI decides search
+// mode via tool calling — none of these are client-provided anymore.
 type Command struct {
 	Message        string `json:"message"`
 	ConversationID string `json:"conversation_id,omitzero"`
 	Stream         bool   `json:"stream,omitzero"` // true → SSE streaming response
-
-	// SearchModeHint permite al cliente sugerir el modo de búsqueda.
-	// Valores válidos: "discovery", "exact", "" (vacío = automático).
-	// Si se especifica un valor inválido, Validate() retorna error.
-	SearchModeHint string `json:"search_mode,omitzero"`
-
-	// Location/env context from frontend (forwarded from /v1/environment).
-	Lat         float64 `json:"lat,omitzero"`
-	Lng         float64 `json:"lng,omitzero"`
-	Timezone    string  `json:"timezone,omitzero"`
-	CountryCode string  `json:"country_code,omitzero"`
 
 	// Resolved search defaults — populated by the handler after calling
 	// shared.ResolveSearchDefaults(). Not part of the JSON API.
@@ -47,17 +40,6 @@ func (c *Command) Validate() error {
 	trimmed := searchshared.TrimSpaces(c.Message)
 	if trimmed == "" {
 		return fmt.Errorf("%w: message", domain.ErrMissingRequiredField)
-	}
-
-	// Validar SearchModeHint si está presente
-	if c.SearchModeHint != "" {
-		switch SearchMode(c.SearchModeHint) {
-		case SearchModeDiscovery, SearchModeExact:
-			// válido
-		default:
-			return fmt.Errorf("%w: search_mode debe ser 'discovery' o 'exact', recibido '%s'",
-				domain.ErrInvalidParameterRange, c.SearchModeHint)
-		}
 	}
 
 	return nil

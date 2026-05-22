@@ -29,6 +29,7 @@ import (
 // Handler processes AI-powered unified search HTTP requests.
 type Handler struct {
 	usecase     *UseCase
+	convStore   ConversationStore // new ConversationStore for CRUD endpoints
 	rdb         *redis.Client
 	defaultsCfg shared.SearchDefaultConfig
 	userProfile domain.UserProfilePort
@@ -37,8 +38,8 @@ type Handler struct {
 
 // NewHandler creates a new AI search handler.
 // userProfile may be nil for anonymous-only deployments or tests.
-func NewHandler(usecase *UseCase, rdb *redis.Client, defaultsCfg shared.SearchDefaultConfig, userProfile domain.UserProfilePort) *Handler {
-	return &Handler{usecase: usecase, rdb: rdb, defaultsCfg: defaultsCfg, userProfile: userProfile}
+func NewHandler(usecase *UseCase, convStore ConversationStore, rdb *redis.Client, defaultsCfg shared.SearchDefaultConfig, userProfile domain.UserProfilePort) *Handler {
+	return &Handler{usecase: usecase, convStore: convStore, rdb: rdb, defaultsCfg: defaultsCfg, userProfile: userProfile}
 }
 
 // Handle processes the AI search request.
@@ -80,7 +81,6 @@ func (h *Handler) Handle(c *echo.Context) error {
 		h.resolveContext(c, &cmd)
 
 		userID := shared.UserIDFromContext(c)
-		isDiscovery := cmd.SearchModeHint == "discovery"
 
 		// Send "thinking" event so the client knows processing has started
 		sseEvent(c, "status", map[string]string{"status": "thinking"})
@@ -99,16 +99,6 @@ func (h *Handler) Handle(c *echo.Context) error {
 		}
 
 		resp.FromCache = false
-
-		// Discovery mode: stream the AI response as word-chunked SSE events
-		if isDiscovery && resp.Mode == "discovery" && resp.Message != "" {
-			if err := streamDiscoveryResponse(c.Response(), resp.Message); err != nil {
-				slog.ErrorContext(c.Request().Context(), "ai_search: SSE stream write failed",
-					slog.String("error", err.Error()),
-				)
-			}
-			return nil
-		}
 
 		// Exact search: send the full JSON response as a single "result" event
 		// Rate limit provider headers
@@ -176,16 +166,14 @@ func (h *Handler) Handle(c *echo.Context) error {
 // =============================================================================
 
 // resolveContext populates cmd with resolved user preferences (currency, language)
-// from the UserProfilePort, environmental data (lat, lng, timezone, country_code)
-// from the env:{ip} cache when not provided by the client, and falls back to
-// config defaults for currency/language.
+// from the UserProfilePort, falling back to config defaults.
 //
-// Resolution order per field:
+// Resolution order:
 //
 //	Currency / HL:  user profile prefs (auth users) → config defaults
-//	Lat / Lng:       client-provided (omitzero=0) → env:{ip} cache
-//	Timezone:         client-provided → env:{ip} cache
-//	CountryCode:      client-provided → env:{ip} cache
+//
+// Location (lat/lng/timezone/country_code) is NO LONGER resolved here.
+// The backend resolves it from c.RealIP() → env:{ip} cache inside the usecase.
 func (h *Handler) resolveContext(c *echo.Context, cmd *Command) {
 	ctx := c.Request().Context()
 	userID := shared.UserIDFromContext(c)
@@ -199,23 +187,6 @@ func (h *Handler) resolveContext(c *echo.Context, cmd *Command) {
 			}
 			if cmd.HL == "" {
 				cmd.HL = lang
-			}
-		}
-	}
-
-	// Resolve environment data from env:{ip} cache when client didn't provide it
-	needEnv := cmd.Lat == 0 && cmd.Lng == 0 || cmd.Timezone == "" || cmd.CountryCode == ""
-	if needEnv && h.rdb != nil && clientIP != "" {
-		if entry := h.resolveEnvCacheEntry(ctx, clientIP); entry != nil {
-			if cmd.Lat == 0 && cmd.Lng == 0 {
-				cmd.Lat = entry.Location.Latitude
-				cmd.Lng = entry.Location.Longitude
-			}
-			if cmd.Timezone == "" {
-				cmd.Timezone = entry.Location.Timezone
-			}
-			if cmd.CountryCode == "" {
-				cmd.CountryCode = entry.Location.CountryCode
 			}
 		}
 	}
@@ -273,4 +244,109 @@ func sseEventRaw(c *echo.Context, event, data string) {
 // sseError sends an error SSE event to the client.
 func sseError(c *echo.Context, message string) {
 	sseEventRaw(c, "error", fmt.Sprintf(`{"error":"%s"}`, message))
+}
+
+// =============================================================================
+// Conversation CRUD handlers (Phase 5)
+// =============================================================================
+
+// HandleListConversations returns the user's active conversations.
+// Route: GET /v1/search/ai/conversations
+func (h *Handler) HandleListConversations(c *echo.Context) error {
+	userID := shared.UserIDFromContext(c)
+	if userID == "" {
+		// Anonymous users get empty list — conversations are tracked by
+		// conversation_id in the frontend, not by user index.
+		return c.JSON(http.StatusOK, []ConversationPreview{})
+	}
+
+	previews, err := h.convStore.ListUserConversations(c.Request().Context(), userID)
+	if err != nil {
+		slog.ErrorContext(c.Request().Context(), "HandleListConversations: failed",
+			slog.String("user_id", userID),
+			slog.String("error", err.Error()),
+		)
+		return httperr.MapError(c, err)
+	}
+
+	if previews == nil {
+		previews = []ConversationPreview{}
+	}
+
+	return c.JSON(http.StatusOK, previews)
+}
+
+// HandleGetConversation returns the full state of a conversation.
+// Route: GET /v1/search/ai/conversations/{id}
+//
+// This is the F5 recovery endpoint (REQ-009): the frontend can reconstruct
+// the entire chat UI from the returned state.
+func (h *Handler) HandleGetConversation(c *echo.Context) error {
+	convID := c.Param("id")
+	if convID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "conversation ID is required")
+	}
+
+	conv, err := h.convStore.Load(c.Request().Context(), convID)
+	if err != nil {
+		slog.ErrorContext(c.Request().Context(), "HandleGetConversation: Load failed",
+			slog.String("conversation_id", convID),
+			slog.String("error", err.Error()),
+		)
+		return httperr.MapError(c, err)
+	}
+
+	if conv == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "conversation not found or expired")
+	}
+
+	// Ownership check: only the conversation owner can access it.
+	// Anonymous conversations (UserID=="") are accessible to anyone who
+	// has the conversation ID — the ID itself acts as the access token.
+	userID := shared.UserIDFromContext(c)
+	if conv.UserID != "" && conv.UserID != userID {
+		return echo.NewHTTPError(http.StatusForbidden, "conversation belongs to another user")
+	}
+
+	return c.JSON(http.StatusOK, conv)
+}
+
+// HandleDeleteConversation removes a conversation.
+// Route: DELETE /v1/search/ai/conversations/{id}
+func (h *Handler) HandleDeleteConversation(c *echo.Context) error {
+	convID := c.Param("id")
+	if convID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "conversation ID is required")
+	}
+
+	userID := shared.UserIDFromContext(c)
+
+	// Load first to check ownership (unless anonymous).
+	conv, err := h.convStore.Load(c.Request().Context(), convID)
+	if err != nil {
+		slog.ErrorContext(c.Request().Context(), "HandleDeleteConversation: Load failed",
+			slog.String("conversation_id", convID),
+			slog.String("error", err.Error()),
+		)
+		return httperr.MapError(c, err)
+	}
+
+	if conv == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "conversation not found")
+	}
+
+	// Ownership check
+	if conv.UserID != "" && conv.UserID != userID {
+		return echo.NewHTTPError(http.StatusForbidden, "conversation belongs to another user")
+	}
+
+	if err := h.convStore.Delete(c.Request().Context(), convID, conv.UserID); err != nil {
+		slog.ErrorContext(c.Request().Context(), "HandleDeleteConversation: Delete failed",
+			slog.String("conversation_id", convID),
+			slog.String("error", err.Error()),
+		)
+		return httperr.MapError(c, err)
+	}
+
+	return c.NoContent(http.StatusNoContent)
 }

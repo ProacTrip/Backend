@@ -479,9 +479,8 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	// Login endpoint
 	authGroup.POST("/login", authMod.LoginHandler.Handle, anonRateLimitMW)
 
-	// Logout endpoints — auth middleware + authenticated rate limiting
+	// Logout endpoint — auth middleware + authenticated rate limiting
 	authGroup.POST("/logout", authMod.LogoutHandler.Handle, authMiddleware.Handle, authRateLimitMW)
-	authGroup.POST("/logout/all", authMod.LogoutHandler.HandleAll, authMiddleware.Handle, authRateLimitMW)
 
 	// OAuth endpoints — públicas, sin auth middleware (obviamente)
 	authGroup.GET("/oauth/:provider", authMod.OAuthAuthorizeHandler.Handle, anonRateLimitMW)
@@ -498,6 +497,10 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	searchGroup.POST("/hotel-details", searchMod.HotelDetailsHandler.Handle)
 	// AI search — supports streaming via "stream": true in the request body
 	searchGroup.POST("/ai", searchMod.AISearchHandler.Handle)
+	// AI search conversation CRUD
+	searchGroup.GET("/ai/conversations", searchMod.AISearchHandler.HandleListConversations)
+	searchGroup.GET("/ai/conversations/:id", searchMod.AISearchHandler.HandleGetConversation)
+	searchGroup.DELETE("/ai/conversations/:id", searchMod.AISearchHandler.HandleDeleteConversation)
 
 	// Ejecutar búsqueda guardada — requiere auth (cookie), no opcional
 	if searchMod.ExecuteSavedSearchHandler != nil {
@@ -546,7 +549,6 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	dashboard.PUT("/users/:id/status",
 		authMod.AccountStatusHandler.Handle,
 		sharedmiddleware.RequirePermission(sharedauth.PermUsersWrite),
-		sharedmiddleware.RequirePermission(sharedauth.PermSessionsWrite),
 	)
 
 	// Feature limits — lectura usa permiso del grupo, escritura requiere feature_limits:write.
