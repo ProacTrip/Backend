@@ -13,6 +13,7 @@
 package ai_search
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -55,8 +56,16 @@ type HotelSearcher interface {
 
 // ConversationStore abstracts conversation persistence.
 type ConversationStore interface {
+	// Legacy methods — return domain.ConversationState (used by runExactSearch).
 	GetConversation(ctx context.Context, id string) (*domain.ConversationState, error)
 	SaveConversation(ctx context.Context, conv *domain.ConversationState) error
+
+	// New methods — return ai_search.Conversation (used by chat streaming + handlers).
+	Save(ctx context.Context, conv *Conversation) error
+	Load(ctx context.Context, convID string) (*Conversation, error)
+	Delete(ctx context.Context, convID, userID string) error
+	ListUserConversations(ctx context.Context, userID string) ([]ConversationPreview, error)
+	ResetTTL(ctx context.Context, convID string) error
 }
 
 // InterpretationCache is the cache interface for AI interpretation results.
@@ -178,12 +187,11 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command, userID string) (*Re
 		return nil, err
 	}
 
-	// 2. Discovery dispatch — if enabled and discovery interpreter is wired,
-	//    route to AI-powered discovery pipeline.
-	if uc.discoveryInterpreter != nil {
-		if cmd.SearchModeHint == "discovery" || isDiscoveryQuery(cmd.Message) {
-			return uc.runDiscovery(ctx, cmd, userID)
-		}
+	// 2. Discovery dispatch — if discovery interpreter is wired and the query
+	//    is a discovery query, route to AI-powered discovery pipeline.
+	//    The AI tool calling path has replaced prompt-based discovery.
+	if uc.discoveryInterpreter != nil && isDiscoveryQuery(cmd.Message) {
+		return uc.runDiscovery(ctx, cmd, userID)
 	}
 
 	// 3. Default: exact search (existing behavior)
@@ -506,28 +514,21 @@ func (uc *UseCase) runDiscovery(ctx context.Context, cmd Command, userID string)
 		slog.String("user_id", userID),
 	)
 
-	// Build DiscoveryContext from command env fields + resolved defaults + current date
+	// Build DiscoveryContext from resolved defaults + current date.
+	// Location is resolved from env:{ip} cache inside the usecase.
 	discCtx := domain.DiscoveryContext{
-		Lat:         cmd.Lat,
-		Lng:         cmd.Lng,
-		CountryCode: cmd.CountryCode,
-		Timezone:    cmd.Timezone,
-		Currency:    cmd.Currency,
-		Language:    cmd.HL,
-		Date:        time.Now().Format("2006-01-02"),
+		Currency: cmd.Currency,
+		Language: cmp.Or(cmd.HL, "es"),
+		Date:     time.Now().Format("2006-01-02"),
 	}
 
-	// Override with resolved env cache data if not provided by frontend
-	if discCtx.CountryCode == "" && uc.rdb != nil && cmd.ClientIP != "" {
+	// Resolve location from env:{ip} cache
+	if uc.rdb != nil && cmd.ClientIP != "" {
 		if entry := uc.resolveEnvCacheEntry(ctx, cmd.ClientIP); entry != nil {
 			discCtx.CountryCode = entry.Location.CountryCode
-			if discCtx.Timezone == "" {
-				discCtx.Timezone = entry.Location.Timezone
-			}
-			if discCtx.Lat == 0 && discCtx.Lng == 0 {
-				discCtx.Lat = entry.Location.Latitude
-				discCtx.Lng = entry.Location.Longitude
-			}
+			discCtx.Timezone = entry.Location.Timezone
+			discCtx.Lat = entry.Location.Latitude
+			discCtx.Lng = entry.Location.Longitude
 		}
 	}
 
