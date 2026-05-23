@@ -1170,7 +1170,7 @@ func TestExecuteToolCalls_ConcurrentDispatch(t *testing.T) {
 		}},
 	}
 
-	results := uc.ExecuteToolCalls(ctx, toolCalls)
+	results := uc.ExecuteToolCalls(ctx, toolCalls, ai_search.ConversationContext{})
 
 	if len(results) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(results))
@@ -1262,7 +1262,7 @@ func TestExecuteToolCalls_PartialFailure(t *testing.T) {
 		}},
 	}
 
-	results := uc.ExecuteToolCalls(ctx, toolCalls)
+	results := uc.ExecuteToolCalls(ctx, toolCalls, ai_search.ConversationContext{})
 
 	if len(results) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(results))
@@ -1379,7 +1379,7 @@ func TestExecuteChatStream_SingleToolCall(t *testing.T) {
 		}},
 	}
 
-	turnCount, err := uc.ExecuteChatStream(ctx, w, messages, tools, 3)
+	turnCount, err := uc.ExecuteChatStream(ctx, w, messages, tools, 3, ai_search.ConversationContext{})
 	if err != nil {
 		t.Fatalf("ExecuteChatStream failed: %v", err)
 	}
@@ -1453,7 +1453,7 @@ func TestExecuteChatStream_MultiTurn(t *testing.T) {
 	}
 	tools := []map[string]interface{}{}
 
-	turnCount, err := uc.ExecuteChatStream(ctx, w, messages, tools, 3)
+	turnCount, err := uc.ExecuteChatStream(ctx, w, messages, tools, 3, ai_search.ConversationContext{})
 	if err != nil {
 		t.Fatalf("ExecuteChatStream failed: %v", err)
 	}
@@ -1503,7 +1503,7 @@ func TestExecuteChatStream_MaxTurnsGuard(t *testing.T) {
 	tools := []map[string]interface{}{}
 
 	// maxTurns = 1 — should stop after first tool call round
-	turnCount, err := uc.ExecuteChatStream(ctx, w, messages, tools, 1)
+	turnCount, err := uc.ExecuteChatStream(ctx, w, messages, tools, 1, ai_search.ConversationContext{})
 	if err != nil {
 		t.Fatalf("ExecuteChatStream failed: %v", err)
 	}

@@ -877,6 +877,53 @@ La AI puede extraer los siguientes parámetros del lenguaje natural:
 
 ---
 
+## Realtime Events (SSE)
+
+El backend emite eventos en tiempo real vía Server-Sent Events (SSE) que el frontend debe escuchar para mantener la UI sincronizada sin refrescos de página.
+
+### Endpoint
+
+```
+GET /v1/realtime/events
+```
+
+> **Requerido:** Autenticación vía cookie `__Secure-access_token`. El endpoint no está disponible para usuarios anónimos.
+
+### Eventos
+
+| Evento | Payload | Cuándo |
+|--------|---------|--------|
+| `search.conversation.expired` | `{"conversation_id": "019ef..."}` | Una conversación de búsqueda expiró automáticamente (TTL de DragonflyDB agotado) |
+
+### Comportamiento Esperado del Frontend
+
+Cuando el frontend recibe un evento `search.conversation.expired`:
+
+1. **Eliminar** la conversación expirada de la lista de conversaciones activas inmediatamente, sin esperar un refresco de página.
+2. **NO mostrar** ningún mensaje, notificación, toast, ni alerta al usuario. La eliminación debe ser silenciosa — la conversación simplemente desaparece de la lista.
+3. Si el usuario tiene abierta la conversación expirada en ese momento, el frontend debe mostrar un estado de "conversación expirada" (mismo comportamiento que al recibir 404 en `GET /conversations/{id}`).
+
+### Formato Wire
+
+```
+event: search.conversation.expired
+data: {"conversation_id":"019ef..."}
+
+```
+
+El header `Content-Type` de la respuesta es `text/event-stream`. El frontend debe usar `EventSource` o `fetch` con `ReadableStream` para consumir estos eventos.
+
+### Eventos Futuros
+
+Este endpoint está diseñado para extenderse. En el futuro puede emitir:
+
+- `search.conversation.updated` — otra pestaña/dispositivo modificó la conversación
+- `search.provider_unavailable` — SerpAPI no está disponible temporalmente
+
+> **Nota de implementación:** Los eventos se publican vía el hub SSE central (`internal/shared/sse`). Cualquier módulo del backend puede publicar eventos para usuarios autenticados. El listener de expiración de DragonflyDB (keyspace notifications) es el publisher de `search.conversation.expired`.
+
+---
+
 ## Rate Limiting
 
 Rate limiting multi-tier con DragonflyDB y scripts Lua atómicos. Distribuido y seguro en entornos multi-instancia. Todos los límites son configurables vía variables de entorno.

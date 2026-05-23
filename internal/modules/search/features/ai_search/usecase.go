@@ -592,6 +592,33 @@ func (uc *UseCase) runDiscovery(ctx context.Context, cmd Command, userID string)
 		FromCache:      false,
 	}
 
+	// Save to ConvStore so discovery conversations appear in GET /conversations.
+	// Uses the same {conv}:{id} dual-write pattern as ExecuteChatStream.
+	now := time.Now()
+	userMsg := domain.ConversationMessage{
+		Role:      "user",
+		Content:   cmd.Message,
+		Timestamp: now,
+	}
+	assistantMsg := domain.ConversationMessage{
+		Role:      "assistant",
+		Content:   aiMessage,
+		Timestamp: now,
+	}
+	if saveErr := uc.convStore.Save(ctx, &Conversation{
+		ID:        convID.String(),
+		UserID:    userID,
+		Messages:  []domain.ConversationMessage{userMsg, assistantMsg},
+		TurnCount: 1,
+		MaxTurns:  maxTurns,
+		CreatedAt: now,
+	}); saveErr != nil {
+		slog.ErrorContext(ctx, "ai_search: failed to save discovery conversation to ConvStore",
+			slog.String("conversation_id", convID.String()),
+			slog.String("error", saveErr.Error()),
+		)
+	}
+
 	return resp, nil
 }
 
@@ -1266,13 +1293,16 @@ func blake3Hash(message string, history []domain.ConversationMessage) []byte {
 // ExecuteToolCalls dispatches multiple tool calls concurrently using wg.Go().
 // Each tool call executes independently; partial failures are collected.
 // Results array preserves the order of the input toolCalls slice.
-func (uc *UseCase) ExecuteToolCalls(ctx context.Context, toolCalls []ToolCall) []ToolResult {
+//
+// convCtx provides resolved defaults (country_code, language, currency) to prefill
+// tool call arguments when the AI omits them.
+func (uc *UseCase) ExecuteToolCalls(ctx context.Context, toolCalls []ToolCall, convCtx ConversationContext) []ToolResult {
 	results := make([]ToolResult, len(toolCalls))
 
 	var wg sync.WaitGroup
 	for i, tc := range toolCalls {
 		wg.Go(func() {
-			result := uc.executeSingleToolCall(ctx, tc)
+			result := uc.executeSingleToolCall(ctx, tc, convCtx)
 			results[i] = result
 		})
 	}
@@ -1282,7 +1312,9 @@ func (uc *UseCase) ExecuteToolCalls(ctx context.Context, toolCalls []ToolCall) [
 }
 
 // executeSingleToolCall dispatches a single tool call to the appropriate searcher.
-func (uc *UseCase) executeSingleToolCall(ctx context.Context, tc ToolCall) ToolResult {
+// convCtx provides resolved defaults (country_code, language, currency) to prefill
+// tool call arguments when the AI omits them.
+func (uc *UseCase) executeSingleToolCall(ctx context.Context, tc ToolCall, convCtx ConversationContext) ToolResult {
 	result := ToolResult{
 		CallID: tc.ID,
 		Name:   tc.Name,
@@ -1295,6 +1327,26 @@ func (uc *UseCase) executeSingleToolCall(ctx context.Context, tc ToolCall) ToolR
 			result.Error = err
 			result.Content = fmt.Sprintf(`{"error": "invalid arguments: %s"}`, err.Error())
 			return result
+		}
+
+		// Prefill GL/HL/Currency from conversation context when the AI omits them.
+		// DragonflyDB v1.38+: GL must be a lowercase 2-letter country code.
+		if cmd.GL == nil && convCtx.CountryCode != "" {
+			gl := strings.ToLower(convCtx.CountryCode)
+			cmd.GL = &gl
+		}
+		if cmd.HL == nil && convCtx.Language != "" {
+			cmd.HL = &convCtx.Language
+		}
+		if cmd.Currency == nil && convCtx.Currency != "" {
+			cmd.Currency = &convCtx.Currency
+		}
+
+		// Default min_price=1 to filter out hotels without prices (Google Maps placeholders).
+		// Matches the default in search_hotels.UseCase.Execute.
+		if cmd.MinPrice == nil || *cmd.MinPrice == 0 {
+			minPrice := 1.0
+			cmd.MinPrice = &minPrice
 		}
 
 		// Set destination
@@ -1326,6 +1378,19 @@ func (uc *UseCase) executeSingleToolCall(ctx context.Context, tc ToolCall) ToolR
 			result.Error = err
 			result.Content = fmt.Sprintf(`{"error": "invalid arguments: %s"}`, err.Error())
 			return result
+		}
+
+		// Prefill GL/HL/Currency from conversation context when the AI omits them.
+		// DragonflyDB v1.38+: GL must be a lowercase 2-letter country code.
+		if cmd.GL == nil && convCtx.CountryCode != "" {
+			gl := strings.ToLower(convCtx.CountryCode)
+			cmd.GL = &gl
+		}
+		if cmd.HL == nil && convCtx.Language != "" {
+			cmd.HL = &convCtx.Language
+		}
+		if cmd.Currency == nil && convCtx.Currency != "" {
+			cmd.Currency = &convCtx.Currency
 		}
 
 		// Set destination
@@ -1385,8 +1450,12 @@ func BuildToolResultMessages(results []ToolResult) []domain.ConversationMessage 
 // It sends messages + tools to the AI, streams text chunks, executes tool calls
 // when requested, injects results back, and continues up to maxTurns rounds.
 //
+// convCtx provides resolved defaults (country_code, language, currency) to prefill
+// tool call arguments when the AI omits them. Pass an empty ConversationContext
+// if no conversation-level context is available.
+//
 // Returns the number of tool call rounds executed.
-func (uc *UseCase) ExecuteChatStream(ctx context.Context, w http.ResponseWriter, messages []domain.ChatMessage, tools []map[string]interface{}, maxTurns int) (int, error) {
+func (uc *UseCase) ExecuteChatStream(ctx context.Context, w http.ResponseWriter, messages []domain.ChatMessage, tools []map[string]interface{}, maxTurns int, convCtx ConversationContext) (int, error) {
 	if uc.toolCallStreamer == nil {
 		return 0, fmt.Errorf("tool call streamer: %w", domain.ErrAIUnavailable)
 	}
@@ -1426,7 +1495,7 @@ func (uc *UseCase) ExecuteChatStream(ctx context.Context, w http.ResponseWriter,
 		}
 
 		// 5. Execute tool calls concurrently
-		results := uc.ExecuteToolCalls(ctx, toolCalls)
+		results := uc.ExecuteToolCalls(ctx, toolCalls, convCtx)
 
 		// 6. Emit search SSE events for each result
 		for _, r := range results {
