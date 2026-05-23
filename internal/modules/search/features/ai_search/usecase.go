@@ -1572,8 +1572,9 @@ func (uc *UseCase) ExecuteChatStream(ctx context.Context, w http.ResponseWriter,
 
 		// 7. Add assistant message with tool calls to history
 		assistantMsg := domain.ChatMessage{
-			Role:    "assistant",
-			Content: result.AssistantText,
+			Role:             "assistant",
+			Content:          result.AssistantText,
+			ReasoningContent: result.ReasoningContent,
 		}
 		assistantMsg.ToolCalls = make([]domain.ToolCall, len(result.ToolCalls))
 		copy(assistantMsg.ToolCalls, result.ToolCalls)

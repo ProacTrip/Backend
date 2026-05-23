@@ -61,6 +61,7 @@ func NewAdapter(client *Client) *Adapter {
 type AdapterToolCallResult struct {
 	AssistantMessage string              `json:"assistant_message"`
 	ToolCalls        []AdapterToolCall   `json:"tool_calls,omitzero"`
+	ReasoningContent string              `json:"reasoning_content,omitzero"` // v4 Flash thinking mode
 }
 
 // AdapterToolCall represents a parsed tool call from the AI model.
@@ -93,6 +94,9 @@ func (a *Adapter) ChatWithTools(ctx context.Context, messages []chatMessage, too
 	for event := range ch {
 		if event.Delta != "" {
 			result.AssistantMessage += event.Delta
+		}
+		if event.ReasoningContent != "" {
+			result.ReasoningContent += event.ReasoningContent
 		}
 		if event.Done && event.FinishReason == "tool_calls" && len(event.ToolCalls) > 0 {
 			for _, tc := range event.ToolCalls {

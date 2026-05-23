@@ -67,10 +67,11 @@ type ToolCallStreamer interface {
 
 // ChatMessage is a simple message struct for the tool calling adapter (avoids import cycle).
 type ChatMessage struct {
-	Role       string     `json:"role"`
-	Content    string     `json:"content,omitzero"`
-	ToolCallID string     `json:"tool_call_id,omitzero"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitzero"`
+	Role             string     `json:"role"`
+	Content          string     `json:"content,omitzero"`
+	ToolCallID       string     `json:"tool_call_id,omitzero"`
+	ToolCalls        []ToolCall `json:"tool_calls,omitzero"`
+	ReasoningContent string     `json:"reasoning_content,omitzero"` // v4 Flash thinking mode
 }
 
 // ToolCall represents a tool call from the AI model.
@@ -82,8 +83,9 @@ type ToolCall struct {
 
 // ToolCallStreamResult wraps the streaming result.
 type ToolCallStreamResult struct {
-	AssistantText string     `json:"assistant_text"`
-	ToolCalls     []ToolCall `json:"tool_calls,omitzero"`
+	AssistantText    string     `json:"assistant_text"`
+	ToolCalls        []ToolCall `json:"tool_calls,omitzero"`
+	ReasoningContent string     `json:"reasoning_content,omitzero"` // v4 Flash thinking mode
 }
 
 // =============================================================================

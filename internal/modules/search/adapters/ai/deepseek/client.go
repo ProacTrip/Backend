@@ -22,10 +22,11 @@ const (
 
 // chatMessage represents a message in the OpenAI-compatible chat API.
 type chatMessage struct {
-	Role      string     `json:"role"`                // "system", "user", "assistant", "tool"
-	Content   string     `json:"content,omitzero"`    // text content (empty for tool messages with ToolCallID)
-	ToolCalls []ToolCall `json:"tool_calls,omitzero"` // tool calls requested by assistant
-	ToolCallID string   `json:"tool_call_id,omitzero"` // tool use: which tool call this responds to
+	Role             string     `json:"role"`                       // "system", "user", "assistant", "tool"
+	Content          string     `json:"content,omitzero"`           // text content (empty for tool messages with ToolCallID)
+	ToolCalls        []ToolCall `json:"tool_calls,omitzero"`        // tool calls requested by assistant
+	ToolCallID       string     `json:"tool_call_id,omitzero"`      // tool use: which tool call this responds to
+	ReasoningContent string     `json:"reasoning_content,omitzero"` // v4 Flash thinking mode — must be passed back
 }
 
 // chatCompletionRequest is the request body for /chat/completions (v4 Flash endpoint).
@@ -270,11 +271,12 @@ func (c *Client) ChatCompletion(ctx context.Context, messages []chatMessage, par
 
 // SSEEvent represents a single Server-Sent Event chunk from the streaming API.
 type SSEEvent struct {
-	Delta        string     `json:"delta"`                    // incremental text from the model
-	ToolCalls    []ToolCall `json:"tool_calls,omitzero"`      // accumulated tool calls (on finish_reason: "tool_calls")
-	FinishReason string     `json:"finish_reason,omitzero"`   // "stop", "tool_calls", etc.
-	Done         bool       `json:"done"`                     // true when the stream is complete
-	FullText     string     `json:"full_text,omitempty"`      // accumulated full response (only on final chunk)
+	Delta            string     `json:"delta"`                       // incremental text from the model
+	ToolCalls        []ToolCall `json:"tool_calls,omitzero"`         // accumulated tool calls (on finish_reason: "tool_calls")
+	FinishReason     string     `json:"finish_reason,omitzero"`      // "stop", "tool_calls", etc.
+	Done             bool       `json:"done"`                        // true when the stream is complete
+	FullText         string     `json:"full_text,omitempty"`         // accumulated full response (only on final chunk)
+	ReasoningContent string     `json:"reasoning_content,omitzero"`  // accumulated reasoning from v4 Flash thinking mode
 }
 
 // ChatCompletionStream sends a streaming chat completion request.
@@ -336,6 +338,7 @@ func (c *Client) ChatCompletionStream(ctx context.Context, messages []chatMessag
 		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 		var fullText strings.Builder
+		var reasoningBuilder strings.Builder
 		var accumulatedToolCalls []ToolCall
 		// toolCallAcc accumulates fragmented tool_call arguments during streaming.
 		type toolCallAccumulator struct {
@@ -364,7 +367,7 @@ func (c *Client) ChatCompletionStream(ctx context.Context, messages []chatMessag
 
 			// "[DONE]" signals end of stream
 			if data == "[DONE]" {
-				ch <- SSEEvent{Done: true, FullText: fullText.String()}
+				ch <- SSEEvent{Done: true, FullText: fullText.String(), ReasoningContent: reasoningBuilder.String()}
 				return
 			}
 
@@ -372,7 +375,8 @@ func (c *Client) ChatCompletionStream(ctx context.Context, messages []chatMessag
 			var chunk struct {
 				Choices []struct {
 					Delta struct {
-						Content   string `json:"content"`
+						Content          string `json:"content"`
+						ReasoningContent string `json:"reasoning_content"`
 						ToolCalls []struct {
 							Index    int    `json:"index"`
 							ID       string `json:"id"`
@@ -402,6 +406,13 @@ func (c *Client) ChatCompletionStream(ctx context.Context, messages []chatMessag
 			if delta != "" {
 				fullText.WriteString(delta)
 				ch <- SSEEvent{Delta: delta}
+			}
+
+			// Accumulate reasoning_content deltas — must be preserved for subsequent requests
+			reasoningDelta := chunk.Choices[0].Delta.ReasoningContent
+			if reasoningDelta != "" {
+				reasoningBuilder.WriteString(reasoningDelta)
+				ch <- SSEEvent{ReasoningContent: reasoningDelta}
 			}
 
 			// Accumulate tool call deltas
@@ -444,15 +455,16 @@ func (c *Client) ChatCompletionStream(ctx context.Context, messages []chatMessag
 						}
 					}
 					ch <- SSEEvent{
-						Done:         true,
-						FinishReason: finishReason,
-						ToolCalls:    accumulatedToolCalls,
-						FullText:     fullText.String(),
+						Done:             true,
+						FinishReason:     finishReason,
+						ToolCalls:        accumulatedToolCalls,
+						FullText:         fullText.String(),
+						ReasoningContent: reasoningBuilder.String(),
 					}
 					return
 				}
 
-				ch <- SSEEvent{Done: true, FullText: fullText.String(), FinishReason: finishReason}
+				ch <- SSEEvent{Done: true, FullText: fullText.String(), FinishReason: finishReason, ReasoningContent: reasoningBuilder.String()}
 				return
 			}
 		}

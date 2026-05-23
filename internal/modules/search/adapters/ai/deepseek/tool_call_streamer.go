@@ -72,9 +72,10 @@ func toChatMessages(messages []domain.ChatMessage) ([]chatMessage, error) {
 	chatMsgs := make([]chatMessage, len(messages))
 	for i, m := range messages {
 		chatMsgs[i] = chatMessage{
-			Role:       m.Role,
-			Content:    m.Content,
-			ToolCallID: m.ToolCallID,
+			Role:             m.Role,
+			Content:          m.Content,
+			ToolCallID:       m.ToolCallID,
+			ReasoningContent: m.ReasoningContent,
 		}
 		if len(m.ToolCalls) > 0 {
 			chatMsgs[i].ToolCalls = make([]ToolCall, len(m.ToolCalls))
@@ -120,7 +121,8 @@ func toToolDefs(tools []map[string]interface{}) ([]ToolDef, error) {
 // toStreamResult converts an AdapterToolCallResult to a domain.ToolCallStreamResult.
 func toStreamResult(result *AdapterToolCallResult) *domain.ToolCallStreamResult {
 	streamResult := &domain.ToolCallStreamResult{
-		AssistantText: result.AssistantMessage,
+		AssistantText:    result.AssistantMessage,
+		ReasoningContent: result.ReasoningContent,
 	}
 	if len(result.ToolCalls) > 0 {
 		streamResult.ToolCalls = make([]domain.ToolCall, len(result.ToolCalls))
