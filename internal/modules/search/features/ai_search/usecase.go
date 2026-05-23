@@ -28,6 +28,8 @@ import (
 	"github.com/redis/go-redis/v9"
 	"lukechampine.com/blake3"
 
+	envDomain "github.com/ProacTrip/Backend/internal/modules/environment/domain"
+	"github.com/ProacTrip/Backend/internal/modules/environment/features/get_destination_weather"
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/search_flights"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/search_hotels"
@@ -51,6 +53,12 @@ type FlightSearcher interface {
 // search_hotels.UseCase satisfies this.
 type HotelSearcher interface {
 	Execute(ctx context.Context, cmd search_hotels.Command) (*search_hotels.Response, error)
+}
+
+// DestinationWeatherSearcher is the interface for destination weather queries.
+// get_destination_weather.UseCase satisfies this.
+type DestinationWeatherSearcher interface {
+	Execute(ctx context.Context, cmd get_destination_weather.Command) (*envDomain.WeatherData, error)
 }
 
 // ConversationStore abstracts conversation persistence.
@@ -86,6 +94,7 @@ type UseCase struct {
 	discoveryInterpreter domain.DiscoveryInterpreter // AI-powered discovery (nil = disabled)
 	flightSearcher       FlightSearcher
 	hotelSearcher        HotelSearcher
+	dstWeatherSearcher   DestinationWeatherSearcher
 	convStore            ConversationStore
 	interpCache          InterpretationCache
 	toolCallStreamer     domain.ToolCallStreamer      // streaming with tool calling
@@ -106,6 +115,7 @@ type UseCaseDeps struct {
 	DiscoveryInterpreter   domain.DiscoveryInterpreter // nil = discovery disabled
 	FlightSearcher         FlightSearcher
 	HotelSearcher          HotelSearcher
+	DstWeatherSearcher     DestinationWeatherSearcher   // nil = weather tool disabled
 	ConvStore              ConversationStore
 	InterpCache            InterpretationCache          // nil = no caching (MVP mode)
 	ToolCallStreamer       domain.ToolCallStreamer      // streaming with tool calling
@@ -150,6 +160,7 @@ func NewUseCase(deps UseCaseDeps) *UseCase {
 		discoveryInterpreter: deps.DiscoveryInterpreter,
 		flightSearcher:       deps.FlightSearcher,
 		hotelSearcher:        deps.HotelSearcher,
+		dstWeatherSearcher:   deps.DstWeatherSearcher,
 		convStore:            deps.ConvStore,
 		interpCache:          deps.InterpCache,
 		toolCallStreamer:     deps.ToolCallStreamer,
@@ -1416,6 +1427,49 @@ func (uc *UseCase) executeSingleToolCall(ctx context.Context, w http.ResponseWri
 		}
 
 		result.Content = fmt.Sprintf(`{"emitted":true,"count":%d}`, len(alerts))
+
+	case "get_destination_weather":
+		cmd, parseErr := ParseDestinationWeatherToolCall(tc.Arguments)
+		if parseErr != nil {
+			result.Error = parseErr
+			result.Content = fmt.Sprintf(`{"error": "invalid arguments: %s"}`, parseErr.Error())
+			return result
+		}
+
+		if uc.dstWeatherSearcher == nil {
+			result.Error = fmt.Errorf("destination weather searcher not available")
+			result.Content = `{"error": "destination weather not available"}`
+			return result
+		}
+
+		// Set human-readable destination from coordinates
+		result.Destination = fmt.Sprintf("%.4f,%.4f", cmd.Lat, cmd.Lng)
+
+		weather, execErr := uc.dstWeatherSearcher.Execute(ctx, cmd)
+		if execErr != nil {
+			result.Error = execErr
+			result.Content = fmt.Sprintf(`{"error": "weather fetch failed: %s"}`, execErr.Error())
+			return result
+		}
+
+		// Emit SSE weather event (weather may be nil = graceful fallback)
+		if writeErr := WriteWeatherEvent(w, result.Destination, weather); writeErr != nil {
+			result.Error = writeErr
+			result.Content = fmt.Sprintf(`{"error": "failed to write weather event: %s"}`, writeErr.Error())
+			return result
+		}
+
+		if weather != nil {
+			data, marshalErr := json.Marshal(weather)
+			if marshalErr != nil {
+				result.Error = marshalErr
+				result.Content = fmt.Sprintf(`{"error": "marshal failed: %s"}`, marshalErr.Error())
+				return result
+			}
+			result.Content = string(data)
+		} else {
+			result.Content = `{"weather":null}`
+		}
 
 	default:
 		result.Error = fmt.Errorf("unknown tool: %s", tc.Name)

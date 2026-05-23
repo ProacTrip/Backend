@@ -119,6 +119,10 @@ type Config struct {
 	// UserHealthPort — adapter for medical/travel/document context injection.
 	// Nil disables medical context injection (anonymous-only or tests).
 	UserHealthPort domain.UserHealthPort
+
+	// DestinationWeatherSearcher — adapter for destination weather tool calling.
+	// Nil disables the get_destination_weather tool (environment module not configured).
+	DestinationWeatherSearcher ai_search.DestinationWeatherSearcher
 }
 
 // =============================================================================
@@ -248,6 +252,7 @@ func NewModule(cfg Config) (*Module, error) {
 			ToolCallStreamer:     cfg.ToolCallStreamer,
 			FlightSearcher:       searchUC,
 			HotelSearcher:        hotelsUC,
+			DstWeatherSearcher:   cfg.DestinationWeatherSearcher,
 			ConvStore:            convStore,
 			InterpCache:          &dragonflyInterpCache{rdb: cfg.RedisClient},
 			AnonMaxTurns:         5,

@@ -422,12 +422,13 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 			Language:    cfg.DefaultLanguage,
 			CountryCode: cfg.DefaultCountryCode,
 		},
-		AIInterpreter:        aiInterpreter,
-		DiscoveryInterpreter: discoveryInterpreterFrom(aiInterpreter),
-		ToolCallStreamer:     toolCallStreamerFrom(aiInterpreter),
-		SavedSearchProvider:  nil,
-		UserProfilePort:      userProfilePort,
-		UserHealthPort:       userHealthPort,
+		AIInterpreter:              aiInterpreter,
+		DiscoveryInterpreter:       discoveryInterpreterFrom(aiInterpreter),
+		ToolCallStreamer:           toolCallStreamerFrom(aiInterpreter),
+		SavedSearchProvider:        nil,
+		UserProfilePort:            userProfilePort,
+		UserHealthPort:             userHealthPort,
+		DestinationWeatherSearcher: environmentMod.GetDestinationWeatherUC,
 	})
 	if err != nil {
 		return nil, err
