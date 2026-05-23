@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/ProacTrip/Backend/internal/modules/search/domain"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/search_flights"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/search_hotels"
 )
@@ -645,4 +646,88 @@ func stringPtrOrNil(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// =============================================================================
+// emit_medical_alerts tool definition + parsing
+// =============================================================================
+
+// EmitMedicalAlertsToolDef returns the emit_medical_alerts tool definition
+// for AI-triggered health alerts via SSE.
+func EmitMedicalAlertsToolDef() ToolDef {
+	// language=json
+	const params = `{
+		"type": "object",
+		"properties": {
+			"alerts": {
+				"type": "array",
+				"description": "Lista de alertas médicas o de viaje detectadas",
+				"items": {
+					"type": "object",
+					"properties": {
+						"level": {
+							"type": "string",
+							"description": "Nivel de severidad de la alerta",
+							"enum": ["info", "warning", "danger"]
+						},
+						"type": {
+							"type": "string",
+							"description": "Categoría de la alerta",
+							"enum": ["allergy", "medication", "vaccination", "condition", "travel", "document"]
+						},
+						"message": {
+							"type": "string",
+							"description": "Descripción legible de la alerta"
+						}
+					},
+					"required": ["level", "type", "message"]
+				}
+			}
+		},
+		"required": ["alerts"]
+	}`
+
+	return ToolDef{
+		Type: "function",
+		Function: ToolFunction{
+			Name:        "emit_medical_alerts",
+			Description: "Emite alertas médicas o de viaje que el usuario debe ver. Usa esta herramienta UNA sola vez con TODAS las alertas detectadas. NO menciones las alertas en tu texto de respuesta.",
+			Parameters:  json.RawMessage(params),
+		},
+	}
+}
+
+// ParseMedicalAlertsToolCall parses tool call arguments into []domain.MedicalAlert.
+// Validates the alerts array and extracts level, type, message from each alert item.
+func ParseMedicalAlertsToolCall(args map[string]interface{}) ([]domain.MedicalAlert, error) {
+	if err := ValidateRequiredOrError("emit_medical_alerts", args, "alerts"); err != nil {
+		return nil, err
+	}
+
+	alertsRaw, ok := args["alerts"]
+	if !ok {
+		return nil, fmt.Errorf("emit_medical_alerts: alerts field is required")
+	}
+
+	alertsArr, ok := alertsRaw.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("emit_medical_alerts: alerts must be an array, got %T", alertsRaw)
+	}
+
+	alerts := make([]domain.MedicalAlert, 0, len(alertsArr))
+	for i, item := range alertsArr {
+		itemMap, ok := item.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("emit_medical_alerts: alerts[%d] is not an object, got %T", i, item)
+		}
+
+		alert := domain.MedicalAlert{
+			Level:   parseString(itemMap, "level"),
+			Type:    parseString(itemMap, "type"),
+			Message: parseString(itemMap, "message"),
+		}
+		alerts = append(alerts, alert)
+	}
+
+	return alerts, nil
 }

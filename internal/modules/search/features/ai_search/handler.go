@@ -3,11 +3,13 @@
 package ai_search
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/redis/go-redis/v9"
 
@@ -45,13 +47,15 @@ type Handler struct {
 	rdb         *redis.Client
 	defaultsCfg shared.SearchDefaultConfig
 	userProfile domain.UserProfilePort
+	userHealth  domain.UserHealthPort // medical/travel/document context
 	RateLimiter *ratelimit.RateLimiter
 }
 
 // NewHandler creates a new AI search handler.
 // userProfile may be nil for anonymous-only deployments or tests.
-func NewHandler(usecase *UseCase, convStore ConversationStore, rdb *redis.Client, defaultsCfg shared.SearchDefaultConfig, userProfile domain.UserProfilePort) *Handler {
-	return &Handler{usecase: usecase, convStore: convStore, rdb: rdb, defaultsCfg: defaultsCfg, userProfile: userProfile}
+// userHealth may be nil for deployments without medical context.
+func NewHandler(usecase *UseCase, convStore ConversationStore, rdb *redis.Client, defaultsCfg shared.SearchDefaultConfig, userProfile domain.UserProfilePort, userHealth domain.UserHealthPort) *Handler {
+	return &Handler{usecase: usecase, convStore: convStore, rdb: rdb, defaultsCfg: defaultsCfg, userProfile: userProfile, userHealth: userHealth}
 }
 
 // Handle processes the AI search request.
@@ -251,8 +255,8 @@ func sseError(c *echo.Context, message string) {
 
 // handleToolCallingStream dispatches the request to ExecuteChatStream for
 // tool-calling-aware AI streaming. It builds the initial chat messages with
-// location context, constructs the tool definitions, and delegates SSE
-// streaming to the usecase.
+// location context and medical context (if authenticated), constructs the tool
+// definitions, and delegates SSE streaming to the usecase.
 func (h *Handler) handleToolCallingStream(c *echo.Context, cmd Command, userID string) {
 	ctx := c.Request().Context()
 
@@ -260,20 +264,33 @@ func (h *Handler) handleToolCallingStream(c *echo.Context, cmd Command, userID s
 	hint := h.usecase.resolveLocationHint(ctx, userID, cmd.ClientIP)
 
 	// Build initial chat messages
-	messages := make([]domain.ChatMessage, 0, 2)
+	messages := make([]domain.ChatMessage, 0, 3)
 	if hint != "" {
 		messages = append(messages, domain.ChatMessage{
 			Role:    "system",
 			Content: hint,
 		})
 	}
+
+	// Inject medical/travel/document context for authenticated users
+	includeMedicalAlerts := false
+	if userID != "" && h.userHealth != nil {
+		if medicalMsg := h.buildMedicalContextMessage(ctx, userID); medicalMsg != "" {
+			messages = append(messages, domain.ChatMessage{
+				Role:    "system",
+				Content: medicalMsg,
+			})
+		}
+		includeMedicalAlerts = true
+	}
+
 	messages = append(messages, domain.ChatMessage{
 		Role:    "user",
 		Content: cmd.Message,
 	})
 
 	// Build tool definitions from typed ToolDefs
-	tools := buildDefaultTools()
+	tools := buildDefaultTools(includeMedicalAlerts)
 
 	// Build conversation context from resolved defaults.
 	// CountryCode comes from config defaults (DEFAULT_COUNTRY_CODE env).
@@ -295,10 +312,113 @@ func (h *Handler) handleToolCallingStream(c *echo.Context, cmd Command, userID s
 	}
 }
 
-// buildDefaultTools converts the typed ToolDefs for search_hotels and
-// search_flights into the []map[string]interface{} format expected by the
-// ToolCallStreamer interface.
-func buildDefaultTools() []map[string]interface{} {
+// buildMedicalContextMessage fetches medical profile, travel preferences,
+// document context, and nationality, then formats them as a Spanish system
+// message for the AI. Returns empty string if all contexts are empty.
+func (h *Handler) buildMedicalContextMessage(ctx context.Context, userID string) string {
+	var parts []string
+
+	// Medical profile
+	medical, err := h.userHealth.GetMedicalContext(ctx, userID)
+	if err == nil && medical != nil {
+		medParts := []string{}
+		if len(medical.Allergies) > 0 {
+			medParts = append(medParts, "Alergias: ["+strings.Join(medical.Allergies, ", ")+"]")
+		}
+		if len(medical.Conditions) > 0 {
+			medParts = append(medParts, "Condiciones: ["+strings.Join(medical.Conditions, ", ")+"]")
+		}
+		if len(medical.Medications) > 0 {
+			medParts = append(medParts, "Medicamentos: ["+strings.Join(medical.Medications, ", ")+"]")
+		}
+		if len(medical.Vaccinations) > 0 {
+			medParts = append(medParts, "Vacunas: ["+strings.Join(medical.Vaccinations, ", ")+"]")
+		}
+		if medical.BloodType != "" {
+			medParts = append(medParts, "Tipo de sangre: "+medical.BloodType)
+		}
+		if len(medParts) > 0 {
+			parts = append(parts, "PERFIL MÉDICO: "+strings.Join(medParts, ". ")+".")
+		}
+	}
+
+	// Travel preferences
+	travel, err := h.userHealth.GetTravelPreferences(ctx, userID)
+	if err == nil && travel != nil {
+		travelParts := []string{}
+		if travel.PreferredClass != "" {
+			travelParts = append(travelParts, "Clase "+travel.PreferredClass)
+		}
+		if travel.SeatPreference != "" {
+			travelParts = append(travelParts, travel.SeatPreference)
+		}
+		if travel.MealPreference != "" {
+			travelParts = append(travelParts, travel.MealPreference)
+		}
+		if travel.AvoidLayovers {
+			layoverMsg := "evitar escalas"
+			if travel.MaxLayoverDuration > 0 {
+				layoverMsg += fmt.Sprintf(" (máx %dmin)", travel.MaxLayoverDuration)
+			}
+			travelParts = append(travelParts, layoverMsg)
+		}
+		if len(travelParts) > 0 {
+			parts = append(parts, "PREFERENCIAS DE VIAJE: "+strings.Join(travelParts, ", ")+".")
+		}
+	}
+
+	// Document context
+	docs, err := h.userHealth.GetDocumentContext(ctx, userID)
+	if err == nil {
+		if len(docs) == 0 {
+			parts = append(parts, "DOCUMENTOS: Sin documentos de viaje registrados.")
+		} else {
+			docStrs := make([]string, 0, len(docs))
+			for _, doc := range docs {
+				var docStr string
+				switch doc.Type {
+				case "passport":
+					docStr = "Pasaporte"
+				case "visa":
+					docStr = "Visa"
+				default:
+					docStr = doc.Type
+				}
+				if doc.IssuingCountry != "" {
+					docStr += " " + doc.IssuingCountry
+				}
+				if doc.Number != "" {
+					docStr += " #" + doc.Number
+				}
+				if doc.ValidUntil != "" {
+					docStr += " (vence " + doc.ValidUntil + ")"
+				}
+				docStrs = append(docStrs, docStr)
+			}
+			parts = append(parts, "DOCUMENTOS: "+strings.Join(docStrs, ". ")+".")
+		}
+	}
+
+	// Nationality
+	nationality := h.userHealth.GetNationality(ctx, userID)
+	if nationality != "" {
+		parts = append(parts, "NACIONALIDAD: "+nationality+".")
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+
+	// Add the anti-repeat rule
+	parts = append(parts, "IMPORTANTE: Cuando detectes riesgos médicos o de viaje, usa la herramienta emit_medical_alerts UNA sola vez con TODAS las alertas. NO menciones estas alertas en tu texto de respuesta — el usuario las ve en una ventana emergente separada.")
+
+	return strings.Join(parts, "\n")
+}
+
+// buildDefaultTools converts the typed ToolDefs for search_hotels,
+// search_flights, and optionally emit_medical_alerts into the
+// []map[string]interface{} format expected by the ToolCallStreamer interface.
+func buildDefaultTools(includeMedicalAlerts bool) []map[string]interface{} {
 	hotelJSON, _ := json.Marshal(SearchHotelsToolDef())
 	flightJSON, _ := json.Marshal(SearchFlightsToolDef())
 
@@ -306,7 +426,16 @@ func buildDefaultTools() []map[string]interface{} {
 	json.Unmarshal(hotelJSON, &hotelMap)
 	json.Unmarshal(flightJSON, &flightMap)
 
-	return []map[string]interface{}{hotelMap, flightMap}
+	tools := []map[string]interface{}{hotelMap, flightMap}
+
+	if includeMedicalAlerts {
+		alertJSON, _ := json.Marshal(EmitMedicalAlertsToolDef())
+		var alertMap map[string]interface{}
+		json.Unmarshal(alertJSON, &alertMap)
+		tools = append(tools, alertMap)
+	}
+
+	return tools
 }
 
 // =============================================================================

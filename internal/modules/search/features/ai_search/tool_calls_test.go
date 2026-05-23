@@ -647,3 +647,181 @@ func TestParseFlightToolCall_Arrays(t *testing.T) {
 		t.Errorf("ExcludeConnections len = %d, want 2", len(cmd.ExcludeConnections))
 	}
 }
+
+// =============================================================================
+// RED: Tasks 2.1-2.2 — EmitMedicalAlertsToolDef + ParseMedicalAlertsToolCall
+// =============================================================================
+
+func TestEmitMedicalAlertsToolDef_Exists(t *testing.T) {
+	schema := EmitMedicalAlertsToolDef()
+
+	if schema.Type != "function" {
+		t.Errorf("Type = %q, want 'function'", schema.Type)
+	}
+	if schema.Function.Name != "emit_medical_alerts" {
+		t.Errorf("Name = %q, want 'emit_medical_alerts'", schema.Function.Name)
+	}
+	if schema.Function.Description == "" {
+		t.Error("Description should not be empty")
+	}
+
+	// Unmarshal parameters as JSON Schema
+	var params map[string]interface{}
+	if err := json.Unmarshal(schema.Function.Parameters, &params); err != nil {
+		t.Fatalf("Parameters is not valid JSON: %v", err)
+	}
+
+	if params["type"] != "object" {
+		t.Errorf("Parameters type = %v, want 'object'", params["type"])
+	}
+
+	// Required fields must be present
+	required, ok := params["required"].([]interface{})
+	if !ok {
+		t.Fatal("Parameters.required is missing or not an array")
+	}
+
+	requiredFields := make(map[string]bool)
+	for _, r := range required {
+		requiredFields[r.(string)] = true
+	}
+
+	if !requiredFields["alerts"] {
+		t.Errorf("required field 'alerts' is missing")
+	}
+
+	// Properties must exist
+	props, ok := params["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("Parameters.properties is missing or not an object")
+	}
+
+	// alerts property must exist and be an array
+	alerts, ok := props["alerts"].(map[string]interface{})
+	if !ok {
+		t.Fatal("alerts property is missing or not an object")
+	}
+	if alerts["type"] != "array" {
+		t.Errorf("alerts type = %v, want 'array'", alerts["type"])
+	}
+
+	// alerts items must have level, type, message
+	items, ok := alerts["items"].(map[string]interface{})
+	if !ok {
+		t.Fatal("alerts items is missing")
+	}
+	itemProps, ok := items["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("alerts items.properties is missing")
+	}
+
+	// Check level enum
+	level, ok := itemProps["level"].(map[string]interface{})
+	if !ok {
+		t.Error("level property missing from alert item")
+	} else {
+		levelEnum := level["enum"]
+		if levelEnum == nil {
+			t.Error("level enum is missing")
+		}
+	}
+
+	// Check type enum
+	alertType, ok := itemProps["type"].(map[string]interface{})
+	if !ok {
+		t.Error("type property missing from alert item")
+	} else {
+		typeEnum := alertType["enum"]
+		if typeEnum == nil {
+			t.Error("type enum is missing")
+		}
+	}
+
+	// Check message
+	if _, ok := itemProps["message"]; !ok {
+		t.Error("message property missing from alert item")
+	}
+}
+
+func TestParseMedicalAlertsToolCall_Valid(t *testing.T) {
+	args := map[string]interface{}{
+		"alerts": []interface{}{
+			map[string]interface{}{
+				"level":   "warning",
+				"type":    "allergy",
+				"message": "Alergia detectada: Maní",
+			},
+			map[string]interface{}{
+				"level":   "info",
+				"type":    "document",
+				"message": "Pasaporte vence en 30 días",
+			},
+		},
+	}
+
+	alerts, err := ParseMedicalAlertsToolCall(args)
+	if err != nil {
+		t.Fatalf("ParseMedicalAlertsToolCall failed: %v", err)
+	}
+
+	if len(alerts) != 2 {
+		t.Fatalf("len(alerts) = %d, want 2", len(alerts))
+	}
+
+	if alerts[0].Level != "warning" {
+		t.Errorf("alerts[0].Level = %q, want 'warning'", alerts[0].Level)
+	}
+	if alerts[0].Type != "allergy" {
+		t.Errorf("alerts[0].Type = %q, want 'allergy'", alerts[0].Type)
+	}
+	if alerts[0].Message != "Alergia detectada: Maní" {
+		t.Errorf("alerts[0].Message = %q", alerts[0].Message)
+	}
+
+	if alerts[1].Level != "info" {
+		t.Errorf("alerts[1].Level = %q, want 'info'", alerts[1].Level)
+	}
+}
+
+func TestParseMedicalAlertsToolCall_MissingAlerts(t *testing.T) {
+	args := map[string]interface{}{}
+
+	_, err := ParseMedicalAlertsToolCall(args)
+	if err == nil {
+		t.Fatal("expected error for missing alerts field")
+	}
+}
+
+func TestParseMedicalAlertsToolCall_InvalidAlerts(t *testing.T) {
+	args := map[string]interface{}{
+		"alerts": "not an array",
+	}
+
+	_, err := ParseMedicalAlertsToolCall(args)
+	if err == nil {
+		t.Fatal("expected error for non-array alerts")
+	}
+}
+
+func TestParseMedicalAlertsToolCall_MissingFields(t *testing.T) {
+	args := map[string]interface{}{
+		"alerts": []interface{}{
+			map[string]interface{}{
+				"level": "warning",
+				// missing type and message
+			},
+		},
+	}
+
+	alerts, err := ParseMedicalAlertsToolCall(args)
+	if err != nil {
+		t.Fatalf("ParseMedicalAlertsToolCall: %v", err)
+	}
+	if len(alerts) != 1 {
+		t.Fatalf("len(alerts) = %d, want 1", len(alerts))
+	}
+	// Missing fields should result in zero values
+	if alerts[0].Message != "" {
+		t.Errorf("expected empty message for missing field, got %q", alerts[0].Message)
+	}
+}
