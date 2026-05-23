@@ -23,6 +23,20 @@ import (
 )
 
 // =============================================================================
+// User ID resolution — auth claims or anonymous cookie
+// =============================================================================
+
+// resolveUserID extracts the user identifier from the request context.
+// For authenticated users, it returns the user ID from the auth middleware.
+// For anonymous users, it returns the anon_token cookie value as the identifier.
+func resolveUserID(c *echo.Context) string {
+	if userID := shared.UserIDFromContext(c); userID != "" {
+		return userID
+	}
+	return ratelimit.AnonIDFromContext(c)
+}
+
+// =============================================================================
 // Handler — endpoint HTTP de AI search
 // =============================================================================
 
@@ -80,7 +94,7 @@ func (h *Handler) Handle(c *echo.Context) error {
 		// Resolve user prefs + env data + fallback defaults
 		h.resolveContext(c, &cmd)
 
-		userID := shared.UserIDFromContext(c)
+		userID := resolveUserID(c)
 
 		// Send "thinking" event so the client knows processing has started
 		sseEvent(c, "status", map[string]string{"status": "thinking"})
@@ -132,9 +146,9 @@ func (h *Handler) Handle(c *echo.Context) error {
 	// Resolve user prefs + env data + fallback defaults
 	h.resolveContext(c, &cmd)
 
-	// Extract userID from context (set by auth middleware).
-	// Empty string for anonymous users.
-	userID := shared.UserIDFromContext(c)
+	// Extract userID from context (set by auth middleware or anon cookie).
+	// Empty string for anonymous users with no cookie.
+	userID := resolveUserID(c)
 
 	resp, err := h.usecase.Execute(c.Request().Context(), cmd, userID)
 	if err != nil {
@@ -253,10 +267,10 @@ func sseError(c *echo.Context, message string) {
 // HandleListConversations returns the user's active conversations.
 // Route: GET /v1/search/ai/conversations
 func (h *Handler) HandleListConversations(c *echo.Context) error {
-	userID := shared.UserIDFromContext(c)
+	userID := resolveUserID(c)
 	if userID == "" {
-		// Anonymous users get empty list — conversations are tracked by
-		// conversation_id in the frontend, not by user index.
+		// No auth and no anon cookie — conversations tracked by
+		// conversation_id in the frontend only.
 		return c.JSON(http.StatusOK, []ConversationPreview{})
 	}
 
@@ -301,9 +315,8 @@ func (h *Handler) HandleGetConversation(c *echo.Context) error {
 	}
 
 	// Ownership check: only the conversation owner can access it.
-	// Anonymous conversations (UserID=="") are accessible to anyone who
-	// has the conversation ID — the ID itself acts as the access token.
-	userID := shared.UserIDFromContext(c)
+	// Anonymous users are identified by their anon_token cookie value.
+	userID := resolveUserID(c)
 	if conv.UserID != "" && conv.UserID != userID {
 		return echo.NewHTTPError(http.StatusForbidden, "conversation belongs to another user")
 	}
@@ -319,7 +332,7 @@ func (h *Handler) HandleDeleteConversation(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "conversation ID is required")
 	}
 
-	userID := shared.UserIDFromContext(c)
+	userID := resolveUserID(c)
 
 	// Load first to check ownership (unless anonymous).
 	conv, err := h.convStore.Load(c.Request().Context(), convID)

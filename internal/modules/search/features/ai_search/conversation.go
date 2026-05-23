@@ -139,10 +139,8 @@ func (s *ConvStore) Save(ctx context.Context, conv *Conversation) error {
 	pipe := s.rdb.Pipeline()
 	pipe.Set(ctx, key, string(data), conversationTTL)
 
-	if conv.UserID != "" {
-		pipe.SAdd(ctx, userConvsKey(conv.UserID), conv.ID)
-		pipe.Expire(ctx, userConvsKey(conv.UserID), conversationTTL)
-	}
+	pipe.SAdd(ctx, userConvsKey(conv.UserID), conv.ID)
+	pipe.Expire(ctx, userConvsKey(conv.UserID), conversationTTL)
 
 	if _, err := pipe.Exec(ctx); err != nil {
 		slog.ErrorContext(ctx, "ConversationStore.Save: pipeline failed",
@@ -203,9 +201,7 @@ func (s *ConvStore) Delete(ctx context.Context, convID, userID string) error {
 
 	pipe := s.rdb.Pipeline()
 	pipe.Del(ctx, key)
-	if userID != "" {
-		pipe.SRem(ctx, userConvsKey(userID), convID)
-	}
+	pipe.SRem(ctx, userConvsKey(userID), convID)
 
 	if _, err := pipe.Exec(ctx); err != nil {
 		slog.ErrorContext(ctx, "ConversationStore.Delete: pipeline failed",
