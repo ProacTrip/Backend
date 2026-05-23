@@ -825,3 +825,180 @@ func TestParseMedicalAlertsToolCall_MissingFields(t *testing.T) {
 		t.Errorf("expected empty message for missing field, got %q", alerts[0].Message)
 	}
 }
+
+// =============================================================================
+// get_destination_weather — tool definition + parser tests
+// =============================================================================
+
+func TestGetDestinationWeatherToolDefinition_Exists(t *testing.T) {
+	schema := GetDestinationWeatherToolDef()
+
+	if schema.Type != "function" {
+		t.Errorf("Type = %q, want 'function'", schema.Type)
+	}
+	if schema.Function.Name != "get_destination_weather" {
+		t.Errorf("Name = %q, want 'get_destination_weather'", schema.Function.Name)
+	}
+	if schema.Function.Description == "" {
+		t.Error("Description should not be empty")
+	}
+
+	var params map[string]interface{}
+	if err := json.Unmarshal(schema.Function.Parameters, &params); err != nil {
+		t.Fatalf("Parameters is not valid JSON: %v", err)
+	}
+
+	if params["type"] != "object" {
+		t.Errorf("Parameters type = %v, want 'object'", params["type"])
+	}
+
+	required, ok := params["required"].([]interface{})
+	if !ok {
+		t.Fatal("Parameters.required is missing or not an array")
+	}
+
+	requiredFields := make(map[string]bool)
+	for _, r := range required {
+		requiredFields[r.(string)] = true
+	}
+
+	for _, field := range []string{"lat", "lng", "date"} {
+		if !requiredFields[field] {
+			t.Errorf("required field %q is missing", field)
+		}
+	}
+
+	props, ok := params["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("Parameters.properties is missing or not an object")
+	}
+
+	for _, field := range []string{"lat", "lng", "date"} {
+		if _, exists := props[field]; !exists {
+			t.Errorf("property %q is missing from parameters", field)
+		}
+	}
+
+	// Verify types
+	if lat, ok := props["lat"].(map[string]interface{}); ok {
+		if lat["type"] != "number" {
+			t.Errorf("lat.type = %v, want 'number'", lat["type"])
+		}
+	}
+	if lng, ok := props["lng"].(map[string]interface{}); ok {
+		if lng["type"] != "number" {
+			t.Errorf("lng.type = %v, want 'number'", lng["type"])
+		}
+	}
+	if date, ok := props["date"].(map[string]interface{}); ok {
+		if date["type"] != "string" {
+			t.Errorf("date.type = %v, want 'string'", date["type"])
+		}
+	}
+}
+
+func TestParseDestinationWeatherToolCall_ValidArgs(t *testing.T) {
+	args := map[string]interface{}{
+		"lat":  41.38,
+		"lng":  2.17,
+		"date": "2026-08-15",
+	}
+
+	cmd, err := ParseDestinationWeatherToolCall(args)
+	if err != nil {
+		t.Fatalf("ParseDestinationWeatherToolCall: %v", err)
+	}
+	if cmd.Lat != 41.38 {
+		t.Errorf("Lat = %f, want 41.38", cmd.Lat)
+	}
+	if cmd.Lng != 2.17 {
+		t.Errorf("Lng = %f, want 2.17", cmd.Lng)
+	}
+	if cmd.Date != "2026-08-15" {
+		t.Errorf("Date = %q, want '2026-08-15'", cmd.Date)
+	}
+}
+
+func TestParseDestinationWeatherToolCall_MissingLat(t *testing.T) {
+	args := map[string]interface{}{
+		"lng":  2.17,
+		"date": "2026-08-15",
+	}
+
+	_, err := ParseDestinationWeatherToolCall(args)
+	if err == nil {
+		t.Fatal("expected error for missing lat")
+	}
+}
+
+func TestParseDestinationWeatherToolCall_MissingLng(t *testing.T) {
+	args := map[string]interface{}{
+		"lat":  41.38,
+		"date": "2026-08-15",
+	}
+
+	_, err := ParseDestinationWeatherToolCall(args)
+	if err == nil {
+		t.Fatal("expected error for missing lng")
+	}
+}
+
+func TestParseDestinationWeatherToolCall_MissingDate(t *testing.T) {
+	args := map[string]interface{}{
+		"lat": 41.38,
+		"lng": 2.17,
+	}
+
+	_, err := ParseDestinationWeatherToolCall(args)
+	if err == nil {
+		t.Fatal("expected error for missing date")
+	}
+}
+
+func TestParseDestinationWeatherToolCall_EmptyDate(t *testing.T) {
+	args := map[string]interface{}{
+		"lat":  41.38,
+		"lng":  2.17,
+		"date": "",
+	}
+
+	_, err := ParseDestinationWeatherToolCall(args)
+	if err == nil {
+		t.Fatal("expected error for empty date")
+	}
+}
+
+func TestParseDestinationWeatherToolCall_FloatArgsFromJSON(t *testing.T) {
+	// JSON numbers are decoded as float64 — verify the parser handles this
+	input := `{"lat": 41.38, "lng": 2.17, "date": "2026-08-15"}`
+	var args map[string]interface{}
+	if err := json.Unmarshal([]byte(input), &args); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	cmd, err := ParseDestinationWeatherToolCall(args)
+	if err != nil {
+		t.Fatalf("ParseDestinationWeatherToolCall: %v", err)
+	}
+	if cmd.Lat != 41.38 {
+		t.Errorf("Lat = %f, want 41.38", cmd.Lat)
+	}
+}
+
+func TestGetDestinationWeatherTool_InBuildDefaultTools(t *testing.T) {
+	tools := buildDefaultTools(false) // no medical alerts
+
+	found := false
+	for _, tool := range tools {
+		if fn, ok := tool["function"].(map[string]interface{}); ok {
+			if fn["name"] == "get_destination_weather" {
+				found = true
+				break
+			}
+		}
+	}
+
+	if !found {
+		t.Error("get_destination_weather tool should be present in buildDefaultTools()")
+	}
+}

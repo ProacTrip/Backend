@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	envDomain "github.com/ProacTrip/Backend/internal/modules/environment/domain"
+	"github.com/ProacTrip/Backend/internal/modules/environment/features/get_destination_weather"
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/ai_search"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/search_flights"
@@ -1516,5 +1518,138 @@ func TestExecuteChatStream_MaxTurnsGuard(t *testing.T) {
 	searchCount := strings.Count(body, "event: search")
 	if searchCount > 1 {
 		t.Errorf("expected at most 1 search event with maxTurns=1, got %d", searchCount)
+	}
+}
+
+// =============================================================================
+// Destination Weather — integration test
+// =============================================================================
+
+// stubDestinationWeatherSearcher implements ai_search.DestinationWeatherSearcher for testing.
+type stubDestinationWeatherSearcher struct {
+	called   bool
+	lastCmd  get_destination_weather.Command
+	weather  *envDomain.WeatherData
+	err      error
+}
+
+func (s *stubDestinationWeatherSearcher) Execute(ctx context.Context, cmd get_destination_weather.Command) (*envDomain.WeatherData, error) {
+	s.called = true
+	s.lastCmd = cmd
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.weather, nil
+}
+
+func TestExecuteToolCall_GetDestinationWeather(t *testing.T) {
+	// Integration test: full tool calling flow for get_destination_weather
+	ctx := t.Context()
+	w := httptest.NewRecorder()
+
+	weatherData := &envDomain.WeatherData{
+		Temp:        32.0,
+		FeelsLike:   34.5,
+		Description: "tormenta eléctrica",
+		Icon:        "11d",
+		IconURL:     "https://openweathermap.org/img/wn/11d@4x.png",
+		Humidity:    80,
+		WindSpeed:   5.2,
+	}
+
+	dstWeatherSearcher := &stubDestinationWeatherSearcher{
+		weather: weatherData,
+	}
+
+	uc := ai_search.NewUseCase(ai_search.UseCaseDeps{
+		FlightSearcher:       &stubFlightSearcher{resp: &search_flights.Response{}},
+		HotelSearcher:        &stubHotelSearcher{resp: &search_hotels.Response{}},
+		DstWeatherSearcher:   dstWeatherSearcher,
+		AnonMaxTurns:         5,
+		AuthMaxTurns:         10,
+	})
+
+	toolCalls := []ai_search.ToolCall{
+		{ID: "call_w", Name: "get_destination_weather", Arguments: map[string]interface{}{
+			"lat":  41.38,
+			"lng":  2.17,
+			"date": "2026-08-15",
+		}},
+	}
+
+	results := uc.ExecuteToolCalls(ctx, w, toolCalls, ai_search.ConversationContext{})
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+
+	result := results[0]
+	if result.CallID != "call_w" {
+		t.Errorf("CallID = %q, want 'call_w'", result.CallID)
+	}
+	if result.Name != "get_destination_weather" {
+		t.Errorf("Name = %q, want 'get_destination_weather'", result.Name)
+	}
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+	if !dstWeatherSearcher.called {
+		t.Error("destination weather searcher should have been called")
+	}
+	if dstWeatherSearcher.lastCmd.Lat != 41.38 {
+		t.Errorf("Lat = %f, want 41.38", dstWeatherSearcher.lastCmd.Lat)
+	}
+	if dstWeatherSearcher.lastCmd.Lng != 2.17 {
+		t.Errorf("Lng = %f, want 2.17", dstWeatherSearcher.lastCmd.Lng)
+	}
+	if dstWeatherSearcher.lastCmd.Date != "2026-08-15" {
+		t.Errorf("Date = %q, want '2026-08-15'", dstWeatherSearcher.lastCmd.Date)
+	}
+
+	// Verify SSE weather event was emitted
+	body := w.Body.String()
+	if !strings.Contains(body, "event: weather") {
+		t.Error("expected SSE 'weather' event in response body")
+	}
+	if !strings.Contains(body, "tormenta") {
+		t.Errorf("expected weather description in SSE payload, got: %s", body[:min(200, len(body))])
+	}
+
+	// Verify result content contains weather JSON
+	if !strings.Contains(result.Content, "\"temp\":32") {
+		t.Errorf("result content should contain weather temp, got: %s", result.Content)
+	}
+
+	// Verify destination is set
+	if result.Destination == "" {
+		t.Error("result.Destination should not be empty")
+	}
+}
+
+func TestExecuteToolCall_GetDestinationWeather_NilSearcher(t *testing.T) {
+	// Graceful fallback: weather searcher is nil (not configured)
+	ctx := t.Context()
+
+	uc := ai_search.NewUseCase(ai_search.UseCaseDeps{
+		AnonMaxTurns: 5,
+		AuthMaxTurns: 10,
+		// DstWeatherSearcher NOT set → nil
+	})
+
+	toolCalls := []ai_search.ToolCall{
+		{ID: "call_w", Name: "get_destination_weather", Arguments: map[string]interface{}{
+			"lat":  41.38,
+			"lng":  2.17,
+			"date": "2026-08-15",
+		}},
+	}
+
+	results := uc.ExecuteToolCalls(ctx, nil, toolCalls, ai_search.ConversationContext{})
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Error == nil {
+		t.Fatal("expected error when weather searcher is nil")
 	}
 }
