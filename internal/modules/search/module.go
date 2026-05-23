@@ -114,6 +114,10 @@ type Config struct {
 	// UserProfilePort — adapter for resolving user currency/language prefs.
 	// Nil disables user profile resolution (anonymous-only or tests).
 	UserProfilePort domain.UserProfilePort
+
+	// UserHealthPort — adapter for medical/travel/document context injection.
+	// Nil disables medical context injection (anonymous-only or tests).
+	UserHealthPort domain.UserHealthPort
 }
 
 // =============================================================================
@@ -258,11 +262,11 @@ func NewModule(cfg Config) (*Module, error) {
 			// Discovery feature flag — leído de variable de entorno
 			InterpretationCacheTTL: cfg.InterpretationCacheTTL,
 		})
-		aiSearchHandler = ai_search.NewHandler(aiSearchUC, convStore, cfg.RedisClient, cfg.SearchDefaults, cfg.UserProfilePort)
+		aiSearchHandler = ai_search.NewHandler(aiSearchUC, convStore, cfg.RedisClient, cfg.SearchDefaults, cfg.UserProfilePort, cfg.UserHealthPort)
 		aiSearchHandler.RateLimiter = cfg.RateLimiter
 	} else {
 		// Handler with nil usecase → Handle() returns 503 "AI not configured"
-		aiSearchHandler = ai_search.NewHandler(nil, convStore, cfg.RedisClient, cfg.SearchDefaults, cfg.UserProfilePort)
+		aiSearchHandler = ai_search.NewHandler(nil, convStore, cfg.RedisClient, cfg.SearchDefaults, cfg.UserProfilePort, cfg.UserHealthPort)
 		aiSearchHandler.RateLimiter = cfg.RateLimiter
 	}
 

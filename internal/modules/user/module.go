@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-	"time"
 
 	serrors "github.com/ProacTrip/Backend/internal/shared/errors"
 	"github.com/labstack/echo/v5"
@@ -129,6 +128,21 @@ func (m *Module) ProfileRepo() domain.ProfileRepository {
 	return m.profileRepo
 }
 
+// TravelPrefsRepo exposes the travel preferences repository.
+func (m *Module) TravelPrefsRepo() domain.TravelPrefsRepository {
+	return m.travelPrefsRepo
+}
+
+// MedicalProfileRepo exposes the medical profile repository.
+func (m *Module) MedicalProfileRepo() domain.MedicalProfileRepository {
+	return m.medicalProfileRepo
+}
+
+// DocumentRepo exposes the document repository.
+func (m *Module) DocumentRepo() domain.DocumentRepository {
+	return m.documentRepo
+}
+
 // EventConsumer expone el consumer de eventos de usuario.
 // Accedido por bootstrap para iniciar el consumer.
 func (m *Module) EventConsumer() *consumer.UserEventConsumer {
@@ -136,15 +150,9 @@ func (m *Module) EventConsumer() *consumer.UserEventConsumer {
 }
 
 // NewModule crea e inicializa el módulo User con todas sus dependencias.
+// Las migraciones se ejecutan desde bootstrap antes de llamar a NewModule.
 func NewModule(cfg Config) (*Module, error) {
 	m := &Module{}
-
-	// 0. Run pending migrations BEFORE any DB operation
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if err := runMigrations(ctx, cfg.PostgresPool); err != nil {
-		return nil, fmt.Errorf("user migrations: %w", err)
-	}
 
 	// 1. Inicializar Repository (PostgreSQL adapter) — implementa ProfileRepository
 	profileRepo := postgres.NewUserRepository(cfg.PostgresPool)

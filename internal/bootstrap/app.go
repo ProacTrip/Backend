@@ -393,6 +393,15 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	// user:prefs:{userID} using shared/user.GetProfilePrefs.
 	userProfilePort := adapters.NewUserProfileAdapter(rdb)
 
+	// User health port — adapter for medical/travel/document context injection
+	// into the AI system prompt. Wires to user module PG repos.
+	userHealthPort := adapters.NewUserHealthAdapter(
+		userMod.ProfileRepo(),
+		userMod.TravelPrefsRepo(),
+		userMod.MedicalProfileRepo(),
+		userMod.DocumentRepo(),
+	)
+
 	// Conversation PG store for auth users
 	searchMod, err := searchModule.NewModule(searchModule.Config{
 		Provider:          nil, // created from SerpAPIKey/SerpAPITimeout
@@ -417,6 +426,7 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		DiscoveryInterpreter: discoveryInterpreterFrom(aiInterpreter),
 		SavedSearchProvider:  nil,
 		UserProfilePort:      userProfilePort,
+		UserHealthPort:       userHealthPort,
 	})
 	if err != nil {
 		return nil, err
