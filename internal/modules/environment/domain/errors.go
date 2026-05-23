@@ -25,4 +25,13 @@ var (
 	// OpenWeather cuando el proveedor externo responde HTTP 429.
 	// Se detecta con errors.Is para decidir entre degradación elegante y propagación del error.
 	ErrWeatherProviderRateLimited = errors.New("proveedor de clima: rate limit excedido")
+
+	// ErrNoWeatherData se retorna cuando el provider de clima no encuentra datos
+	// para la fecha solicitada (ej: forecast sin entrada para el día objetivo).
+	// El usecase lo convierte en weather: null (degradación elegante).
+	ErrNoWeatherData = errors.New("datos meteorológicos no disponibles para la fecha solicitada")
+
+	// ErrInvalidParameterRange se retorna cuando un parámetro está fuera del rango válido.
+	// Usado por get_destination_weather.Command.Validate() para lat/lng/date.
+	ErrInvalidParameterRange = errors.New("parámetro fuera de rango")
 )

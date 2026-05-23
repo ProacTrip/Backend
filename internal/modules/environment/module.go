@@ -11,6 +11,7 @@ import (
 	"github.com/ProacTrip/Backend/internal/modules/environment/adapters/ipquery"
 	"github.com/ProacTrip/Backend/internal/modules/environment/adapters/openweather"
 	"github.com/ProacTrip/Backend/internal/modules/environment/domain"
+	"github.com/ProacTrip/Backend/internal/modules/environment/features/get_destination_weather"
 	"github.com/ProacTrip/Backend/internal/modules/environment/features/get_environment"
 	"github.com/ProacTrip/Backend/internal/modules/environment/adapters/resolver"
 	serrors "github.com/ProacTrip/Backend/internal/shared/errors"
@@ -24,6 +25,10 @@ type Module struct {
 	// de registro del módulo auth (resuelve moneda/idioma/país/timezone desde IP).
 	// Exportado para que bootstrap lo inyecte en la configuración del módulo auth.
 	EnvironmentResolver *resolver.EnvironmentResolverAdapter
+
+	// GetDestinationWeatherUC expone el caso de uso de clima de destino
+	// para que el módulo search lo inyecte en el tool calling.
+	GetDestinationWeatherUC *get_destination_weather.UseCase
 
 	// wg contabiliza las goroutines fire-and-forget (escrituras asíncronas en caché).
 	// Expuesto para que bootstrap llame a wg.Wait() durante el graceful shutdown.
@@ -102,6 +107,16 @@ func NewModule(cfg Config) *Module {
 
 	getEnvironmentHandler := get_environment.NewHandler(getEnvironmentUC)
 
+	// Crear el caso de uso de clima de destino (forecast + histórico).
+	// Usa el mismo cliente OpenWeather que get_environment y el mismo wg.
+	// El caché usa el adaptador Dragonfly inyectado via Config.Cache.
+	getDestWeatherUC := get_destination_weather.NewUseCase(get_destination_weather.UseCaseDeps{
+		WeatherClient: openWeatherClient,
+		Cache:         cfg.Cache,
+		CacheTTL:      cfg.OpenWeatherCacheTTL,
+		WG:            &wg,
+	})
+
 	// Crear el adaptador resolver para el wiring del registro en auth.
 	// El adaptador usa el mismo cliente IP query (sin llamadas HTTP extra).
 	resolverAdapter := resolver.NewEnvironmentResolverAdapter(ipQueryClient)
@@ -120,9 +135,10 @@ func NewModule(cfg Config) *Module {
 	)
 
 	return &Module{
-		GetEnvironmentHandler: getEnvironmentHandler,
-		EnvironmentResolver:    resolverAdapter,
-		wg:                     &wg,
+		GetEnvironmentHandler:   getEnvironmentHandler,
+		EnvironmentResolver:     resolverAdapter,
+		GetDestinationWeatherUC: getDestWeatherUC,
+		wg:                      &wg,
 	}
 }
 

@@ -19,3 +19,10 @@ type WeatherData struct {
 type WeatherProvider interface {
 	GetCurrentWeather(ctx context.Context, lat, lon float64, lang, units string) (*WeatherData, error)
 }
+
+// WeatherForecaster es el puerto para obtener el clima de un destino en una fecha específica.
+// Soporta dos estrategias: forecast (≤7 días) y historical (>7 días, −1 año).
+type WeatherForecaster interface {
+	GetForecastForDate(ctx context.Context, lat, lng float64, date string) (*WeatherData, error)
+	GetHistoricalForDate(ctx context.Context, lat, lng float64, date string) (*WeatherData, error)
+}
