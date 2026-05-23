@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+
+	"github.com/ProacTrip/Backend/internal/modules/search/domain"
 )
 
 // =============================================================================
@@ -89,4 +91,13 @@ func WriteDoneEvent(w http.ResponseWriter, conversationID string, turnCount int)
 // WriteErrorEvent writes an SSE "error" event.
 func WriteErrorEvent(w http.ResponseWriter, message string) error {
 	return writeSSEEventJSON(w, "error", map[string]string{"error": message})
+}
+
+// WriteMedicalAlertsEvent writes an SSE "alert" event with medical/travel alerts.
+// The frontend displays these in a separate popup window.
+func WriteMedicalAlertsEvent(w http.ResponseWriter, alerts []domain.MedicalAlert) error {
+	if alerts == nil {
+		alerts = []domain.MedicalAlert{}
+	}
+	return writeSSEEventJSON(w, "alert", map[string]interface{}{"alerts": alerts})
 }

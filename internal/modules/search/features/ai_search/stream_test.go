@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/ProacTrip/Backend/internal/modules/search/domain"
 )
 
 // =============================================================================
@@ -212,5 +214,75 @@ func TestFlusherCheck(t *testing.T) {
 	var w http.ResponseWriter = httptest.NewRecorder()
 	if _, ok := w.(http.Flusher); !ok {
 		t.Error("httptest.ResponseRecorder should implement http.Flusher")
+	}
+}
+
+// =============================================================================
+// RED: Task 3.1 — WriteMedicalAlertsEvent
+// =============================================================================
+
+func TestWriteMedicalAlertsEvent(t *testing.T) {
+	w := httptest.NewRecorder()
+	alerts := []domain.MedicalAlert{
+		{Level: "warning", Type: "allergy", Message: "Alergia detectada: Maní"},
+		{Level: "info", Type: "document", Message: "Pasaporte vence en 30 días"},
+	}
+
+	err := WriteMedicalAlertsEvent(w, alerts)
+	if err != nil {
+		t.Fatalf("WriteMedicalAlertsEvent failed: %v", err)
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "event: alert") {
+		t.Error("should contain 'event: alert'")
+	}
+
+	// Parse the SSE data
+	lines := strings.Split(strings.TrimSpace(body), "\n")
+	var dataLine string
+	for _, line := range lines {
+		if strings.HasPrefix(line, "data: ") {
+			dataLine = strings.TrimPrefix(line, "data: ")
+		}
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(dataLine), &parsed); err != nil {
+		t.Fatalf("unmarshal alert event data: %v", err)
+	}
+
+	alertsRaw, ok := parsed["alerts"].([]interface{})
+	if !ok {
+		t.Fatal("missing 'alerts' array in event data")
+	}
+	if len(alertsRaw) != 2 {
+		t.Fatalf("expected 2 alerts, got %d", len(alertsRaw))
+	}
+
+	firstAlert := alertsRaw[0].(map[string]interface{})
+	if firstAlert["level"] != "warning" {
+		t.Errorf("alert[0].level = %v, want 'warning'", firstAlert["level"])
+	}
+	if firstAlert["type"] != "allergy" {
+		t.Errorf("alert[0].type = %v, want 'allergy'", firstAlert["type"])
+	}
+	if firstAlert["message"] != "Alergia detectada: Maní" {
+		t.Errorf("alert[0].message = %v", firstAlert["message"])
+	}
+}
+
+func TestWriteMedicalAlertsEvent_EmptyAlerts(t *testing.T) {
+	w := httptest.NewRecorder()
+	alerts := []domain.MedicalAlert{}
+
+	err := WriteMedicalAlertsEvent(w, alerts)
+	if err != nil {
+		t.Fatalf("WriteMedicalAlertsEvent with empty alerts failed: %v", err)
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "event: alert") {
+		t.Error("should contain 'event: alert' even with empty alerts")
 	}
 }

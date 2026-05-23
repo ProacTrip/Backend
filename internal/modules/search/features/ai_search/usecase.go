@@ -1279,13 +1279,13 @@ func blake3Hash(message string, history []domain.ConversationMessage) []byte {
 //
 // convCtx provides resolved defaults (country_code, language, currency) to prefill
 // tool call arguments when the AI omits them.
-func (uc *UseCase) ExecuteToolCalls(ctx context.Context, toolCalls []ToolCall, convCtx ConversationContext) []ToolResult {
+func (uc *UseCase) ExecuteToolCalls(ctx context.Context, w http.ResponseWriter, toolCalls []ToolCall, convCtx ConversationContext) []ToolResult {
 	results := make([]ToolResult, len(toolCalls))
 
 	var wg sync.WaitGroup
 	for i, tc := range toolCalls {
 		wg.Go(func() {
-			result := uc.executeSingleToolCall(ctx, tc, convCtx)
+			result := uc.executeSingleToolCall(ctx, w, tc, convCtx)
 			results[i] = result
 		})
 	}
@@ -1297,7 +1297,7 @@ func (uc *UseCase) ExecuteToolCalls(ctx context.Context, toolCalls []ToolCall, c
 // executeSingleToolCall dispatches a single tool call to the appropriate searcher.
 // convCtx provides resolved defaults (country_code, language, currency) to prefill
 // tool call arguments when the AI omits them.
-func (uc *UseCase) executeSingleToolCall(ctx context.Context, tc ToolCall, convCtx ConversationContext) ToolResult {
+func (uc *UseCase) executeSingleToolCall(ctx context.Context, w http.ResponseWriter, tc ToolCall, convCtx ConversationContext) ToolResult {
 	result := ToolResult{
 		CallID: tc.ID,
 		Name:   tc.Name,
@@ -1398,6 +1398,25 @@ func (uc *UseCase) executeSingleToolCall(ctx context.Context, tc ToolCall, convC
 		}
 		result.Content = string(data)
 
+	case "emit_medical_alerts":
+		alerts, parseErr := ParseMedicalAlertsToolCall(tc.Arguments)
+		if parseErr != nil {
+			result.Error = parseErr
+			result.Content = fmt.Sprintf(`{"error": "invalid alerts: %s"}`, parseErr.Error())
+			return result
+		}
+
+		domainAlerts := make([]domain.MedicalAlert, len(alerts))
+		copy(domainAlerts, alerts)
+
+		if writeErr := WriteMedicalAlertsEvent(w, domainAlerts); writeErr != nil {
+			result.Error = writeErr
+			result.Content = fmt.Sprintf(`{"error": "failed to write alert event: %s"}`, writeErr.Error())
+			return result
+		}
+
+		result.Content = fmt.Sprintf(`{"emitted":true,"count":%d}`, len(alerts))
+
 	default:
 		result.Error = fmt.Errorf("unknown tool: %s", tc.Name)
 		result.Content = fmt.Sprintf(`{"error": "unknown tool: %s"}`, tc.Name)
@@ -1478,7 +1497,7 @@ func (uc *UseCase) ExecuteChatStream(ctx context.Context, w http.ResponseWriter,
 		}
 
 		// 5. Execute tool calls concurrently
-		results := uc.ExecuteToolCalls(ctx, toolCalls, convCtx)
+		results := uc.ExecuteToolCalls(ctx, w, toolCalls, convCtx)
 
 		// 6. Emit search SSE events for each result
 		for _, r := range results {

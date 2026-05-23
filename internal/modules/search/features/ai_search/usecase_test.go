@@ -1170,7 +1170,7 @@ func TestExecuteToolCalls_ConcurrentDispatch(t *testing.T) {
 		}},
 	}
 
-	results := uc.ExecuteToolCalls(ctx, toolCalls, ai_search.ConversationContext{})
+	results := uc.ExecuteToolCalls(ctx, nil, toolCalls, ai_search.ConversationContext{})
 
 	if len(results) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(results))
@@ -1262,7 +1262,7 @@ func TestExecuteToolCalls_PartialFailure(t *testing.T) {
 		}},
 	}
 
-	results := uc.ExecuteToolCalls(ctx, toolCalls, ai_search.ConversationContext{})
+	results := uc.ExecuteToolCalls(ctx, nil, toolCalls, ai_search.ConversationContext{})
 
 	if len(results) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(results))
