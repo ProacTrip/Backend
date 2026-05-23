@@ -73,10 +73,7 @@ func (c *circuitState) initialBackoff() time.Duration {
 type PoolConfig struct {
 	Auth            string
 	User            string
-	Booking         string
-	Payment         string
 	Notification    string
-	Audit           string
 	MaxOpenConns    int
 	MaxIdleConns    int
 	MaxConnLifetime time.Duration
@@ -103,10 +100,7 @@ func NewPoolManager(cfg PoolConfig) *PoolManager {
 	databases := map[DBType]string{
 		DBAuth:         cfg.Auth,
 		DBUser:         cfg.User,
-		DBBooking:      cfg.Booking,
-		DBPayment:      cfg.Payment,
 		DBNotification: cfg.Notification,
-		DBAudit:        cfg.Audit,
 	}
 
 	for dbType, url := range databases {

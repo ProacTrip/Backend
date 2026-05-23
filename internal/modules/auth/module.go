@@ -252,7 +252,7 @@ func NewModule(cfg Config) (*Module, error) {
 	m.UserDetailHandler = userdetail.NewHandler(userDetailUC)
 
 	// Account Status — AS-SPEC-003, AS-SPEC-005
-	// Inyecta EventPublisher para publicar session.invalidated en disable.
+	// Inyecta EventPublisher para publicar account_disabled/account_enabled.
 	accountStatusUC := accountstatus.NewUseCase(
 		m.Repository.(interface {
 			GetByID(context.Context, uuid.UUID) (*domain.User, error)

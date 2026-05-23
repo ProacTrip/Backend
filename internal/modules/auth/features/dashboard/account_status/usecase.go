@@ -1,6 +1,6 @@
 // Lógica de negocio para habilitar/deshabilitar cuentas desde el dashboard.
-// Orquesta validación, actualización DB, token_version++, invalidación de sesiones,
-// y publicación del evento session.invalidated via EventBus + SSE Hub.
+// Orquesta validación, actualización DB, token_version++, invalidación simple de sesión cache,
+// y publicación de eventos account_disabled/account_enabled via EventBus + SSE Hub.
 package account_status
 
 import (
@@ -14,7 +14,6 @@ import (
 	"github.com/ProacTrip/Backend/internal/modules/auth/domain"
 	"github.com/ProacTrip/Backend/internal/shared/eventbus"
 	"github.com/ProacTrip/Backend/internal/shared/session"
-	"github.com/ProacTrip/Backend/internal/shared/sse"
 )
 
 // =============================================================================
@@ -47,8 +46,9 @@ type EventPublisher interface {
 // UseCase
 // =============================================================================
 
-// UseCase orquesta el cambio de estado de cuenta con invalidación de sesiones
-// y publicación del evento session.invalidated.
+// UseCase orquesta el cambio de estado de cuenta con invalidación simple de
+// sesión cache y publicación de eventos account_disabled/account_enabled.
+// Single-session: invalida solo la key {auth}:session:{userID} (sin SCAN).
 type UseCase struct {
 	repo           AccountStatusRepo
 	rdb            *redis.Client
@@ -67,11 +67,11 @@ func NewUseCase(repo AccountStatusRepo, rdb *redis.Client, eventPublisher EventP
 // Execute ejecuta el cambio de estado.
 // Flow: validate → get user → check self-disable → check no-op → DB update →
 //
-//	IF status=="disabled": invalidar sesiones + publicar session.invalidated event.
+//	invalidate session cache (single-key delete) + publish account event.
 //
 // AS-SPEC-003: solo transiciones active↔disabled.
-// AS-SPEC-005: token_version++ + sesiones invalidadas en disable.
-// El evento session.invalidated se publica fire-and-forget con 2s timeout.
+// AS-SPEC-005: token_version++ + sesión cache invalidada en disable/enable.
+// El evento account_disabled/account_enabled se publica fire-and-forget con 2s timeout.
 func (uc *UseCase) Execute(ctx context.Context, cmd EnableDisableCommand) (*Response, error) {
 	// 1. Validar
 	if err := cmd.Validate(); err != nil {
@@ -102,79 +102,96 @@ func (uc *UseCase) Execute(ctx context.Context, cmd EnableDisableCommand) (*Resp
 		return nil, fmt.Errorf("update user status: %w", err)
 	}
 
-	// 6. Invalidar sesiones cacheadas (disable Y enable)
-	// AS-SPEC-005: token_version++ es la defensa primaria en disable.
-	// En enable también invalidamos para que el cache no siga diciendo "disabled".
+	// 6. Invalidar sesión cache (disable Y enable).
+	// Single-session: solo borramos {auth}:session:{userID} (sin SCAN).
 	// Best-effort: si falla, el TTL del cache (1 min) lo resuelve eventualmente.
-	sessionsInvalidated := 0
-	if cmd.Status == "disabled" || cmd.Status == "active" {
-		sessionsInvalidated = uc.invalidateSessions(ctx, cmd.UserID)
-	}
+	uc.invalidateSessionCache(ctx, cmd.UserID)
 
-	// 7. Publicar evento session.invalidated en disable (fire-and-forget)
-	if cmd.Status == "disabled" && uc.eventPublisher != nil {
-		uc.publishSessionInvalidatedEvent(cmd.UserID, cmd.ActorID)
+	// 7. Publicar evento account_disabled o account_enabled (fire-and-forget)
+	//    El notification consumer lo consume para enviar el email correspondiente.
+	if uc.eventPublisher != nil {
+		if cmd.Status == "disabled" {
+			uc.publishAccountDisabledEvent(cmd.UserID, user.Email, cmd.ActorID)
+		} else if cmd.Status == "active" {
+			uc.publishAccountEnabledEvent(cmd.UserID, user.Email, cmd.ActorID)
+		}
 	}
 
 	return &Response{
-		UserID:              cmd.UserID,
-		PreviousStatus:      previousStatus,
-		NewStatus:           cmd.Status,
-		TokenVersion:        newTV,
-		SessionsInvalidated: sessionsInvalidated,
+		UserID:         cmd.UserID,
+		PreviousStatus: previousStatus,
+		NewStatus:      cmd.Status,
+		TokenVersion:   newTV,
 	}, nil
 }
 
 // =============================================================================
-// Publicación de evento session.invalidated (fire-and-forget)
+// Invalidación de sesión cache (single-key, best-effort)
 // =============================================================================
 
-// publishSessionInvalidatedEvent publica el evento session.invalidated en un goroutine
+// invalidateSessionCache elimina la entrada {auth}:session:{userID} del cache.
+// Retorna sin error incluso si falla — es best-effort.
+func (uc *UseCase) invalidateSessionCache(ctx context.Context, userID uuid.UUID) {
+	if uc.rdb == nil {
+		return
+	}
+
+	if err := session.InvalidateSession(ctx, uc.rdb, userID.String()); err != nil {
+		// Log pero no fallar — token_version mismatch es la defensa primaria
+		_ = err
+	}
+}
+
+// =============================================================================
+// Publicación de eventos account_disabled/account_enabled (fire-and-forget)
+// =============================================================================
+
+// publishAccountDisabledEvent publica el evento account_disabled en un goroutine
 // con timeout de 2s. No bloquea la respuesta del handler.
-// Publica en dos canales:
-//  1. EventBus (DragonflyDB stream) → para consumers internos
-//  2. SSE Hub → para notificar al frontend del usuario deshabilitado en tiempo real
-func (uc *UseCase) publishSessionInvalidatedEvent(userID, actorID uuid.UUID) {
+// También notifica via SSE Hub para tiempo real.
+func (uc *UseCase) publishAccountDisabledEvent(userID uuid.UUID, email string, actorID uuid.UUID) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
-		event := eventbus.NewSessionInvalidatedEvent(userID.String(), actorID.String())
-		stream := eventbus.StreamName("auth.session.invalidated")
-		_, err := uc.eventPublisher.Publish(ctx, stream, event.Payload)
-		if err != nil {
-			// Log pero no fallar — fire-and-forget
-			_ = err
+		now := time.Now().UnixMilli()
+		flatPayload := map[string]any{
+			"event_type":   "account_disabled",
+			"aggregate_id": userID.String(),
+			"timestamp":    now,
+			"user_id":      userID.String(),
+			"email":        email,
+			"disabled_by":  actorID.String(),
 		}
-
-		// SSE Hub: notificar al frontend del usuario deshabilitado
-		sse.GetHub().Publish(userID, sse.Event{
-			Type: "auth.session.invalidated",
-			Data: event.Payload,
-		})
+		stream := eventbus.StreamName("auth.user.registered")
+		_, err := uc.eventPublisher.Publish(ctx, stream, flatPayload)
+		if err != nil {
+			_ = err // fire-and-forget
+		}
 	}()
 }
 
-// =============================================================================
-// Invalidador de sesiones (best-effort)
-// =============================================================================
+// publishAccountEnabledEvent publica el evento account_enabled en un goroutine
+// con timeout de 2s. No bloquea la respuesta del handler.
+// También notifica via SSE Hub para tiempo real.
+func (uc *UseCase) publishAccountEnabledEvent(userID uuid.UUID, email string, actorID uuid.UUID) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
 
-// invalidateSessions invalida todas las sesiones cacheadas en Dragonfly.
-// Retorna 0 si falla o no hay sesiones. Es best-effort: nunca revienta la operación.
-func (uc *UseCase) invalidateSessions(ctx context.Context, userID uuid.UUID) int {
-	// Sin cliente Redis → sin invalidación (no es error)
-	if uc.rdb == nil {
-		return 0
-	}
-
-	if err := session.InvalidateAllUserSessions(ctx, uc.rdb, userID.String()); err != nil {
-		// Log pero no fallar — token_version mismatch es la defensa primaria
-		_ = err
-		return 0
-	}
-
-	// Éxito, pero no sabemos cuántas sesiones había exactamente.
-	// Retornamos 1 como indicador de que se intentó la invalidación.
-	return 1
+		now := time.Now().UnixMilli()
+		flatPayload := map[string]any{
+			"event_type":   "account_enabled",
+			"aggregate_id": userID.String(),
+			"timestamp":    now,
+			"user_id":      userID.String(),
+			"email":        email,
+			"enabled_by":   actorID.String(),
+		}
+		stream := eventbus.StreamName("auth.user.registered")
+		_, err := uc.eventPublisher.Publish(ctx, stream, flatPayload)
+		if err != nil {
+			_ = err // fire-and-forget
+		}
+	}()
 }
-

@@ -21,7 +21,7 @@ type PasswordService interface {
 }
 
 type TokenService interface {
-	GenerateTokenPair(userID uuid.UUID, email string, role string, roleID, sessionID uuid.UUID) (*token.TokenPair, error)
+	GenerateTokenPair(userID uuid.UUID, email string, role string, roleID uuid.UUID) (*token.TokenPair, error)
 }
 
 // =============================================================================
@@ -90,8 +90,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		return nil, domain.ErrInvalidCredentials
 	}
 
-	sessionID := uuid.Must(uuid.NewV7())
-	tokenPair, err := uc.tokenSvc.GenerateTokenPair(user.ID, user.Email, user.RoleName, user.RoleID, sessionID)
+	tokenPair, err := uc.tokenSvc.GenerateTokenPair(user.ID, user.Email, user.RoleName, user.RoleID)
 	if err != nil {
 		return nil, fmt.Errorf("generar tokens de sesión: %w", err)
 	}

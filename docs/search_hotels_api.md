@@ -1076,7 +1076,7 @@ curl -X POST {base_url}/hotel-details \
         "date": "2025-03-20T14:22:00Z",
         "score": 5.0,
         "comment": "La estancia fue extraordinaria, el hotel muy cómodo y limpio. El personal muy amable y atento.",
-        "url": "https://www.tripadvisor.es/Hotel_Review-..."
+        "url": "https://www.hotel-reviews.example.com/review/..."
       }
     }
   ],

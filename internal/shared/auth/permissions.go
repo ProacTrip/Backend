@@ -13,7 +13,5 @@ const (
 	// Escritura de feature limits.
 	PermFeatureLimitsWrite = "feature_limits:write"
 
-	// Lectura y escritura de sesiones activas.
-	PermSessionsRead  = "sessions:read"
-	PermSessionsWrite = "sessions:write"
+
 )

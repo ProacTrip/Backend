@@ -6,8 +6,8 @@
 --   1. Tabla user_permission_overrides (reemplazada por resolución solo-rol)
 --   2. Columna users.mfa_enabled (MFA eliminado del dominio)
 --   3. Permisos no usados: roles:read, roles:write, permissions:read,
---      permissions:write, feature_limits:read
---   4. Actualiza role_permissions del admin a solo 5 permisos
+--      permissions:write, feature_limits:read, sessions:read, sessions:write
+--   4. Actualiza role_permissions del admin a solo 3 permisos
 -- =============================================================================
 
 -- 1. Eliminar tabla de permission overrides
@@ -22,18 +22,13 @@ DELETE FROM permissions WHERE (resource, action) IN (
     ('roles', 'write'),
     ('permissions', 'read'),
     ('permissions', 'write'),
-    ('feature_limits', 'read')
+    ('feature_limits', 'read'),
+    ('sessions', 'read'),
+    ('sessions', 'write')
 );
 
--- 3b. Asegurar que sessions:read y sessions:write existen (no estaban en migraciones anteriores)
-INSERT INTO permissions(resource, action, description) VALUES
-    ('sessions', 'read', 'Ver sesiones activas'),
-    ('sessions', 'write', 'Invalidar sesiones')
-ON CONFLICT (resource, action) DO NOTHING;
-
--- 4. Actualizar role_permissions del admin: mantener solo los 5 permisos activos
---    Los permisos activos son: users:read, users:write, feature_limits:write,
---    sessions:read, sessions:write.
+-- 4. Actualizar role_permissions del admin: mantener solo los 3 permisos activos
+--    Los permisos activos son: users:read, users:write, feature_limits:write.
 --    Eliminamos las asociaciones a permisos que ya no existen.
 DELETE FROM role_permissions rp
 USING roles r
@@ -44,9 +39,7 @@ WHERE rp.role_id = r.id
     WHERE (p.resource, p.action) IN (
       ('users', 'read'),
       ('users', 'write'),
-      ('feature_limits', 'write'),
-      ('sessions', 'read'),
-      ('sessions', 'write')
+      ('feature_limits', 'write')
     )
   );
 
@@ -82,7 +75,9 @@ INSERT INTO permissions(resource, action, description) VALUES
     ('roles', 'write', 'Gestionar roles'),
     ('permissions', 'read', 'Ver permisos RBAC'),
     ('permissions', 'write', 'Gestionar permisos RBAC'),
-    ('feature_limits', 'read', 'Ver límites de features')
+    ('feature_limits', 'read', 'Ver límites de features'),
+    ('sessions', 'read', 'Ver sesiones activas'),
+    ('sessions', 'write', 'Invalidar sesiones')
 ON CONFLICT (resource, action) DO NOTHING;
 
 -- 4. Reasignar al admin
@@ -94,7 +89,8 @@ WHERE r.name = 'admin'
   AND (p.resource, p.action) IN (
     ('roles', 'read'), ('roles', 'write'),
     ('permissions', 'read'), ('permissions', 'write'),
-    ('feature_limits', 'read')
+    ('feature_limits', 'read'),
+    ('sessions', 'read'), ('sessions', 'write')
   )
   AND NOT EXISTS (
     SELECT 1 FROM role_permissions rp

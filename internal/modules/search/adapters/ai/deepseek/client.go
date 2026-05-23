@@ -70,6 +70,7 @@ type ToolFunction struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitzero"`
 	Parameters  json.RawMessage `json:"parameters,omitzero"`
+	Arguments   string          `json:"arguments,omitzero"`
 }
 
 // ToolCall represents a tool call from the AI model in a chat response.

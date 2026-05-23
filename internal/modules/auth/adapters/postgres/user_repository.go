@@ -36,10 +36,10 @@ func NewUserRepository(pool PgxPool) *UserRepository {
 func (r *UserRepository) Create(ctx context.Context, user *domain.User) error {
 	query := `
 		INSERT INTO users (
-			id, email, email_verified, email_verified_at, password_hash, status,
+			id, email, email_verified, email_verified_at, password_hash, first_name, status,
 			role_id, login_count, failed_login_attempts, locked_until,
 			created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 	`
 
 	_, err := r.pool.Exec(ctx, query,
@@ -48,6 +48,7 @@ func (r *UserRepository) Create(ctx context.Context, user *domain.User) error {
 		user.EmailVerified,
 		user.EmailVerifiedAt,
 		user.PasswordHash,
+		user.FirstName,
 		user.Status,
 		user.RoleID,
 		user.LoginCount,
@@ -68,7 +69,7 @@ func (r *UserRepository) Create(ctx context.Context, user *domain.User) error {
 func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error) {
 	query := `
 		SELECT u.id, u.email, u.email_verified, u.email_verified_at, u.password_hash,
-		       u.status, u.role_id, r.name as role_name, u.login_count, u.failed_login_attempts,
+		       u.first_name, u.status, u.role_id, r.name as role_name, u.login_count, u.failed_login_attempts,
 		       u.locked_until, u.last_login_at, u.created_at, u.updated_at
 		FROM users u
 		JOIN roles r ON u.role_id = r.id
@@ -82,6 +83,7 @@ func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Use
 		&user.EmailVerified,
 		&user.EmailVerifiedAt,
 		&user.PasswordHash,
+		&user.FirstName,
 		&user.Status,
 		&user.RoleID,
 		&user.RoleName,
@@ -107,7 +109,7 @@ func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Use
 func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*domain.User, error) {
 	query := `
 		SELECT u.id, u.email, u.email_verified, u.email_verified_at, u.password_hash,
-		       u.status, u.role_id, r.name as role_name, u.login_count, u.failed_login_attempts,
+		       u.first_name, u.status, u.role_id, r.name as role_name, u.login_count, u.failed_login_attempts,
 		       u.locked_until, u.last_login_at, u.created_at, u.updated_at
 		FROM users u
 		JOIN roles r ON u.role_id = r.id
@@ -121,6 +123,7 @@ func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*domain.
 		&user.EmailVerified,
 		&user.EmailVerifiedAt,
 		&user.PasswordHash,
+		&user.FirstName,
 		&user.Status,
 		&user.RoleID,
 		&user.RoleName,
@@ -147,10 +150,10 @@ func (r *UserRepository) Update(ctx context.Context, user *domain.User) error {
 	query := `
 		UPDATE users SET
 			email = $1, email_verified = $2, email_verified_at = $3,
-			password_hash = $4, status = $5, role_id = $6,
-			login_count = $7, failed_login_attempts = $8, locked_until = $9,
-			last_login_at = $10, updated_at = $11
-		WHERE id = $12
+			password_hash = $4, first_name = $5, status = $6, role_id = $7,
+			login_count = $8, failed_login_attempts = $9, locked_until = $10,
+			last_login_at = $11, updated_at = $12
+		WHERE id = $13
 	`
 
 	ct, err := r.pool.Exec(ctx, query,
@@ -158,6 +161,7 @@ func (r *UserRepository) Update(ctx context.Context, user *domain.User) error {
 		user.EmailVerified,
 		user.EmailVerifiedAt,
 		user.PasswordHash,
+		user.FirstName,
 		user.Status,
 		user.RoleID,
 		user.LoginCount,

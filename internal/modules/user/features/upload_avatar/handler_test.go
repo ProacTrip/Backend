@@ -22,12 +22,12 @@ func (m *testUAStorage) GenerateUploadURL(ctx context.Context, bucket, key strin
 
 func TestUploadAvatarHandler_Handle(t *testing.T) {
 	uid := uuid.Must(uuid.NewV7())
-	tc := &sharedauth.AccessClaims{UserID: uid, Email: "t@t.com", RoleID: uuid.Must(uuid.NewV7()), Role: "client", SessionID: uuid.Must(uuid.NewV7()), JTI: uuid.Must(uuid.NewV7())}
+	tc := &sharedauth.AccessClaims{UserID: uid, Email: "t@t.com", RoleID: uuid.Must(uuid.NewV7()), Role: "client", JTI: uuid.Must(uuid.NewV7())}
 	tests := []struct {
 		name string; claims *sharedauth.AccessClaims; body string; storage *testUAStorage; wantStatus int
 	}{
 		{"debe retornar 201 con URL prefirmada", tc, `{"file_name":"avatar.png","content_type":"image/png"}`, &testUAStorage{}, http.StatusInternalServerError},
-		{"debe retornar error sin claims", nil, `{"file_name":"test.png"}`, &testUAStorage{}, http.StatusInternalServerError},
+		{"debe retornar error sin claims", nil, `{"file_name":"test.png"}`, &testUAStorage{}, http.StatusUnauthorized},
 		{"debe retornar 400 cuando content_type invalido", tc, `{"file_name":"test.exe","content_type":"application/x-msdownload"}`, &testUAStorage{}, http.StatusInternalServerError},
 	}
 	for _, tt := range tests {

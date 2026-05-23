@@ -53,30 +53,6 @@ func (h *Handler) Handle(c *echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{"message": "Logged out successfully."})
 }
 
-func (h *Handler) HandleAll(c *echo.Context) error {
-	c.Response().Header().Set("Cache-Control", "no-store, private")
-
-	tokenStr := h.extractToken(c)
-
-	cmd := Command{Token: tokenStr, LogoutAll: true}
-	if err := cmd.Validate(); err != nil {
-		return httperr.MapError(c, err)
-	}
-
-	_, err := h.usecase.Execute(c.Request().Context(), cmd)
-	if err != nil {
-		return httperr.MapError(c, err)
-	}
-
-	if h.isProduction {
-		httperr.ClearAuthCookies(c, h.cookieDomain)
-	} else {
-		httperr.ClearAuthCookiesDev(c)
-	}
-
-	return c.JSON(http.StatusOK, map[string]string{"message": "All sessions have been revoked."})
-}
-
 func (h *Handler) extractToken(c *echo.Context) string {
 	cookie, err := c.Cookie(accessCookieNameProd)
 	if err != nil {

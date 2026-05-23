@@ -18,6 +18,7 @@ import (
 
 // Servicio de tokens usando PASETO V4 Local.
 // Genera y valida access/refresh tokens cifrados.
+// Single-session: los tokens ya no incluyen session_id.
 
 type PasetoConfig struct {
 	SymmetricKey    []byte // 32 bytes exactos
@@ -60,13 +61,13 @@ func NewPasetoService(cfg PasetoConfig) (*PasetoService, error) {
 	}, nil
 }
 
-func (s *PasetoService) GenerateTokenPair(userID uuid.UUID, email string, role string, roleID, sessionID uuid.UUID) (*TokenPair, error) {
-	accessToken, accessJTI, err := s.generateAccessToken(userID, email, role, roleID, sessionID)
+func (s *PasetoService) GenerateTokenPair(userID uuid.UUID, email string, role string, roleID uuid.UUID) (*TokenPair, error) {
+	accessToken, accessJTI, err := s.generateAccessToken(userID, email, role, roleID)
 	if err != nil {
 		return nil, err
 	}
 
-	refreshToken, refreshJTI, err := s.generateRefreshToken(userID, email, role, roleID, sessionID)
+	refreshToken, refreshJTI, err := s.generateRefreshToken(userID, email, role, roleID)
 	if err != nil {
 		return nil, err
 	}
@@ -82,13 +83,13 @@ func (s *PasetoService) GenerateTokenPair(userID uuid.UUID, email string, role s
 }
 
 // GenerateAccessToken genera solo un access token.
-func (s *PasetoService) GenerateAccessToken(userID uuid.UUID, email string, role string, roleID, sessionID uuid.UUID) (string, error) {
-	tokenStr, _, err := s.generateAccessToken(userID, email, role, roleID, sessionID)
+func (s *PasetoService) GenerateAccessToken(userID uuid.UUID, email string, role string, roleID uuid.UUID) (string, error) {
+	tokenStr, _, err := s.generateAccessToken(userID, email, role, roleID)
 	return tokenStr, err
 }
 
-func (s *PasetoService) GenerateRefreshToken(userID uuid.UUID, email string, role string, roleID, sessionID uuid.UUID) (string, error) {
-	tokenStr, _, err := s.generateRefreshToken(userID, email, role, roleID, sessionID)
+func (s *PasetoService) GenerateRefreshToken(userID uuid.UUID, email string, role string, roleID uuid.UUID) (string, error) {
+	tokenStr, _, err := s.generateRefreshToken(userID, email, role, roleID)
 	return tokenStr, err
 }
 
@@ -131,15 +132,6 @@ func (s *PasetoService) ValidateAccessToken(ctx context.Context, tokenString str
 		return nil, domain.ErrTokenInvalid
 	}
 
-	sessionIDStr, err := pasetoToken.GetString("session_id")
-	if err != nil {
-		return nil, domain.ErrTokenInvalid
-	}
-	sessionID, err := uuid.Parse(sessionIDStr)
-	if err != nil {
-		return nil, domain.ErrTokenInvalid
-	}
-
 	jti, err := pasetoToken.GetJti()
 	if err != nil || jti == "" {
 		return nil, domain.ErrTokenInvalid
@@ -163,7 +155,6 @@ func (s *PasetoService) ValidateAccessToken(ctx context.Context, tokenString str
 		Email:        email,
 		RoleID:       roleID,
 		Role:         role,
-		SessionID:    sessionID,
 		JTI:          jtiUUID,
 		TokenVersion: tokenVersion,
 	}, nil
@@ -199,15 +190,6 @@ func (s *PasetoService) ValidateRefreshToken(ctx context.Context, tokenString st
 	roleIDStr, _ := pasetoToken.GetString("role_id")
 	roleID, _ := uuid.Parse(roleIDStr)
 
-	sessionIDStr, err := pasetoToken.GetString("session_id")
-	if err != nil {
-		return nil, domain.ErrTokenInvalid
-	}
-	sessionID, err := uuid.Parse(sessionIDStr)
-	if err != nil {
-		return nil, domain.ErrTokenInvalid
-	}
-
 	jti, err := pasetoToken.GetJti()
 	if err != nil || jti == "" {
 		return nil, domain.ErrTokenInvalid
@@ -220,12 +202,11 @@ func (s *PasetoService) ValidateRefreshToken(ctx context.Context, tokenString st
 	role, _ := pasetoToken.GetString("role")
 
 	claims := &RefreshClaims{
-		UserID:    userID,
-		Email:     email,
-		RoleID:    roleID,
-		Role:      role,
-		SessionID: sessionID,
-		JTI:       jtiUUID,
+		UserID: userID,
+		Email:  email,
+		RoleID: roleID,
+		Role:   role,
+		JTI:    jtiUUID,
 	}
 
 	blacklisted, err := s.isJTIBlacklisted(ctx, jtiUUID)
@@ -255,12 +236,12 @@ func (s *PasetoService) ValidateAndRotateRefresh(ctx context.Context, refreshTok
 		return nil, "", "", fmt.Errorf("blacklist JTI: %w", err)
 	}
 
-	newAccess, err := s.GenerateAccessToken(claims.UserID, claims.Email, claims.Role, claims.RoleID, claims.SessionID)
+	newAccess, err := s.GenerateAccessToken(claims.UserID, claims.Email, claims.Role, claims.RoleID)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("generate access token: %w", err)
 	}
 
-	newRefresh, err := s.GenerateRefreshToken(claims.UserID, claims.Email, claims.Role, claims.RoleID, claims.SessionID)
+	newRefresh, err := s.GenerateRefreshToken(claims.UserID, claims.Email, claims.Role, claims.RoleID)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("generate refresh token: %w", err)
 	}
@@ -290,7 +271,7 @@ func (s *PasetoService) ValidateAndRotateRefreshWithVersion(
 	// Generar access token con el token_version real desde DB
 	newAccess, _, err := s.generateAccessTokenWithVersion(
 		claims.UserID, claims.Email, claims.Role,
-		claims.RoleID, claims.SessionID, tokenVersion,
+		claims.RoleID, tokenVersion,
 	)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("generate access token: %w", err)
@@ -299,7 +280,7 @@ func (s *PasetoService) ValidateAndRotateRefreshWithVersion(
 	// Generar refresh token con el token_version real desde DB
 	newRefresh, _, err := s.generateRefreshTokenWithVersion(
 		claims.UserID, claims.Email, claims.Role,
-		claims.RoleID, claims.SessionID, tokenVersion,
+		claims.RoleID, tokenVersion,
 	)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("generate refresh token: %w", err)
@@ -336,7 +317,7 @@ func (s *PasetoService) isJTIBlacklisted(ctx context.Context, jti uuid.UUID) (bo
 // Métodos privados de generación
 // ---------------------------------------------------------------------------
 
-func (s *PasetoService) generateAccessToken(userID uuid.UUID, email, role string, roleID, sessionID uuid.UUID) (string, uuid.UUID, error) {
+func (s *PasetoService) generateAccessToken(userID uuid.UUID, email, role string, roleID uuid.UUID) (string, uuid.UUID, error) {
 	jti := uuid.Must(uuid.NewV7())
 
 	token := paseto.NewToken()
@@ -344,7 +325,6 @@ func (s *PasetoService) generateAccessToken(userID uuid.UUID, email, role string
 	token.SetString("email", email)
 	token.SetString("role", role)
 	token.SetString("role_id", roleID.String())
-	token.SetString("session_id", sessionID.String())
 	token.SetJti(jti.String())
 	token.SetString("type", "access")
 	token.Set("token_version", 1) // Por defecto 1 para nuevos logins y OAuth
@@ -357,7 +337,7 @@ func (s *PasetoService) generateAccessToken(userID uuid.UUID, email, role string
 // generateAccessTokenWithVersion genera un access token con el token_version especificado.
 // Usado por ValidateAndRotateRefreshWithVersion para tokens de rotación que deben
 // reflejar la versión actual en DB.
-func (s *PasetoService) generateAccessTokenWithVersion(userID uuid.UUID, email, role string, roleID, sessionID uuid.UUID, tokenVersion int) (string, uuid.UUID, error) {
+func (s *PasetoService) generateAccessTokenWithVersion(userID uuid.UUID, email, role string, roleID uuid.UUID, tokenVersion int) (string, uuid.UUID, error) {
 	jti := uuid.Must(uuid.NewV7())
 
 	token := paseto.NewToken()
@@ -365,7 +345,6 @@ func (s *PasetoService) generateAccessTokenWithVersion(userID uuid.UUID, email, 
 	token.SetString("email", email)
 	token.SetString("role", role)
 	token.SetString("role_id", roleID.String())
-	token.SetString("session_id", sessionID.String())
 	token.SetJti(jti.String())
 	token.SetString("type", "access")
 	token.Set("token_version", tokenVersion)
@@ -375,7 +354,7 @@ func (s *PasetoService) generateAccessTokenWithVersion(userID uuid.UUID, email, 
 	return encrypted, jti, nil
 }
 
-func (s *PasetoService) generateRefreshToken(userID uuid.UUID, email, role string, roleID, sessionID uuid.UUID) (string, uuid.UUID, error) {
+func (s *PasetoService) generateRefreshToken(userID uuid.UUID, email, role string, roleID uuid.UUID) (string, uuid.UUID, error) {
 	jti := uuid.Must(uuid.NewV7())
 
 	token := paseto.NewToken()
@@ -383,7 +362,6 @@ func (s *PasetoService) generateRefreshToken(userID uuid.UUID, email, role strin
 	token.SetString("email", email)
 	token.SetString("role", role)
 	token.SetString("role_id", roleID.String())
-	token.SetString("session_id", sessionID.String())
 	token.SetJti(jti.String())
 	token.SetString("type", "refresh")
 	token.Set("token_version", 1) // Por defecto 1 para nuevos logins y OAuth
@@ -395,7 +373,7 @@ func (s *PasetoService) generateRefreshToken(userID uuid.UUID, email, role strin
 
 // generateRefreshTokenWithVersion genera un refresh token con el token_version especificado.
 // Usado por ValidateAndRotateRefreshWithVersion para tokens de rotación.
-func (s *PasetoService) generateRefreshTokenWithVersion(userID uuid.UUID, email, role string, roleID, sessionID uuid.UUID, tokenVersion int) (string, uuid.UUID, error) {
+func (s *PasetoService) generateRefreshTokenWithVersion(userID uuid.UUID, email, role string, roleID uuid.UUID, tokenVersion int) (string, uuid.UUID, error) {
 	jti := uuid.Must(uuid.NewV7())
 
 	token := paseto.NewToken()
@@ -403,7 +381,6 @@ func (s *PasetoService) generateRefreshTokenWithVersion(userID uuid.UUID, email,
 	token.SetString("email", email)
 	token.SetString("role", role)
 	token.SetString("role_id", roleID.String())
-	token.SetString("session_id", sessionID.String())
 	token.SetJti(jti.String())
 	token.SetString("type", "refresh")
 	token.Set("token_version", tokenVersion)
@@ -414,7 +391,7 @@ func (s *PasetoService) generateRefreshTokenWithVersion(userID uuid.UUID, email,
 }
 
 // ---------------------------------------------------------------------------
-// Tipos de retorno (pueden moverse a otro archivo si lo deseas)
+// Tipos de retorno
 // ---------------------------------------------------------------------------
 
 type TokenPair struct {
@@ -431,12 +408,11 @@ type TokenPair struct {
 type AccessClaims = sharedauth.AccessClaims
 
 type RefreshClaims struct {
-	UserID    uuid.UUID
-	Email     string
-	RoleID    uuid.UUID
-	Role      string
-	SessionID uuid.UUID
-	JTI       uuid.UUID
+	UserID uuid.UUID
+	Email  string
+	RoleID uuid.UUID
+	Role   string
+	JTI    uuid.UUID
 }
 
 // GetUserID returns the user ID as a UUID for interface satisfaction.

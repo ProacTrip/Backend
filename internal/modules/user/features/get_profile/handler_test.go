@@ -53,8 +53,7 @@ func testClaims() *sharedauth.AccessClaims {
 		Email:     "test@example.com",
 		RoleID:    uuid.Must(uuid.NewV7()),
 		Role:      "client",
-		SessionID: uuid.Must(uuid.NewV7()),
-		JTI:       uuid.Must(uuid.NewV7()),
+		JTI: uuid.Must(uuid.NewV7()),
 	}
 }
 
@@ -93,7 +92,7 @@ func TestGetProfileHandler_Handle(t *testing.T) {
 		{
 			name:        "debe retornar error cuando no hay claims en el contexto",
 			profileRepo: &testProfileRepo{},
-			wantStatus:  http.StatusInternalServerError,
+			wantStatus:  http.StatusUnauthorized,
 		},
 		{
 			name:   "debe retornar 404 cuando el perfil no existe",

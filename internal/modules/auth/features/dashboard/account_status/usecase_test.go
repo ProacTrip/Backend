@@ -387,8 +387,8 @@ func TestExecute_NoopStatusChange(t *testing.T) {
 	}
 }
 
-// TestExecute_SessionInvalidation_BestEffort verifica que si Redis falla,
-// la operación igual retorna éxito (best-effort).
+// TestExecute_SessionInvalidation_BestEffort verifica que la invalidación
+// de sesión es best-effort: si Redis falla, la operación igual retorna éxito.
 func TestExecute_SessionInvalidation_BestEffort(t *testing.T) {
 	ctx := t.Context()
 	rdb := newMiniRedis(t)
@@ -420,6 +420,246 @@ func TestExecute_SessionInvalidation_BestEffort(t *testing.T) {
 	if resp.NewStatus != "disabled" {
 		t.Errorf("expected disabled, got %s", resp.NewStatus)
 	}
-	// SessionsInvalidated puede ser 0 si no hay sesiones cacheadas o si Redis falló
-	// El punto es que la operación NO debe fallar
+	// Single-session: no hay SessionsInvalidated en la respuesta
+}
+
+// =============================================================================
+// Stub EventPublisher para verificar publicación de eventos
+// =============================================================================
+
+// stubEventPublisher registra las llamadas a Publish para verificar en tests.
+type stubEventPublisher struct {
+	calls       []publishCall
+	shouldError error // Si no es nil, Publish retorna este error.
+}
+
+type publishCall struct {
+	stream  string
+	payload map[string]interface{}
+}
+
+func (s *stubEventPublisher) Publish(_ context.Context, stream string, payload map[string]interface{}) (string, error) {
+	s.calls = append(s.calls, publishCall{stream: stream, payload: payload})
+	if s.shouldError != nil {
+		return "", s.shouldError
+	}
+	return "msg-stub-001", nil
+}
+
+// newUseCaseWithPublisher crea un UseCase con EventPublisher inyectado.
+func newUseCaseWithPublisher(
+	getByID func(ctx context.Context, id uuid.UUID) (*domain.User, error),
+	updateStatus func(ctx context.Context, id uuid.UUID, status string) (int, error),
+	rdb *redis.Client,
+	publisher accountstatus.EventPublisher,
+) *accountstatus.UseCase {
+	repo := &stubAccountStatusRepo{getByID: getByID, updateStatus: updateStatus}
+	return accountstatus.NewUseCase(repo, rdb, publisher)
+}
+
+// =============================================================================
+// Tests para publicación de eventos account_disabled/account_enabled (Task 2.1)
+// =============================================================================
+
+// TestExecute_Disable_PublishesAccountDisabledEvent verifica que al deshabilitar
+// se publica el evento account_disabled en el stream correcto via goroutine.
+func TestExecute_Disable_PublishesAccountDisabledEvent(t *testing.T) {
+	ctx := t.Context()
+	rdb := newMiniRedis(t)
+
+	userID := uuid.Must(uuid.NewV7())
+	roleID := uuid.Must(uuid.NewV7())
+	actorID := uuid.Must(uuid.NewV7())
+	email := "disabled-event@proactrip.com"
+
+	publisher := &stubEventPublisher{}
+	uc := newUseCaseWithPublisher(
+		func(ctx context.Context, id uuid.UUID) (*domain.User, error) {
+			return usuarioActivo(userID, email, roleID), nil
+		},
+		func(ctx context.Context, id uuid.UUID, status string) (int, error) {
+			return 2, nil
+		},
+		rdb,
+		publisher,
+	)
+
+	cmd := accountstatus.EnableDisableCommand{
+		UserID:  userID,
+		Status:  "disabled",
+		ActorID: actorID,
+	}
+
+	_, err := uc.Execute(ctx, cmd)
+	if err != nil {
+		t.Fatalf("Execute() unexpected error: %v", err)
+	}
+
+	// Esperar un poco para que el goroutine de fire-and-forget termine.
+	time.Sleep(100 * time.Millisecond)
+
+	if len(publisher.calls) < 1 {
+		t.Fatalf("expected at least 1 publish call (account_disabled), got %d", len(publisher.calls))
+	}
+
+	// Buscar account_disabled event
+	var accountDisabledCall *publishCall
+	for i := range publisher.calls {
+		eventType, _ := publisher.calls[i].payload["event_type"].(string)
+		if eventType == "account_disabled" {
+			accountDisabledCall = &publisher.calls[i]
+			break
+		}
+	}
+
+	if accountDisabledCall == nil {
+		t.Fatal("account_disabled event was not published")
+	}
+
+	payload := accountDisabledCall.payload
+	if payload["user_id"] != userID.String() {
+		t.Errorf("user_id = %q, want %q", payload["user_id"], userID.String())
+	}
+	if payload["email"] != email {
+		t.Errorf("email = %q, want %q", payload["email"], email)
+	}
+	if payload["disabled_by"] != actorID.String() {
+		t.Errorf("disabled_by = %q, want %q", payload["disabled_by"], actorID.String())
+	}
+}
+
+// TestExecute_Enable_PublishesAccountEnabledEvent verifica que al habilitar
+// se publica el evento account_enabled.
+func TestExecute_Enable_PublishesAccountEnabledEvent(t *testing.T) {
+	ctx := t.Context()
+	rdb := newMiniRedis(t)
+
+	userID := uuid.Must(uuid.NewV7())
+	roleID := uuid.Must(uuid.NewV7())
+	actorID := uuid.Must(uuid.NewV7())
+	email := "enabled-event@proactrip.com"
+
+	publisher := &stubEventPublisher{}
+	uc := newUseCaseWithPublisher(
+		func(ctx context.Context, id uuid.UUID) (*domain.User, error) {
+			return usuarioDeshabilitado(userID, email, roleID), nil
+		},
+		func(ctx context.Context, id uuid.UUID, status string) (int, error) {
+			return 3, nil
+		},
+		rdb,
+		publisher,
+	)
+
+	cmd := accountstatus.EnableDisableCommand{
+		UserID:  userID,
+		Status:  "active",
+		ActorID: actorID,
+	}
+
+	_, err := uc.Execute(ctx, cmd)
+	if err != nil {
+		t.Fatalf("Execute() unexpected error: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	var accountEnabledCall *publishCall
+	for i := range publisher.calls {
+		eventType, _ := publisher.calls[i].payload["event_type"].(string)
+		if eventType == "account_enabled" {
+			accountEnabledCall = &publisher.calls[i]
+			break
+		}
+	}
+
+	if accountEnabledCall == nil {
+		t.Fatal("account_enabled event was not published")
+	}
+
+	payload := accountEnabledCall.payload
+	if payload["user_id"] != userID.String() {
+		t.Errorf("user_id = %q, want %q", payload["user_id"], userID.String())
+	}
+	if payload["email"] != email {
+		t.Errorf("email = %q, want %q", payload["email"], email)
+	}
+	if payload["enabled_by"] != actorID.String() {
+		t.Errorf("enabled_by = %q, want %q", payload["enabled_by"], actorID.String())
+	}
+}
+
+// TestExecute_SelfDisable_NoEventPublished verifica que NO se publica evento
+// cuando el usuario intenta deshabilitarse a sí mismo (error temprano).
+func TestExecute_SelfDisable_NoEventPublished(t *testing.T) {
+	ctx := t.Context()
+	rdb := newMiniRedis(t)
+
+	userID := uuid.Must(uuid.NewV7())
+	roleID := uuid.Must(uuid.NewV7())
+
+	publisher := &stubEventPublisher{}
+	uc := newUseCaseWithPublisher(
+		func(ctx context.Context, id uuid.UUID) (*domain.User, error) {
+			return usuarioActivo(userID, "self@proactrip.com", roleID), nil
+		},
+		nil,
+		rdb,
+		publisher,
+	)
+
+	cmd := accountstatus.EnableDisableCommand{
+		UserID:  userID,
+		Status:  "disabled",
+		ActorID: userID, // self-disable
+	}
+
+	_, err := uc.Execute(ctx, cmd)
+	if err == nil {
+		t.Fatal("expected error for self-disable")
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	if len(publisher.calls) != 0 {
+		t.Errorf("expected 0 events on self-disable error, got %d calls", len(publisher.calls))
+	}
+}
+
+// TestExecute_Noop_NoEventPublished verifica que NO se publica evento
+// cuando el status ya es el mismo (no-op).
+func TestExecute_Noop_NoEventPublished(t *testing.T) {
+	ctx := t.Context()
+	rdb := newMiniRedis(t)
+
+	userID := uuid.Must(uuid.NewV7())
+	roleID := uuid.Must(uuid.NewV7())
+	actorID := uuid.Must(uuid.NewV7())
+
+	publisher := &stubEventPublisher{}
+	uc := newUseCaseWithPublisher(
+		func(ctx context.Context, id uuid.UUID) (*domain.User, error) {
+			return usuarioActivo(userID, "noop@proactrip.com", roleID), nil
+		},
+		nil,
+		rdb,
+		publisher,
+	)
+
+	cmd := accountstatus.EnableDisableCommand{
+		UserID:  userID,
+		Status:  "active",
+		ActorID: actorID,
+	}
+
+	_, err := uc.Execute(ctx, cmd)
+	if err == nil {
+		t.Fatal("expected error for no-op status change")
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	if len(publisher.calls) != 0 {
+		t.Errorf("expected 0 events on no-op, got %d calls", len(publisher.calls))
+	}
 }

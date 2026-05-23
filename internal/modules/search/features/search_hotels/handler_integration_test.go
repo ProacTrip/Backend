@@ -143,7 +143,6 @@ func TestHandlerIntegration_SearchHotels_AuthenticatedUser_UsesProfilePrefs(t *t
 		UserID:    userID,
 		Email:     "brazilian@example.com",
 		RoleID:    uuid.Nil,
-		SessionID: uuid.Nil,
 		JTI:       uuid.Nil,
 	})
 

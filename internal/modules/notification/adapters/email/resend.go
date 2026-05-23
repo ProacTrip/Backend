@@ -52,10 +52,12 @@ func NewResendService(cfg ResendConfig) *ResendService {
 // Constantes de templates configurados en https://resend.com/templates.
 // El "from" se define en cada template en el dashboard de Resend.
 var (
-	// TemplateWelcome es el ID del template de bienvenida en Resend.
-	TemplateWelcome = "a59105e0-e732-490f-8747-3d2a317e1781"
 	// TemplateVerifyEmail es el ID del template de verificación de email en Resend.
 	TemplateVerifyEmail = "c58c6953-1bf9-41f1-9d8d-26d5d77b9879"
+	// TemplateAccountDisabled es el ID del template de cuenta deshabilitada en Resend.
+	TemplateAccountDisabled = "d96a15e5-59e2-4c2a-b561-023287e858c5"
+	// TemplateAccountEnabled es el ID del template de cuenta habilitada en Resend.
+	TemplateAccountEnabled = "01929326-fe76-40cd-83bd-1cfeff4ed477"
 )
 
 // =============================================================================
@@ -130,20 +132,5 @@ func (s *ResendService) HealthCheck(ctx context.Context) error {
 	return nil
 }
 
-// =============================================================================
-// Métodos de conveniencia
-// =============================================================================
 
-// SendVerifyEmail envía email de verificación.
-// El template usa {{{verification_url}}} y {{{first_name}}}.
-// first_name solo se incluye si no está vacío (el template de Resend
-// tiene fallback a "Usuario" cuando el campo está ausente).
-func (s *ResendService) SendVerifyEmail(ctx context.Context, to, firstName, verificationURL string) (string, error) {
-	vars := map[string]any{
-		"verification_url": verificationURL,
-	}
-	if firstName != "" {
-		vars["first_name"] = firstName
-	}
-	return s.SendWithTemplate(ctx, to, TemplateVerifyEmail, vars)
-}
+

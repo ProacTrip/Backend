@@ -13,10 +13,7 @@ type DBType string
 const (
 	DBAuth         DBType = "auth"
 	DBUser         DBType = "user"
-	DBBooking      DBType = "booking"
-	DBPayment      DBType = "payment"
 	DBNotification DBType = "notification"
-	DBAudit        DBType = "audit"
 )
 
 // DBConfig contiene la configuración para un pool de base de datos

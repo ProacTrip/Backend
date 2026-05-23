@@ -820,9 +820,6 @@ curl -X GET {base_url}/medical-profile \
 | data.insurance_info.value.expiration_date | string | null | Fecha de vencimiento de la cobertura (ISO 8601). |
 | data.insurance_info.source | object | Estructura de trazabilidad (type y document_id). |
 | data.insurance_info.updated_at | string | Fecha de actualización en formato ISO 8601 UTC. |
-| is_shared | boolean | Indica si el perfil es accesible de forma pública en emergencias. |
-| has_pending_conflicts | boolean | true si el OCR/NLP detectó datos que contradicen lo manual. |
-| pending_conflict_count | integer | Número total de inconsistencias que requieren revisión manual. |
 
 **Response Headers:**
 

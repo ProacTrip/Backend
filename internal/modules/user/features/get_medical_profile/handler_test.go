@@ -31,7 +31,7 @@ func (m *testGMPendingCounter) CountPending(ctx context.Context, userID uuid.UUI
 
 func TestGetMedicalProfileHandler_Handle(t *testing.T) {
 	uid := uuid.Must(uuid.NewV7())
-	tc := &sharedauth.AccessClaims{UserID: uid, Email: "t@t.com", RoleID: uuid.Must(uuid.NewV7()), Role: "client", SessionID: uuid.Must(uuid.NewV7()), JTI: uuid.Must(uuid.NewV7())}
+	tc := &sharedauth.AccessClaims{UserID: uid, Email: "t@t.com", RoleID: uuid.Must(uuid.NewV7()), Role: "client", JTI: uuid.Must(uuid.NewV7())}
 	tests := []struct {
 		name string; claims *sharedauth.AccessClaims; mp *testGMMedicalRepo; enc *testGMEncryption; pc *testGMPendingCounter; wantStatus int
 	}{

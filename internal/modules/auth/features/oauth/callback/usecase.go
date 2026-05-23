@@ -26,7 +26,7 @@ type OAuthStateTokenService interface {
 
 // TokenService genera pares de tokens (access + refresh).
 type TokenService interface {
-	GenerateTokenPair(userID uuid.UUID, email string, role string, roleID, sessionID uuid.UUID) (*token.TokenPair, error)
+	GenerateTokenPair(userID uuid.UUID, email string, role string, roleID uuid.UUID) (*token.TokenPair, error)
 }
 
 // EventPublisher publica eventos en Dragonfly Streams.
@@ -263,8 +263,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 	}
 
 	// 10. Generar tokens de sesión
-	sessionID := uuid.Must(uuid.NewV7())
-	tokenPair, err := uc.tokenSvc.GenerateTokenPair(user.ID, user.Email, user.RoleName, user.RoleID, sessionID)
+	tokenPair, err := uc.tokenSvc.GenerateTokenPair(user.ID, user.Email, user.RoleName, user.RoleID)
 	if err != nil {
 		return nil, fmt.Errorf("generar tokens: %w", err)
 	}

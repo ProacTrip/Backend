@@ -30,6 +30,7 @@ type User struct {
 	EmailVerified       bool
 	EmailVerifiedAt     *time.Time `json:"email_verified_at,omitzero"`
 	PasswordHash        string
+	FirstName           string // Nombre del usuario, requerido para emails de cambio de estado
 	RoleID              uuid.UUID
 	RoleName            string
 	Status              UserStatus
@@ -48,13 +49,15 @@ type User struct {
 // Métodos de dominio para manipulación del estado del usuario.
 
 // NewUser crea un nuevo usuario con estado inicial pending_verification.
-func NewUser(email, passwordHash string, roleID uuid.UUID) *User {
+// firstName es requerido: el usuario debe proporcionar su nombre al registrarse.
+func NewUser(email, passwordHash, firstName string, roleID uuid.UUID) *User {
 	now := time.Now()
 	return &User{
 		ID:                  uuid.Must(uuid.NewV7()),
 		Email:               email,
 		EmailVerified:       false,
 		PasswordHash:        passwordHash,
+		FirstName:           firstName,
 		RoleID:              roleID,
 		RoleName:            "client",
 		Status:              StatusPendingVerification,

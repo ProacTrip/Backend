@@ -26,24 +26,11 @@ func TestCommand_Validate_TokenVacio(t *testing.T) {
 
 // =============================================================================
 // Test: Validate — token no vacío es válido
-// =============================================================================
 
 func TestCommand_Validate_TokenValido(t *testing.T) {
 	cmd := logout.Command{Token: "v5.local.some-refresh-token"}
 	err := cmd.Validate()
 	if err != nil {
 		t.Errorf("esperaba nil, obtuve %v", err)
-	}
-}
-
-// =============================================================================
-// Test: Validate — LogoutAll flag no afecta la validación
-// =============================================================================
-
-func TestCommand_Validate_LogoutAll(t *testing.T) {
-	cmd := logout.Command{Token: "v5.local.some-token", LogoutAll: true}
-	err := cmd.Validate()
-	if err != nil {
-		t.Errorf("LogoutAll=true no debería afectar validación, obtuve %v", err)
 	}
 }

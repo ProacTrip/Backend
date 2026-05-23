@@ -26,12 +26,9 @@ import (
 
 // mockRepo implementa domain.NotificationRepository para tests.
 type mockRepo struct {
-	saveFn            func(ctx context.Context, n *domain.Notification) (uuid.UUID, error)
-	getByIDFn         func(ctx context.Context, id uuid.UUID) (*domain.Notification, error)
-	markSentFn        func(ctx context.Context, id uuid.UUID, messageID string) error
-	markFailedFn      func(ctx context.Context, id uuid.UUID, errStr string) error
-	markDeliveredFn   func(ctx context.Context, id uuid.UUID, deliveredAt time.Time) error
-	updateWebhookFn   func(ctx context.Context, providerMessageID string, status domain.NotificationStatus, eventTimestamp time.Time) error
+	saveFn     func(ctx context.Context, n *domain.Notification) (uuid.UUID, error)
+	getByIDFn  func(ctx context.Context, id uuid.UUID) (*domain.Notification, error)
+	markSentFn func(ctx context.Context, id uuid.UUID) error
 }
 
 func (m *mockRepo) Save(ctx context.Context, n *domain.Notification) (uuid.UUID, error) {
@@ -48,30 +45,9 @@ func (m *mockRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.Notificat
 	return nil, nil
 }
 
-func (m *mockRepo) MarkSent(ctx context.Context, id uuid.UUID, messageID string) error {
+func (m *mockRepo) MarkSent(ctx context.Context, id uuid.UUID) error {
 	if m.markSentFn != nil {
-		return m.markSentFn(ctx, id, messageID)
-	}
-	return nil
-}
-
-func (m *mockRepo) MarkFailed(ctx context.Context, id uuid.UUID, errStr string) error {
-	if m.markFailedFn != nil {
-		return m.markFailedFn(ctx, id, errStr)
-	}
-	return nil
-}
-
-func (m *mockRepo) MarkDelivered(ctx context.Context, id uuid.UUID, deliveredAt time.Time) error {
-	if m.markDeliveredFn != nil {
-		return m.markDeliveredFn(ctx, id, deliveredAt)
-	}
-	return nil
-}
-
-func (m *mockRepo) UpdateFromWebhook(ctx context.Context, providerMessageID string, status domain.NotificationStatus, eventTimestamp time.Time) error {
-	if m.updateWebhookFn != nil {
-		return m.updateWebhookFn(ctx, providerMessageID, status, eventTimestamp)
+		return m.markSentFn(ctx, id)
 	}
 	return nil
 }
@@ -158,14 +134,14 @@ func TestCommand_Validate(t *testing.T) {
 }
 
 // =============================================================================
-// H5.2 — TestExecute_FlujoFeliz: envía email y guarda message ID
+// H5.2 — TestExecute_FlujoFeliz: envía email y llama a MarkSent
 // =============================================================================
 
 func TestExecute_FlujoFeliz(t *testing.T) {
-	var savedMessageID string
+	markSentCalled := false
 	repo := &mockRepo{
-		markSentFn: func(ctx context.Context, id uuid.UUID, messageID string) error {
-			savedMessageID = messageID
+		markSentFn: func(ctx context.Context, id uuid.UUID) error {
+			markSentCalled = true
 			return nil
 		},
 	}
@@ -189,15 +165,12 @@ func TestExecute_FlujoFeliz(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	msgID, err := uc.Execute(ctx, cmd)
+	err := uc.Execute(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Execute inesperadamente falló: %v", err)
 	}
-	if msgID != "resend_flow_ok" {
-		t.Errorf("messageID = %q, se esperaba 'resend_flow_ok'", msgID)
-	}
-	if savedMessageID != "resend_flow_ok" {
-		t.Errorf("MarkSent recibió messageID = %q, se esperaba 'resend_flow_ok'", savedMessageID)
+	if !markSentCalled {
+		t.Error("MarkSent debería haber sido llamado después del envío exitoso")
 	}
 }
 
@@ -212,7 +185,7 @@ func TestExecute_ComandoInvalido(t *testing.T) {
 	})
 
 	cmd := Command{} // UserID nil, email vacío, token vacío
-	_, err := uc.Execute(t.Context(), cmd)
+	err := uc.Execute(t.Context(), cmd)
 	if err == nil {
 		t.Fatal("se esperaba error por comando inválido")
 	}
@@ -241,24 +214,18 @@ func TestExecute_ErrorDeRepoSave(t *testing.T) {
 		VerificationToken: "token",
 	}
 
-	_, err := uc.Execute(t.Context(), cmd)
+	err := uc.Execute(t.Context(), cmd)
 	if err == nil {
 		t.Fatal("se esperaba error del repositorio, se obtuvo nil")
 	}
 }
 
 // =============================================================================
-// H5.5 — TestExecute_ErrorDeSender: falla el envío y marca failed
+// H5.5 — TestExecute_ErrorDeSender: falla el envío y loguea error
 // =============================================================================
 
 func TestExecute_ErrorDeSender(t *testing.T) {
-	markFailedCalled := false
-	repo := &mockRepo{
-		markFailedFn: func(ctx context.Context, id uuid.UUID, errStr string) error {
-			markFailedCalled = true
-			return nil
-		},
-	}
+	repo := &mockRepo{}
 	sender := &mockSender{
 		sendFn: func(ctx context.Context, to, templateID string, vars map[string]any) (string, error) {
 			return "", errors.New("Resend API timeout")
@@ -277,22 +244,21 @@ func TestExecute_ErrorDeSender(t *testing.T) {
 		VerificationToken: "token",
 	}
 
-	_, err := uc.Execute(t.Context(), cmd)
+	err := uc.Execute(t.Context(), cmd)
 	if err == nil {
 		t.Fatal("se esperaba error del sender, se obtuvo nil")
-	}
-	if !markFailedCalled {
-		t.Error("MarkFailed no fue llamado después del error del sender")
 	}
 }
 
 // =============================================================================
-// H5.6 — TestExecute_Idempotencia: notificación ya enviada retorna ID existente
+// H5.6 — TestExecute_Idempotencia: notificación ya enviada retorna nil
 // =============================================================================
 
 func TestExecute_Idempotencia(t *testing.T) {
 	existingID := uuid.New()
 	sendCalled := false
+	now := time.Now()
+	sentAt := &now
 
 	repo := &mockRepo{
 		saveFn: func(ctx context.Context, n *domain.Notification) (uuid.UUID, error) {
@@ -300,9 +266,8 @@ func TestExecute_Idempotencia(t *testing.T) {
 		},
 		getByIDFn: func(ctx context.Context, id uuid.UUID) (*domain.Notification, error) {
 			return &domain.Notification{
-				ID:                existingID,
-				Status:            domain.NotificationStatusSent,
-				ProviderMessageID: "existing_msg_123",
+				ID:     existingID,
+				SentAt: sentAt,
 			}, nil
 		},
 	}
@@ -325,12 +290,9 @@ func TestExecute_Idempotencia(t *testing.T) {
 		VerificationToken: "token",
 	}
 
-	msgID, err := uc.Execute(t.Context(), cmd)
+	err := uc.Execute(t.Context(), cmd)
 	if err != nil {
 		t.Fatalf("Execute falló en caso de idempotencia: %v", err)
-	}
-	if msgID != "existing_msg_123" {
-		t.Errorf("messageID = %q, se esperaba 'existing_msg_123'", msgID)
 	}
 	if sendCalled {
 		t.Error("SendWithTemplate fue llamado en un caso de idempotencia (no debería)")
@@ -363,7 +325,7 @@ func TestExecute_FirstNameOpcional(t *testing.T) {
 		FirstName:         "", // Vacío
 	}
 
-	_, err := uc.Execute(t.Context(), cmd)
+	err := uc.Execute(t.Context(), cmd)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}

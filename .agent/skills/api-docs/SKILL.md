@@ -444,7 +444,6 @@ Cuando documentes un módulo que emite eventos SSE:
 
 | Módulo | Evento | Descripción |
 |--------|--------|-------------|
-| **Auth** | `session.invalidated` | Sesión invalidada (admin bloqueó usuario, cambio de contraseña) |
 | **User** | `user.avatar.updated` | Avatar procesado y activado por el worker |
 | **User** | `user.profile.updated` | Perfil modificado |
 | **Documents** | `document.processing.completed` | Documento procesado exitosamente por OCR |

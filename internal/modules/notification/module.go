@@ -11,6 +11,7 @@ import (
 	"github.com/ProacTrip/Backend/internal/modules/notification/adapters/email"
 	"github.com/ProacTrip/Backend/internal/modules/notification/adapters/postgres"
 	"github.com/ProacTrip/Backend/internal/modules/notification/consumer"
+	"github.com/ProacTrip/Backend/internal/modules/notification/features/send_account_status_email"
 	"github.com/ProacTrip/Backend/internal/modules/notification/features/send_verification_email"
 	"github.com/ProacTrip/Backend/internal/shared/ratelimit"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -26,7 +27,8 @@ type Module struct {
 	EmailSender *email.ResendService
 
 	// Use Cases
-	SendVerificationEmailUseCase *send_verification_email.UseCase
+	SendVerificationEmailUseCase    *send_verification_email.UseCase
+	SendAccountStatusEmailUseCase   *send_account_status_email.UseCase
 
 	// Event Consumer
 	EventConsumer *consumer.NotificationConsumer
@@ -61,7 +63,7 @@ func NewModule(cfg Config) (*Module, error) {
 		RateLimiter: cfg.RateLimiter,
 	})
 
-	// 3. Inicializar Use Case con dependencias
+	// 3. Inicializar Use Cases con dependencias
 	m.SendVerificationEmailUseCase = send_verification_email.NewUseCase(
 		send_verification_email.Deps{
 			Repo:           m.Repository,
@@ -70,11 +72,22 @@ func NewModule(cfg Config) (*Module, error) {
 		},
 	)
 
+	m.SendAccountStatusEmailUseCase = send_account_status_email.NewUseCase(
+		send_account_status_email.Deps{
+			Repo:   m.Repository,
+			Sender: m.EmailSender,
+		},
+	)
+
 	// 4. Inicializar Event Consumer (Dragonfly Streams)
-	m.EventConsumer = consumer.NewNotificationConsumer(cfg.RedisClient, m.SendVerificationEmailUseCase)
+	m.EventConsumer = consumer.NewNotificationConsumer(
+		cfg.RedisClient,
+		m.SendVerificationEmailUseCase,
+		m.SendAccountStatusEmailUseCase,
+	)
 
 	slog.Info("Notification module initialized",
-		"features", []string{"send_verification_email"},
+		"features", []string{"send_verification_email", "send_account_status_email"},
 		"consumer", "notification-consumer",
 	)
 

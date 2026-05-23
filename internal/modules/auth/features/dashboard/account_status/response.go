@@ -10,11 +10,10 @@ import "github.com/google/uuid"
 
 // Response es la respuesta del endpoint de cambio de estado.
 // AS-SPEC-003: 200 con datos del usuario actualizado.
-// AS-SPEC-005: incluye conteo de sesiones invalidadas.
+// Single-session: ya no incluye conteo de sesiones invalidadas.
 type Response struct {
-	UserID              uuid.UUID `json:"user_id"`
-	PreviousStatus      string    `json:"previous_status"`
-	NewStatus           string    `json:"new_status"`
-	TokenVersion        int       `json:"token_version"`
-	SessionsInvalidated int       `json:"sessions_invalidated"`
+	UserID         uuid.UUID `json:"user_id"`
+	PreviousStatus string    `json:"previous_status"`
+	NewStatus      string    `json:"new_status"`
+	TokenVersion   int       `json:"token_version"`
 }

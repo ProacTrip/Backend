@@ -15,6 +15,7 @@ import (
 
 	"github.com/ProacTrip/Backend/internal/modules/user/domain"
 	"github.com/ProacTrip/Backend/internal/modules/user/pipeline"
+	sse "github.com/ProacTrip/Backend/internal/shared/sse"
 )
 
 // =============================================================================
@@ -70,6 +71,7 @@ func (m *avatarMockRepo) UpdateAvatar(ctx context.Context, userID uuid.UUID, ava
 // =============================================================================
 
 func TestAvatarValidator_ProcesaAvatarCorrectamente(t *testing.T) {
+	sse.Init()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -81,7 +83,7 @@ func TestAvatarValidator_ProcesaAvatarCorrectamente(t *testing.T) {
 	userID := uuid.Must(uuid.NewV7())
 
 	// Crear el worker
-	worker := pipeline.NewAvatarValidator(rdb, repo, "")
+	worker := pipeline.NewAvatarValidator(rdb, repo, "https://cdn.proactrip.com")
 
 	if err := worker.Run(ctx); err != nil {
 		t.Fatalf("Run falló: %v", err)
@@ -143,7 +145,7 @@ func TestAvatarValidator_MensajeSinUserID_RechazaInmediato(t *testing.T) {
 	t.Cleanup(func() { rdb.Close() })
 
 	repo := newAvatarMockRepo()
-	worker := pipeline.NewAvatarValidator(rdb, repo, "")
+	worker := pipeline.NewAvatarValidator(rdb, repo, "https://cdn.proactrip.com")
 
 	if err := worker.Run(ctx); err != nil {
 		t.Fatalf("Run falló: %v", err)
@@ -187,7 +189,7 @@ func TestAvatarValidator_MensajeSinStorageKey_RechazaInmediato(t *testing.T) {
 	t.Cleanup(func() { rdb.Close() })
 
 	repo := newAvatarMockRepo()
-	worker := pipeline.NewAvatarValidator(rdb, repo, "")
+	worker := pipeline.NewAvatarValidator(rdb, repo, "https://cdn.proactrip.com")
 
 	if err := worker.Run(ctx); err != nil {
 		t.Fatalf("Run falló: %v", err)
@@ -229,7 +231,7 @@ func TestAvatarValidator_UserIDInvalido_RechazaInmediato(t *testing.T) {
 	t.Cleanup(func() { rdb.Close() })
 
 	repo := newAvatarMockRepo()
-	worker := pipeline.NewAvatarValidator(rdb, repo, "")
+	worker := pipeline.NewAvatarValidator(rdb, repo, "https://cdn.proactrip.com")
 
 	if err := worker.Run(ctx); err != nil {
 		t.Fatalf("Run falló: %v", err)
@@ -275,7 +277,7 @@ func TestAvatarValidator_FalloUpdateAvatar_QuedaEnPEL(t *testing.T) {
 	repo.updateErr = errors.New("database connection refused")
 
 	userID := uuid.Must(uuid.NewV7())
-	worker := pipeline.NewAvatarValidator(rdb, repo, "")
+	worker := pipeline.NewAvatarValidator(rdb, repo, "https://cdn.proactrip.com")
 
 	if err := worker.Run(ctx); err != nil {
 		t.Fatalf("Run falló: %v", err)
@@ -321,7 +323,7 @@ func TestAvatarValidator_NombreYEstado(t *testing.T) {
 	t.Cleanup(func() { rdb.Close() })
 
 	repo := newAvatarMockRepo()
-	worker := pipeline.NewAvatarValidator(rdb, repo, "")
+	worker := pipeline.NewAvatarValidator(rdb, repo, "https://cdn.proactrip.com")
 
 	// El nombre es fijo
 	if worker.Name() != "avatar-validator" {

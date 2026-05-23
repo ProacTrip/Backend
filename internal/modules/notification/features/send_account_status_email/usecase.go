@@ -1,6 +1,7 @@
-// Caso de uso: Envío de email de verificación.
-// Maneja la lógica de envío de emails de verificación.
-package send_verification_email
+// Caso de uso: Envío de email de cambio de estado de cuenta.
+// Maneja la lógica de envío de emails transaccionales cuando un admin
+// habilita o deshabilita una cuenta de usuario.
+package send_account_status_email
 
 import (
 	"context"
@@ -9,17 +10,19 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/ProacTrip/Backend/internal/config"
 	"github.com/ProacTrip/Backend/internal/modules/notification/domain"
 	"github.com/ProacTrip/Backend/internal/shared/errors"
 )
 
 // =============================================================================
-// Resend Template ID para verificación de email
+// Resend Template IDs para cambio de estado de cuenta
 // =============================================================================
 
-// ResendTemplateVerifyEmail es el ID del template de verificación en Resend.
-const ResendTemplateVerifyEmail = "c58c6953-1bf9-41f1-9d8d-26d5d77b9879"
+// TemplateAccountDisabled es el ID del template de cuenta deshabilitada en Resend.
+const TemplateAccountDisabled = "d96a15e5-59e2-4c2a-b561-023287e858c5"
+
+// TemplateAccountEnabled es el ID del template de cuenta habilitada en Resend.
+const TemplateAccountEnabled = "01929326-fe76-40cd-83bd-1cfeff4ed477"
 
 // =============================================================================
 // EmailSender port - interfaz para enviar emails
@@ -35,12 +38,12 @@ type EmailSender interface {
 // Command - Datos de entrada para el caso de uso
 // =============================================================================
 
-// Command representa el comando para enviar un email de verificación.
+// Command representa el comando para enviar un email de cambio de estado.
+// TemplateID determina si se envía el email de "disabled" o "enabled".
 type Command struct {
-	UserID            uuid.UUID
-	Email             string
-	VerificationToken string
-	FirstName         string // Opcional — puede estar vacío
+	UserID     uuid.UUID
+	Email      string
+	TemplateID string // "d96a15e5-..." | "01929326-..."
 }
 
 // Validate valida que los campos obligatorios del comando no estén vacíos.
@@ -51,48 +54,54 @@ func (c Command) Validate() error {
 	if c.Email == "" {
 		return fmt.Errorf("Email es obligatorio")
 	}
-	if c.VerificationToken == "" {
-		return fmt.Errorf("VerificationToken es obligatorio")
+	if c.TemplateID == "" {
+		return fmt.Errorf("TemplateID es obligatorio")
 	}
 	return nil
 }
 
 // =============================================================================
-// UseCase encapsula la lógica para enviar emails de verificación.
+// UseCase encapsula la lógica para enviar emails de cambio de estado.
 type UseCase struct {
-	repo           domain.NotificationRepository
-	sender         EmailSender
-	frontendConfig config.FrontendConfig
+	repo   domain.NotificationRepository
+	sender EmailSender
 }
 
 // Deps agrupa las dependencias necesarias para construir un UseCase.
 type Deps struct {
-	Repo           domain.NotificationRepository
-	Sender         EmailSender
-	FrontendConfig config.FrontendConfig
+	Repo   domain.NotificationRepository
+	Sender EmailSender
 }
 
+// NewUseCase crea un nuevo UseCase de envío de email de cambio de estado.
 func NewUseCase(deps Deps) *UseCase {
 	return &UseCase{
-		repo:           deps.Repo,
-		sender:         deps.Sender,
-		frontendConfig: deps.FrontendConfig,
+		repo:   deps.Repo,
+		sender: deps.Sender,
 	}
 }
 
-// Execute envía un email de verificación con idempotencia.
+// Execute envía un email de cambio de estado de cuenta con idempotencia.
+// El templateID en el comando determina si es el email de "disabled" o "enabled".
 func (uc *UseCase) Execute(ctx context.Context, cmd Command) error {
 	// 1. Validar comando
 	if err := cmd.Validate(); err != nil {
 		return fmt.Errorf("comando inválido: %w", err)
 	}
 
-	// 2. Generar URL de verificación usando la configuración del frontend
-	baseURL := uc.frontendConfig.GetURL()
-	verificationURL := fmt.Sprintf("%s/auth/verify-email?token=%s", baseURL, cmd.VerificationToken)
+	// 2. Determinar template_code según templateID
+	var templateCode string
+	switch cmd.TemplateID {
+	case TemplateAccountDisabled:
+		templateCode = "account_disabled"
+	case TemplateAccountEnabled:
+		templateCode = "account_enabled"
+	default:
+		return fmt.Errorf("templateID desconocido: %s", cmd.TemplateID)
+	}
 
 	// 3. Crear notificación
-	notification, err := domain.NewEmailNotification(cmd.UserID, "verify_email")
+	notification, err := domain.NewEmailNotification(cmd.UserID, templateCode)
 	if err != nil {
 		return errors.ErrInternalError("failed to create notification", err)
 	}
@@ -107,9 +116,10 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) error {
 	if existingID != uuid.Nil {
 		existing, getErr := uc.repo.GetByID(ctx, existingID)
 		if getErr == nil && existing != nil && existing.SentAt != nil {
-			slog.Info("verification email already sent",
+			slog.Info("account status email already sent",
 				"user_id", cmd.UserID,
 				"notification_id", existingID,
+				"template_code", templateCode,
 			)
 			return nil // Idempotencia: ya fue enviado
 		}
@@ -117,19 +127,17 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) error {
 
 	// 5. Preparar variables del template
 	templateVars := map[string]any{
-		"verification_url": verificationURL,
-	}
-	if cmd.FirstName != "" {
-		templateVars["first_name"] = cmd.FirstName
+		"user_email": cmd.Email,
 	}
 
 	// 6. Enviar email
-	if _, err := uc.sender.SendWithTemplate(ctx, cmd.Email, ResendTemplateVerifyEmail, templateVars); err != nil {
-		slog.Error("failed to send verification email",
+	if _, err := uc.sender.SendWithTemplate(ctx, cmd.Email, cmd.TemplateID, templateVars); err != nil {
+		slog.Error("failed to send account status email",
 			"error", err,
 			"email", cmd.Email,
+			"template_code", templateCode,
 		)
-		return errors.ErrInternalError("failed to send verification email", err)
+		return errors.ErrInternalError("failed to send account status email", err)
 	}
 
 	// 7. Actualizar sent_at
@@ -138,9 +146,10 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) error {
 		// El email se envió, pero falló el update - no es crítico
 	}
 
-	slog.Info("verification email sent successfully",
+	slog.Info("account status email sent successfully",
 		"user_id", cmd.UserID,
 		"email", cmd.Email,
+		"template_code", templateCode,
 	)
 
 	return nil

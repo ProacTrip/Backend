@@ -13,7 +13,7 @@ import (
 )
 
 // Lógica de negocio del logout.
-// Agrega JTI a blacklist en Dragonfly. Soporta logout-all para invalidar todas las sesiones.
+// Agrega JTI a blacklist en Dragonfly. Single-session: invalida únicamente el access token actual.
 
 type TokenService interface {
 	ValidateAccessToken(ctx context.Context, tokenString string) (*token.AccessClaims, error)
@@ -54,19 +54,6 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 			slog.String("error", err.Error()),
 		)
 		return nil, domain.ErrSessionNotFound
-	}
-
-	if cmd.LogoutAll {
-		sessionSetKey := fmt.Sprintf("{auth}:sessions:%s", claims.UserID.String())
-		if err := uc.dragonflyDB.Del(ctx, sessionSetKey).Err(); err != nil {
-			slog.WarnContext(ctx, "logout_all: failed to clear session set",
-				slog.String("user_id", claims.UserID.String()),
-				slog.String("error", err.Error()),
-			)
-		}
-
-		revokeKey := fmt.Sprintf("{auth}:revoked_at:%s", claims.UserID.String())
-		uc.dragonflyDB.Set(ctx, revokeKey, time.Now().Unix(), 7*24*time.Hour)
 	}
 
 	return &Response{Message: "Logged out successfully."}, nil

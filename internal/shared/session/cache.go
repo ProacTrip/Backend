@@ -1,9 +1,9 @@
 // Paquete session expone funciones compartidas para lectura/escritura del cache
-// de sesión en DragonflyDB. El contrato de clave es {auth}:session:{sessionID} —
+// de sesión en DragonflyDB. El contrato de clave es {auth}:session:{userID} —
 // documentado en PM-SPEC-004. El middleware de autenticación usa este paquete para
 // evitar consultas a la DB en cada request.
 //
-// Formato de clave: {auth}:session:{sessionID} — hash con campos permissions,
+// Formato de clave: {auth}:session:{userID} — hash con campos permissions,
 // status, token_version, schema_version.
 package session
 
@@ -11,7 +11,6 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -22,7 +21,8 @@ import (
 // =============================================================================
 
 // SessionData contiene los campos cacheados para la sesión de un usuario.
-// Se almacena como un hash {auth}:session:{sessionID} en DragonflyDB.
+// Se almacena como un hash {auth}:session:{userID} en DragonflyDB.
+// Single-session: una sola entrada por usuario.
 type SessionData struct {
 	// UserID es el ID del usuario propietario de esta sesión.
 	UserID string
@@ -58,21 +58,22 @@ const (
 )
 
 // keyForSession genera la clave Dragonfly para el hash de sesión.
-// Formato: {auth}:session:{sessionID} — el hashtag {auth} asegura que
+// Formato: {auth}:session:{userID} — el hashtag {auth} asegura que
 // todas las claves de sesión caigan en el mismo shard.
-func keyForSession(sessionID string) string {
-	return fmt.Sprintf("{auth}:session:%s", sessionID)
+// Single-session: una sola clave por usuario.
+func keyForSession(userID string) string {
+	return fmt.Sprintf("{auth}:session:%s", userID)
 }
 
 // =============================================================================
-// GetSession — lectura del hash {auth}:session:{sessionID}
+// GetSession — lectura del hash {auth}:session:{userID}
 // =============================================================================
 
 // GetSession obtiene los datos de sesión cacheados desde Dragonfly.
 // Retorna nil, nil en cache miss (hash inexistente o vacío).
 // Retorna error solo si Dragonfly falla.
-func GetSession(ctx context.Context, rdb *redis.Client, sessionID string) (*SessionData, error) {
-	key := keyForSession(sessionID)
+func GetSession(ctx context.Context, rdb *redis.Client, userID string) (*SessionData, error) {
+	key := keyForSession(userID)
 
 	fields, err := rdb.HGetAll(ctx, key).Result()
 	if err != nil {
@@ -94,18 +95,18 @@ func GetSession(ctx context.Context, rdb *redis.Client, sessionID string) (*Sess
 }
 
 // =============================================================================
-// SetSession — escritura del hash {auth}:session:{sessionID}
+// SetSession — escritura del hash {auth}:session:{userID}
 // =============================================================================
 
 // SetSession guarda los datos de sesión en Dragonfly como un hash con TTL.
 // El TTL se resetea en cada escritura (sliding expiration).
 // Si data es nil, no hace nada (no-op).
-func SetSession(ctx context.Context, rdb *redis.Client, sessionID string, data *SessionData, ttl time.Duration) error {
+func SetSession(ctx context.Context, rdb *redis.Client, userID string, data *SessionData, ttl time.Duration) error {
 	if data == nil {
 		return nil
 	}
 
-	key := keyForSession(sessionID)
+	key := keyForSession(userID)
 	schemaVer := cmp.Or(data.SchemaVersion, SchemaVersionActual)
 
 	fields := map[string]interface{}{
@@ -128,62 +129,17 @@ func SetSession(ctx context.Context, rdb *redis.Client, sessionID string, data *
 }
 
 // =============================================================================
-// InvalidateSession — eliminación de una sesión específica
+// InvalidateSession — eliminación de la sesión de un usuario
 // =============================================================================
 
-// InvalidateSession elimina una sesión específica del cache.
+// InvalidateSession elimina la entrada de cache de sesión para un usuario.
 // Idempotente: no retorna error si la key no existe.
-func InvalidateSession(ctx context.Context, rdb *redis.Client, sessionID string) error {
-	key := keyForSession(sessionID)
+// Single-session: solo hay una key por usuario ({auth}:session:{userID}).
+func InvalidateSession(ctx context.Context, rdb *redis.Client, userID string) error {
+	key := keyForSession(userID)
 	if err := rdb.Del(ctx, key).Err(); err != nil {
 		return fmt.Errorf("invalidate session: %w", err)
 	}
-	return nil
-}
-
-// =============================================================================
-// InvalidateAllUserSessions — eliminación de todas las sesiones de un usuario
-// =============================================================================
-
-// InvalidateAllUserSessions elimina todas las entradas de cache de sesión
-// para un usuario específico. Escanea todas las claves {auth}:session:* y
-// solo elimina aquellas cuyo campo user_id coincide con el userID dado.
-// Usa el hashtag {auth} para mantener las operaciones en el mismo shard.
-// Limitado a 100 keys por iteración de SCAN para evitar bloquear Dragonfly.
-//
-// Si falla el HGET para alguna key, esa key se omite (no se elimina) —
-// el token_version mismatch la invalidará eventualmente.
-func InvalidateAllUserSessions(ctx context.Context, rdb *redis.Client, userID string) error {
-	pattern := "{auth}:session:*"
-	var cursor uint64
-
-	for {
-		keys, nextCursor, err := rdb.Scan(ctx, cursor, pattern, 100).Result()
-		if err != nil {
-			return fmt.Errorf("invalidate all sessions scan: %w", err)
-		}
-
-		for _, key := range keys {
-			// Verificar que esta sesión pertenece al usuario antes de eliminar
-			ownerID, err := rdb.HGet(ctx, key, "user_id").Result()
-			if err != nil {
-				// Si no podemos leer el hash, omitimos esta key (best-effort).
-				// El token_version mismatch la invalidará eventualmente.
-				continue
-			}
-			if ownerID == userID {
-				if err := rdb.Del(ctx, key).Err(); err != nil {
-					slog.WarnContext(ctx, "failed to delete cached session", "key", key, "error", err)
-				}
-			}
-		}
-
-		cursor = nextCursor
-		if cursor == 0 {
-			break
-		}
-	}
-
 	return nil
 }
 
@@ -198,9 +154,9 @@ func InvalidateAllUserSessions(ctx context.Context, rdb *redis.Client, userID st
 // fn() solo se llama en cache miss. Dos requests concurrentes que caen en miss
 // ambos llamarán a fn() y ambos harán HSet. Como los datos son los mismos,
 // el último write gana (idempotente, sin corrupción).
-func GetOrSetSession(ctx context.Context, rdb *redis.Client, sessionID string, ttl time.Duration, fn func() (*SessionData, error)) (*SessionData, error) {
+func GetOrSetSession(ctx context.Context, rdb *redis.Client, userID string, ttl time.Duration, fn func() (*SessionData, error)) (*SessionData, error) {
 	// Cache hit
-	data, err := GetSession(ctx, rdb, sessionID)
+	data, err := GetSession(ctx, rdb, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +174,7 @@ func GetOrSetSession(ctx context.Context, rdb *redis.Client, sessionID string, t
 	}
 
 	// Guardar en cache (best-effort, no bloquea en error)
-	if setErr := SetSession(ctx, rdb, sessionID, data, ttl); setErr != nil {
+	if setErr := SetSession(ctx, rdb, userID, data, ttl); setErr != nil {
 		// Log pero no fallar — el dato se retorna igual desde DB
 		_ = setErr
 	}

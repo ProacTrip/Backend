@@ -69,7 +69,7 @@ func testClaims() *sharedauth.AccessClaims {
 	return &sharedauth.AccessClaims{
 		UserID: uid, Email: "test@example.com",
 		RoleID: uuid.Must(uuid.NewV7()), Role: "client",
-		SessionID: uuid.Must(uuid.NewV7()), JTI: uuid.Must(uuid.NewV7()),
+		JTI: uuid.Must(uuid.NewV7()),
 	}
 }
 
@@ -82,7 +82,7 @@ func TestUpdateProfileHandler_Handle(t *testing.T) {
 	claims := &sharedauth.AccessClaims{
 		UserID: userID, Email: "test@example.com",
 		RoleID: uuid.Must(uuid.NewV7()), Role: "client",
-		SessionID: uuid.Must(uuid.NewV7()), JTI: uuid.Must(uuid.NewV7()),
+		JTI: uuid.Must(uuid.NewV7()),
 	}
 
 	profile := domain.NewUserProfile(userID, "test@example.com")
@@ -113,7 +113,7 @@ func TestUpdateProfileHandler_Handle(t *testing.T) {
 			body:        `{"first_name":"Test"}`,
 			profileRepo: &testProfileRepo{},
 			eventPub:    &testEventPublisher{},
-			wantStatus:  http.StatusInternalServerError,
+			wantStatus:  http.StatusUnauthorized,
 		},
 		{
 			name:   "debe retornar 200 sin modificar campos (body vacío)",

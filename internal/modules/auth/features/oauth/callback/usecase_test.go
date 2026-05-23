@@ -190,7 +190,7 @@ type mockTokenSvc struct {
 	err  error
 }
 
-func (m *mockTokenSvc) GenerateTokenPair(userID uuid.UUID, email string, role string, roleID, sessionID uuid.UUID) (*token.TokenPair, error) {
+func (m *mockTokenSvc) GenerateTokenPair(userID uuid.UUID, email string, role string, roleID uuid.UUID) (*token.TokenPair, error) {
 	if m.err != nil {
 		return nil, m.err
 	}

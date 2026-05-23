@@ -49,9 +49,9 @@ func TestResolveEffectivePermissions(t *testing.T) {
 			want:      []string{"users:read"},
 		},
 		{
-			name:      "admin con 5 permisos — ordenados",
-			rolePerms: []string{"feature_limits:write", "sessions:write", "users:read", "sessions:read", "users:write"},
-			want:      []string{"feature_limits:write", "sessions:read", "sessions:write", "users:read", "users:write"},
+			name:      "admin con 3 permisos — ordenados",
+			rolePerms: []string{"feature_limits:write", "users:read", "users:write"},
+			want:      []string{"feature_limits:write", "users:read", "users:write"},
 		},
 	}
 

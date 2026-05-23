@@ -129,3 +129,116 @@ func TestNewUserRegisteredEvent_EmptyVerificationToken_Omitted(t *testing.T) {
 		t.Error("verification_token should be omitted when empty")
 	}
 }
+
+// =============================================================================
+// Tests para NewAccountDisabledEvent y NewAccountEnabledEvent
+// Sin first_name — el template de Resend usa user_email
+// =============================================================================
+
+func TestNewAccountDisabledEvent_PayloadCompleto(t *testing.T) {
+	event := eventbus.NewAccountDisabledEvent(
+		"user-dis-001",
+		"disabled@example.com",
+		"admin-001",
+	)
+
+	if event.EventType != eventbus.AccountDisabled {
+		t.Errorf("EventType = %q, want %q", event.EventType, eventbus.AccountDisabled)
+	}
+	if event.AggregateID != "user-dis-001" {
+		t.Errorf("AggregateID = %q, want %q", event.AggregateID, "user-dis-001")
+	}
+	if event.Timestamp <= 0 {
+		t.Error("Timestamp should be positive")
+	}
+
+	payload := event.Payload
+	if payload["user_id"] != "user-dis-001" {
+		t.Errorf("user_id = %q, want %q", payload["user_id"], "user-dis-001")
+	}
+	if payload["email"] != "disabled@example.com" {
+		t.Errorf("email = %q, want %q", payload["email"], "disabled@example.com")
+	}
+	if payload["disabled_by"] != "admin-001" {
+		t.Errorf("disabled_by = %q, want %q", payload["disabled_by"], "admin-001")
+	}
+
+	// first_name NO debe estar en el payload
+	if _, ok := payload["first_name"]; ok {
+		t.Error("first_name should NOT be in payload")
+	}
+}
+
+func TestNewAccountDisabledEvent_EmailAlwaysPresent(t *testing.T) {
+	event := eventbus.NewAccountDisabledEvent(
+		"user-dis-002",
+		"nodata@example.com",
+		"admin-002",
+	)
+
+	payload := event.Payload
+
+	if payload["user_id"] != "user-dis-002" {
+		t.Errorf("user_id = %q, want %q", payload["user_id"], "user-dis-002")
+	}
+	if payload["email"] != "nodata@example.com" {
+		t.Errorf("email = %q, want %q", payload["email"], "nodata@example.com")
+	}
+	if payload["disabled_by"] != "admin-002" {
+		t.Errorf("disabled_by = %q, want %q", payload["disabled_by"], "admin-002")
+	}
+}
+
+func TestNewAccountEnabledEvent_PayloadCompleto(t *testing.T) {
+	event := eventbus.NewAccountEnabledEvent(
+		"user-en-001",
+		"enabled@example.com",
+		"admin-003",
+	)
+
+	if event.EventType != eventbus.AccountEnabled {
+		t.Errorf("EventType = %q, want %q", event.EventType, eventbus.AccountEnabled)
+	}
+	if event.AggregateID != "user-en-001" {
+		t.Errorf("AggregateID = %q, want %q", event.AggregateID, "user-en-001")
+	}
+	if event.Timestamp <= 0 {
+		t.Error("Timestamp should be positive")
+	}
+
+	payload := event.Payload
+	if payload["user_id"] != "user-en-001" {
+		t.Errorf("user_id = %q, want %q", payload["user_id"], "user-en-001")
+	}
+	if payload["email"] != "enabled@example.com" {
+		t.Errorf("email = %q, want %q", payload["email"], "enabled@example.com")
+	}
+	if payload["enabled_by"] != "admin-003" {
+		t.Errorf("enabled_by = %q, want %q", payload["enabled_by"], "admin-003")
+	}
+
+	// first_name NO debe estar en el payload
+	if _, ok := payload["first_name"]; ok {
+		t.Error("first_name should NOT be in payload")
+	}
+}
+
+func TestNewAccountEnabledEvent_EmailAlwaysPresent(t *testing.T) {
+	event := eventbus.NewAccountEnabledEvent(
+		"user-en-002",
+		"nodata2@example.com",
+		"admin-004",
+	)
+
+	payload := event.Payload
+
+	if payload["user_id"] != "user-en-002" {
+		t.Errorf("user_id = %q, want %q", payload["user_id"], "user-en-002")
+	}
+	if payload["email"] != "nodata2@example.com" {
+		t.Errorf("email = %q, want %q", payload["email"], "nodata2@example.com")
+	}
+	if payload["enabled_by"] != "admin-004" {
+		t.Errorf("enabled_by = %q, want %q", payload["enabled_by"], "admin-004")
+	}
+}

@@ -1,8 +1,9 @@
-# Documentación de AI Search API (Cookie-Based)
+# Documentación de AI Search API (Tool Calling)
 
-> **Arquitectura:** Endpoint de búsqueda unificado con interpretación de lenguaje natural.
-> El usuario envía un mensaje conversacional y el backend interpreta la intención,
-> resuelve parámetros, y ejecuta búsquedas de vuelos y/o hoteles automáticamente.
+> **Arquitectura:** Endpoint unificado de búsqueda con interpretación de lenguaje natural y Tool Calling.
+> El usuario envía un mensaje conversacional. El backend interpreta la intención vía AI,
+> resuelve parámetros automáticamente (ubicación por IP, moneda/idioma del perfil),
+> y ejecuta búsquedas de vuelos y/o hoteles.
 
 ---
 
@@ -11,19 +12,24 @@
 | Sección | Estado |
 |---------|--------|
 | [Arquitectura](#arquitectura) | ✅ |
+| [Tool Calling](#tool-calling) | ✅ |
 | [Seguridad de Cookies](#seguridad-de-cookies) | ✅ |
 | [Base URLs](#base-urls) | ✅ |
 | [Errores Estándar](#errores-estándar) | ✅ |
 | [Estrategia de Refresco de Tokens](#estrategia-de-refresco-de-tokens) | ✅ |
-| [AI Search](#ai-search) | ✅ Implementado |
+| [AI Search — POST /ai](#ai-search) | ✅ |
 | [Flujo de Conversación](#flujo-de-conversación) | ✅ |
 | [Modelo Multi-Turno](#modelo-multi-turno) | ✅ |
 | [Request](#request) | ✅ |
+| [SSE Streaming](#sse-streaming) | ✅ |
 | [Responses](#responses) | ✅ |
 | [Response Fields](#response-fields-explained) | ✅ |
 | [Tipos de Intento](#tipos-de-intento) | ✅ |
-| [Discovery Mode](#discovery-mode) | ✅ AI-Powered (DeepSeek v4 Flash) |
+| [Discovery Mode](#discovery-mode) | ✅ |
+| [Conversation CRUD](#conversation-crud) | ✅ |
+| [Realtime Events](#realtime-events) | ✅ |
 | [Resolución IATA](#resolución-iata) | ✅ |
+| [Contexto Médico y de Viaje](#contexto-médico-y-de-viaje) | ✅ |
 | [Posibles Errores](#posibles-errores-ai-search) | ✅ |
 | [Rate Limiting](#rate-limiting) | ✅ |
 | [Cache](#cache) | ✅ |
@@ -35,87 +41,65 @@
 
 ## Arquitectura
 
-### Flujo de AI Search
+### Flujo de AI Search (Tool Calling)
 
 ```
 ┌─────────────┐   POST /v1/search/ai            ┌─────────────┐    ┌─────────────┐
 │   Browser   │ ────────────────────────────────>│   Backend   │───>│  AI Provider│
-│  (Frontend) │  {message:"Busco vuelos a..."}   │             │    │ (DeepSeek/  │
+│  (Frontend) │  {"message":"Busco vuelos a..."} │             │    │ (DeepSeek/  │
 └─────────────┘                                  └─────────────┘    │  Ollama/    │
-^                                                      │            │  OpenAI)    │
-│                               Set-Cookie: __Secure-access_token=..│            │
-│                              (si el usuario está autenticado)     └─────────────┘
-│                              Response: { intent, message,               │
-│                                flights?, hotels?, conversation_id }    │
-│                                                                        │
-│                     ┌──────────────────────────────────────────┐       │
-│                     │      Si intent = "flights" o "both"      │       │
-│                     │          ┌─────────────┐                 │       │
-│                     │          │   SerpAPI   │ <─── llamada    │       │
-│                     │          │  (Google    │      interna    │       │
-│                     │          │   Flights)  │                 │       │
-│                     │          └─────────────┘                 │       │
-│                     └──────────────────────────────────────────┘       │
-│                     ┌──────────────────────────────────────────┐       │
-│                     │      Si intent = "hotels" o "both"       │       │
-│                     │          ┌─────────────┐                 │       │
-│                     │          │   SerpAPI   │ <─── llamada    │       │
-│                     │          │  (Google    │      interna    │       │
-│                     │          │   Hotels)   │                 │       │
-│                     │          └─────────────┘                 │       │
-│                     └──────────────────────────────────────────┘       │
-└────────────────────────────────────────────────────────────────────────┘
-
-Las cookies de autenticación se envían AUTOMÁTICAMENTE en cada request.
-El frontend NO almacena ni lee tokens. No se requiere header Authorization.
+       ^                                               │            │  OpenAI)    │
+       │                                               │            └─────────────┘
+       │                        ┌──────────────────────┘                  │
+       │                        │   1. AI decide si necesita datos        │
+       │                        │      → tool call: search_flights        │
+       │                        │      → tool call: search_hotels         │
+       │                        │                                         │
+       │                        │   2. Backend ejecuta tools en paralelo   │
+       │                        │      (prefill GL/HL/Currency)           │
+       │                        │                                         │
+       │                        │   3. AI genera respuesta final           │
+       │                        │      con resultados en lenguaje natural  │
+       │                        │                                         │
+       │                        │   4. Backend guarda conversación         │
+       │                        │      en DragonflyDB (TTL 5 min)         │
+       │                        │                                         │
+       │                        ▼                                         │
+       │   Response JSON: { intent, message, flights?, hotels?,           │
+       │                    conversation_id, from_cache, cached_at }      │
+       │                                                                  │
+       │   Set-Cookie: __Secure-access_token=..                           │
+       │   (si el usuario está autenticado)                               │
+       └──────────────────────────────────────────────────────────────────┘
 ```
 
-### Tres Capas de Procesamiento
+> **El AI decide el modo de búsqueda automáticamente.** Ya no existe el campo `search_mode` en el request. El AI interpreta la consulta y decide si necesita ejecutar `search_flights`, `search_hotels`, ambos, o ninguno (pregunta de seguimiento).
 
-```
-Mensaje del usuario
-    │
-    ▼
-┌──────────────────────────────────────────────────────────────────┐
-│ CAPA 1: Interpretación AI (DeepSeek/Ollama/OpenAI)               │
-│   - Analiza lenguaje natural                                    │
-│   - Extrae parámetros: origen, destino, fechas, pasajeros...    │
-│   - Determina intención: flights | hotels | both                 │
-│   - Si faltan datos → incomplete / ambiguous                     │
-│   - Genera pregunta de seguimiento                               │
-└──────────────────────────────────────────────────────────────────┘
-    │
-    ▼
-┌──────────────────────────────────────────────────────────────────┐
-│ CAPA 2: Orquestación (Go — UseCase)                              │
-│   - Valida campos extraídos                                      │
-│   - Convierte TravelIntent → FlightCommand / HotelCommand        │
-│   - Ejecuta búsqueda(s) vía SerpAPI (paralelo si "both")         │
-│   - Aplica FilterCriteria determinísticos en Go                  │
-└──────────────────────────────────────────────────────────────────┘
-    │
-    ▼
-┌──────────────────────────────────────────────────────────────────┐
-│ CAPA 3: Respuesta Unificada                                      │
-│   - Estado de conversación (turn_count, max_turns)               │
-│   - Intención interpretada + confianza                           │
-│   - Mensaje de respuesta (resultados o pregunta de seguimiento)  │
-│   - Resultados de vuelos (formato search_flights completo)       │
-│   - Resultados de hoteles (formato search_hotels completo)       │
-└──────────────────────────────────────────────────────────────────┘
-```
+### Tool Calling
 
-### Política de Cookies para AI Search
+El endpoint `POST /v1/search/ai` usa **Tool Calling** — el modelo de AI decide cuándo y con qué parámetros ejecutar búsquedas. El backend define dos tools:
 
-| Cookie | Nombre | TTL | Propósito |
-|--------|--------|-----|-----------|
-| Access Token | `__Secure-access_token` | 15 min | Sesión activa (opcional en búsqueda) |
-| Refresh Token | `__Secure-refresh_token` | 7 días | Rotación de sesión (opcional en búsqueda) |
+| Tool | Propósito | Campos requeridos |
+|------|-----------|-------------------|
+| `search_flights` | Busca vuelos entre dos aeropuertos | `trip_type`, `departure`, `arrival`, `outbound_date` |
+| `search_hotels` | Busca hoteles en un destino | `query`, `check_in_date`, `check_out_date` |
 
-> Este endpoint **no requiere autenticación**. Si las cookies están presentes, el backend usa las preferencias del perfil (país, idioma, moneda) para personalizar los resultados. Si no están presentes, se usan los defaults de configuración del servidor.
->
-> **Usuarios autenticados** tienen 10 turnos por conversación y las búsquedas se guardan en PostgreSQL para historial.
-> **Usuarios anónimos** tienen 5 turnos por conversación y los datos se guardan solo en DragonflyDB (volátil).
+**Flujo:**
+1. El frontend envía `{"message": "..."}` (y opcionalmente `conversation_id`, `stream`)
+2. El backend resuelve ubicación vía IP (`env:{ip}` en DragonflyDB), preferencias de moneda/idioma del perfil del usuario
+3. El backend inyecta contexto de ubicación como system message
+4. La AI recibe el mensaje + herramientas disponibles y decide:
+   - **No necesita tools** → devuelve respuesta directa o pregunta de seguimiento
+   - **Necesita una o ambas tools** → el backend ejecuta las búsquedas, inyecta resultados, la AI genera respuesta final
+5. El backend guarda el estado de la conversación en DragonflyDB (TTL 5 min)
+6. El backend devuelve la respuesta unificada
+
+**Prefilling automático de GL/HL/Currency:** Cuando la AI omite `gl`, `hl` o `currency` en una tool call, el backend los rellena automáticamente desde el contexto de la conversación:
+- `gl` → código de país del usuario (lowercase, 2 letras)
+- `hl` → idioma detectado
+- `currency` → moneda del perfil o default del servidor
+
+**min_price=1 default para hoteles:** En `search_hotels`, el backend aplica `min_price=1` por defecto para filtrar hoteles sin precios (placeholders de Google Maps que no se pueden reservar).
 
 ---
 
@@ -129,7 +113,7 @@ Mensaje del usuario
 | `Secure` | `true` | Solo HTTPS en producción |
 | `SameSite` | `Lax` | Protección CSRF. Permite navegación top-level |
 | `Path` | `/` | Disponible en todas las rutas |
-| `Domain` | `.proactrip.com` | Compartido entre subdominios (omitir si usas `__Host-`) |
+| `Domain` | `.proactrip.com` | Compartido entre subdominios |
 
 ### Formato de Producción
 
@@ -178,9 +162,9 @@ Formato **RFC 9457 Problem Details**:
 
 | Header | Descripción |
 |--------|-------------|
-| `X-Trace-Id` | UUID v7 para trazabilidad. Asignado globalmente por middleware, nunca por handlers individuales |
+| `X-Trace-Id` | UUID v7 para trazabilidad. Asignado globalmente por middleware |
 | `traceparent` | W3C Trace Context |
-| `X-Request-Id` | ID de request no-W3C. Para correlación de logs a nivel de aplicación |
+| `X-Request-Id` | ID de request no-W3C para correlación de logs |
 
 ---
 
@@ -198,7 +182,7 @@ El frontend nunca llama manualmente a `/refresh-token`. Las cookies se gestionan
 
 ## AI Search
 
-Busca vuelos y/o hoteles mediante interpretación de lenguaje natural. Un solo endpoint que reemplaza preguntas del tipo "¿a dónde querés ir?" con una conversación inteligente que extrae los parámetros automáticamente.
+Busca vuelos y/o hoteles mediante interpretación de lenguaje natural con Tool Calling. Un solo endpoint que reemplaza formularios de búsqueda tradicionales con una conversación inteligente.
 
 ### Flujo de Conversación
 
@@ -221,7 +205,7 @@ Busca vuelos y/o hoteles mediante interpretación de lenguaje natural. Un solo e
 │  │            "conversation_id":"019ef..." }                     │  │
 │  │ Response: { intent:"flights", confidence:0.95,                │  │
 │  │            message:"Encontré 15 vuelos...",                   │  │
-│  │            flights:{ phase:"outbound_selection", ... },       │  │
+│  │            flights:{ ... },                                   │  │
 │  │            turn_count:2, max_turns:10 }                       │  │
 │  └──────────────────────────────────────────────────────────────┘  │
 │                            ↓                                        │
@@ -232,16 +216,21 @@ Busca vuelos y/o hoteles mediante interpretación de lenguaje natural. Un solo e
 
 ### Modelo Multi-Turno
 
-El endpoint mantiene una conversación con estado. Cada turno agrega contexto que la AI usa para refinar la interpretación.
+El endpoint mantiene conversaciones con estado persistido en DragonflyDB. Cada turno agrega contexto que la AI usa para refinar la interpretación.
 
 | Aspecto | Valor |
 |---------|-------|
-| **Duración de conversación** | 10 minutos desde la creación |
+| **Duración de conversación (TTL)** | 5 minutos desde la última actividad POST. Se reinicia en cada POST |
 | **Turnos anónimos** | Máximo 5 |
 | **Turnos autenticados** | Máximo 10 |
-| **Persistencia** | DragonflyDB para todos; PostgreSQL adicional para autenticados |
+| **Persistencia** | DragonflyDB para todos (clave `{conv}:{id}`, índice `user:convs:{userID}`). PostgreSQL adicional para autenticados |
 | **Nuevo conversation_id** | Se genera al primer mensaje (`POST` sin `conversation_id`) |
 | **Reanudar conversación** | Se envía `conversation_id` en requests subsiguientes |
+| **Recuperación F5** | `GET /v1/search/ai/conversations/{id}` reconstruye el estado completo de la conversación. El frontend puede restaurar el chat tras un refresh de página |
+
+> **Importante:** Si la conversación expira (5 min sin actividad), el `conversation_id` deja de ser válido. El frontend debe manejar el error 400 `CONVERSATION_NOT_FOUND` y crear una nueva conversación. El evento SSE `search.conversation.expired` notifica la expiración en tiempo real.
+
+---
 
 ### Request
 
@@ -254,7 +243,7 @@ POST /v1/search/ai
 | Header | Tipo | Requerido | Descripción |
 |--------|------|-----------|-------------|
 | `Content-Type` | string | Sí | `application/json` |
-| `X-Trace-Id` | string | No | UUID v7 opcional para trazabilidad. El middleware asigna uno automáticamente si no se envía |
+| `X-Trace-Id` | string | No | UUID v7 opcional. El middleware asigna uno automáticamente si no se envía |
 
 > Las cookies `__Secure-access_token` y `__Secure-refresh_token` se envían automáticamente si existen. No se requiere header `Authorization`.
 
@@ -264,12 +253,7 @@ POST /v1/search/ai
 {
   "message": "Quiero viajar a Madrid desde Buenos Aires del 15 al 22 de marzo, 2 adultos",
   "conversation_id": "019ef5439-cb43-716d-90b5-51dcbe980908",
-  "search_mode": "",
-  "stream": false,
-  "lat": -34.6037,
-  "lng": -58.3816,
-  "country_code": "AR",
-  "timezone": "America/Argentina/Buenos_Aires"
+  "stream": false
 }
 ```
 
@@ -277,14 +261,11 @@ POST /v1/search/ai
 
 | Campo | Tipo | Requerido | Descripción |
 |-------|------|-----------|-------------|
-| `message` | string | Sí | Mensaje en lenguaje natural describiendo la búsqueda. No puede estar vacío ni ser solo espacios. Ej: `"Busco vuelos baratos a Lima en marzo"`, `"hoteles en Bali con pileta"`, `"vuelo y hotel a Cancún para 2"` |
-| `conversation_id` | string | No | UUID v7 de una conversación existente. Omitir en el primer mensaje — el backend genera uno nuevo y lo devuelve en la respuesta. Usar el mismo ID en turnos subsiguientes |
-| `search_mode` | string | No | Sugerencia de modo: `"discovery"` para descubrir destinos, `"exact"` para búsquedas concretas, `""` (vacío u omitido) para detección automática |
-| `stream` | boolean | No | `true` para recibir la respuesta como SSE (Server-Sent Events) con `Content-Type: text/event-stream`. Cada evento contiene los campos de la respuesta de forma incremental. `false` o ausente → respuesta JSON estándar |
-| `lat` | float64 | No | Latitud del usuario. Proporcionada por el frontend (obtenida de `/v1/environment`). Se usa para contexto de ubicación en el prompt del intérprete AI. Ej: `40.4168` |
-| `lng` | float64 | No | Longitud del usuario. Proporcionada por el frontend (obtenida de `/v1/environment`). Ej: `-3.7038` |
-| `timezone` | string | No | Zona horaria IANA del usuario. Ej: `"Europe/Madrid"`, `"America/Argentina/Buenos_Aires"` |
-| `country_code` | string | No | Código ISO 3166-1 alpha-2 del país del usuario. Ej: `"ES"`, `"AR"` |
+| `message` | string | **Sí** | Mensaje en lenguaje natural. No puede estar vacío ni ser solo espacios. Ej: `"Busco vuelos baratos a Lima en marzo"`, `"hoteles en Bali con pileta"`, `"vuelo y hotel a Cancún para 2"` |
+| `conversation_id` | string | No | UUID v7 de una conversación existente. Omitir en el primer mensaje — el backend genera uno nuevo. Usar el mismo ID en turnos subsiguientes |
+| `stream` | boolean | No | `true` para recibir la respuesta como SSE (`Content-Type: text/event-stream`). `false` o ausente → respuesta JSON estándar. Default: `false` |
+
+> **Ya no se envían:** `search_mode` (la AI decide el modo vía Tool Calling), `lat`, `lng`, `timezone`, `country_code` (el backend los resuelve automáticamente por IP vía `env:{ip}` en DragonflyDB).
 
 ### Ejemplos curl
 
@@ -320,8 +301,6 @@ curl -X POST {base_url}/ai \
   }'
 ```
 
-> **Nota:** Las cookies se envían con `-b` solo si el usuario está autenticado. Para búsquedas anónimas, omitir el flag `-b`.
-
 #### Búsqueda combinada (vuelos + hotel)
 
 ```bash
@@ -343,11 +322,61 @@ curl -X POST {base_url}/ai \
   }'
 ```
 
+### SSE Streaming
+
+Cuando `stream: true`, el backend responde con `Content-Type: text/event-stream`. El flujo de eventos es:
+
+```
+event: status
+data: {"status":"thinking"}
+
+event: chunk
+data: {"content":"Voy a buscar vuelos..."}
+
+event: search
+data: {"destination":"MAD→BCN","type":"flights","data":{...}}
+
+event: chunk
+data: {"content":"Encontré 5 vuelos. También busco hoteles..."}
+
+event: search
+data: {"destination":"Barcelona, España","type":"hotels","data":{...}}
+
+event: chunk
+data: {"content":"Acá están todos los resultados."}
+
+event: result
+data: {"conversation_id":"...","intent":"both","message":"...","flights":{...},"hotels":{...}}
+
+event: error
+data: {"error":"mensaje de error"}
+```
+
+**Tipos de eventos SSE:**
+
+| Evento | Formato | Cuándo |
+|--------|--------|--------|
+| `status` | `{"status":"thinking"}` | Inmediatamente al recibir el request. Indica que el procesamiento comenzó |
+| `chunk` | `{"content":"..."}` | Fragmento de texto generado por la AI. Se envía en tiempo real |
+| `search` | `{"destination":"...","type":"hotels\|flights","data":{...}}` | Resultados de una búsqueda ejecutada (tool call completado) |
+| `result` | `{...respuesta JSON completa...}` | Respuesta final unificada. Contiene todos los campos de la respuesta JSON estándar |
+| `error` | `{"error":"mensaje"}` | Error durante el procesamiento (AI no disponible, rate limit, etc.) |
+| `alert` | `{"alerts":[{"level":"warning"\|"info","type":"allergy"\|"medication_restricted"\|"vaccination"\|"condition"\|"travel"\|"document","message":"..."}]}` | Alertas médicas o de viaje detectadas por la AI. Solo para usuarios autenticados |
+
+**Formato wire:**
+```
+event: {tipo}\ndata: {json}\n\n
+```
+
+> **Importante para el frontend:** En modo streaming, usar `EventSource` o `fetch` con `ReadableStream`. El header `Content-Type` de la respuesta será `text/event-stream`. En modo no-streaming, la respuesta es JSON estándar con `Content-Type: application/json`.
+
+---
+
 ### Responses
 
 #### Intento Incompleto (incomplete)
 
-Cuando el mensaje no contiene suficiente información para ejecutar una búsqueda. El backend devuelve una pregunta de seguimiento generada por la AI y los campos faltantes.
+Cuando el mensaje no contiene suficiente información para ejecutar una búsqueda. El backend devuelve una pregunta de seguimiento generada por la AI.
 
 ```json
 {
@@ -366,11 +395,11 @@ Cuando el mensaje no contiene suficiente información para ejecutar una búsqued
 }
 ```
 
-> **Nota para el frontend:** Cuando `intent` es `"incomplete"`, mostrar el `message` como pregunta de seguimiento al usuario. Los campos `missing_fields` indican qué datos faltan. No hay `flights` ni `hotels` en la respuesta.
+> **Nota para el frontend:** Cuando `intent` es `"incomplete"`, mostrar el `message` como pregunta de seguimiento. Los campos `missing_fields` indican qué datos faltan. No hay `flights` ni `hotels` en la respuesta.
 
 #### Intento Ambiguo (ambiguous)
 
-Cuando la AI entiende parcialmente la consulta pero necesita una aclaración. Similar a `incomplete` pero con al menos algunos parámetros interpretados.
+Cuando la AI entiende parcialmente la consulta pero necesita una aclaración.
 
 ```json
 {
@@ -390,7 +419,7 @@ Cuando la AI entiende parcialmente la consulta pero necesita una aclaración. Si
 
 #### Vuelos (flights)
 
-Cuando la AI interpreta que el usuario busca vuelos y tiene todos los parámetros necesarios. La respuesta incluye la estructura completa de `search_flights` igual que `POST /v1/search/flights`.
+Cuando la AI interpreta que el usuario busca vuelos y tiene todos los parámetros necesarios. La respuesta incluye la estructura completa de `search_flights`.
 
 ```json
 {
@@ -475,9 +504,7 @@ Cuando la AI interpreta que el usuario busca vuelos y tiene todos los parámetro
         "airport_name": "Aeropuerto Internacional Ministro Pistarini",
         "city": "Buenos Aires",
         "country": "Argentina",
-        "country_code": "AR",
-        "image_url": null,
-        "thumbnail_url": null
+        "country_code": "AR"
       },
       {
         "role": "arrival",
@@ -485,19 +512,13 @@ Cuando la AI interpreta que el usuario busca vuelos y tiene todos los parámetro
         "airport_name": "Aeropuerto Adolfo Suárez Madrid-Barajas",
         "city": "Madrid",
         "country": "España",
-        "country_code": "ES",
-        "image_url": null,
-        "thumbnail_url": null
+        "country_code": "ES"
       }
     ],
     "price_insights": {
       "lowest_price": { "amount": 1245000, "currency": "ARS" },
       "price_level": "typical",
-      "typical_range": {
-        "min": 900000,
-        "max": 1500000,
-        "currency": "ARS"
-      },
+      "typical_range": { "min": 900000, "max": 1500000, "currency": "ARS" },
       "price_history": []
     },
     "meta": {
@@ -513,20 +534,11 @@ Cuando la AI interpreta que el usuario busca vuelos y tiene todos los parámetro
 }
 ```
 
-**Response Headers:**
-
-```
-X-Trace-Id: 019ef5439-cb43-716d-90b5-51dcbe980908
-traceparent: 00-019ef5439cb43716d90b551dcbe980908-a1b2c3d4e5f67890-01
-```
-
-> Si el usuario está autenticado y la sesión fue refrescada, se incluyen nuevos `Set-Cookie` headers con los tokens rotados.
-
-> **Nota:** La estructura del campo `flights` es **idéntica** a la respuesta de `POST /v1/search/flights`. El frontend reutiliza los mismos componentes de UI para mostrar los resultados. Ver [Search Flights API](search_flights_api.md#responses) para la documentación completa de cada campo.
+> **Nota:** La estructura del campo `flights` es **idéntica** a la respuesta de `POST /v1/search/flights`. Ver [Search Flights API](search_flights_api.md#responses) para la documentación completa.
 
 #### Hoteles (hotels)
 
-Cuando la AI interpreta que el usuario solo busca hoteles. La respuesta incluye la estructura completa de `search_hotels`.
+Cuando la AI interpreta que el usuario solo busca hoteles.
 
 ```json
 {
@@ -580,7 +592,7 @@ Cuando la AI interpreta que el usuario solo busca hoteles. La respuesta incluye 
 
 #### Ambos (both)
 
-Cuando la AI interpreta que el usuario quiere vuelos Y hoteles. Ambos buscadores se ejecutan **en paralelo** con errgroup. La respuesta incluye ambos campos.
+Cuando la AI interpreta que el usuario quiere vuelos Y hoteles. Ambos buscadores se ejecutan **en paralelo** con `errgroup`.
 
 ```json
 {
@@ -595,21 +607,17 @@ Cuando la AI interpreta que el usuario quiere vuelos Y hoteles. Ambos buscadores
     "phase": "complete",
     "results_state": "matching",
     "best_flights": [],
-    "other_flights": [ "..." ],
-    "airports": [ "..." ],
-    "price_insights": null,
-    "meta": null,
-    "from_cache": false,
-    "cached_at": null
+    "other_flights": [],
+    "airports": [],
+    "from_cache": false
   },
   "hotels": {
     "type": "hotels",
     "results_state": "matching",
-    "properties": [ "..." ],
+    "properties": [],
     "brands": [],
     "pagination": { "next_token": null, "has_more": false },
-    "from_cache": false,
-    "cached_at": null
+    "from_cache": false
   },
   "from_cache": false
 }
@@ -617,7 +625,7 @@ Cuando la AI interpreta que el usuario quiere vuelos Y hoteles. Ambos buscadores
 
 #### Partial Failure en Both
 
-Cuando el intent es `"both"` y uno de los dos buscadores falla pero el otro tiene éxito, el backend devuelve resultados parciales. El campo `flights_error` o `hotels_error` contiene el mensaje de error del buscador fallido.
+Cuando un buscador falla y el otro tiene éxito, el backend devuelve resultados parciales con `flights_error` o `hotels_error`.
 
 ```json
 {
@@ -630,18 +638,19 @@ Cuando el intent es `"both"` y uno de los dos buscadores falla pero el otro tien
   "hotels": {
     "type": "hotels",
     "results_state": "matching",
-    "properties": [ "..." ],
+    "properties": [],
     "brands": [],
     "pagination": { "next_token": null, "has_more": false },
-    "from_cache": false,
-    "cached_at": null
+    "from_cache": false
   },
   "flights_error": "flight search: provider unavailable",
   "from_cache": false
 }
 ```
 
-> **Nota para el frontend:** Cuando `flights_error` o `hotels_error` están presentes, significa que esa búsqueda falló. Mostrar un mensaje informativo al usuario indicando que esa parte no está disponible. La otra búsqueda (`flights` u `hotels`) contiene resultados válidos.
+> **Nota para el frontend:** Cuando `flights_error` o `hotels_error` están presentes, significa que esa búsqueda falló. Mostrar un mensaje informativo. La otra búsqueda contiene resultados válidos. Si AMBOS fallan, la respuesta es 502 Bad Gateway.
+
+---
 
 ### Campos de la Respuesta
 
@@ -649,62 +658,41 @@ Cuando el intent es `"both"` y uno de los dos buscadores falla pero el otro tien
 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
-| `conversation_id` | string | UUID v7 de la conversación. Usar en requests subsiguientes para continuar el multi-turno |
+| `conversation_id` | string | UUID v7 de la conversación. Usar en requests subsiguientes |
 | `turn_count` | integer | Número de turno actual (1-indexado, incrementa en cada request) |
 | `max_turns` | integer | Límite máximo de turnos: 5 para anónimos, 10 para autenticados |
 | `intent` | string | Tipo de intención interpretada. Ver [Tipos de Intento](#tipos-de-intento) |
 | `confidence` | float | Nivel de confianza de la AI en la interpretación (0.0 a 1.0). 0.0 para `incomplete` |
-| `message` | string | Texto de respuesta. Resultados en lenguaje natural o pregunta de seguimiento |
-| `missing_fields` | string[] | Campos que faltan para completar la búsqueda. Vacío `[]` para intents completos |
-| `flights` | object\|null | Resultados de búsqueda de vuelos (formato `search_flights`). `null` si no hay búsqueda de vuelos |
-| `hotels` | object\|null | Resultados de búsqueda de hoteles (formato `search_hotels`). `null` si no hay búsqueda de hoteles |
-| `flights_error` | string | Mensaje de error del buscador de vuelos. Solo presente en partial failure de `"both"` |
-| `hotels_error` | string | Mensaje de error del buscador de hoteles. Solo presente en partial failure de `"both"` |
+| `message` | string | Texto de respuesta en lenguaje natural o pregunta de seguimiento |
+| `missing_fields` | string[] | Campos que faltan. Vacío para intents completos. Omitido si vacío (`omitzero`) |
+| `flights` | object\|null | Resultados de vuelos (formato `search_flights`). Omitido si no hay búsqueda de vuelos (`omitzero`) |
+| `hotels` | object\|null | Resultados de hoteles (formato `search_hotels`). Omitido si no hay búsqueda de hoteles (`omitzero`) |
+| `flights_error` | string | Mensaje de error del buscador de vuelos. Solo en partial failure de `"both"`. Omitido si vacío (`omitzero`) |
+| `hotels_error` | string | Mensaje de error del buscador de hoteles. Solo en partial failure de `"both"`. Omitido si vacío (`omitzero`) |
 | `from_cache` | boolean | `true` si la **interpretación** de la AI vino de caché (blake3 hash). `false` si fue fresca. **No** indica si los resultados de búsqueda son cacheados |
-| `cached_at` | string\|null | Timestamp ISO 8601 del momento en que se cacheó la interpretación. `null` si `from_cache` es `false` |
+| `cached_at` | string\|null | Timestamp ISO 8601 del momento en que se cacheó la interpretación. Omitido si `from_cache` es `false` (`omitzero`) |
+| `mode` | string | `"discovery"` en respuestas del pipeline de discovery. Omitido en búsqueda exacta (`omitzero`) |
+| `candidates` | object[] | Destinos rankeados del pipeline de discovery (top 3-5). Omitido si no aplica (`omitzero`) |
+| `total_candidates` | integer | Total de candidatos antes del truncado. Omitido si es 0 (`omitzero`) |
+| `needs_clarification` | boolean | `true` si se necesita más información del usuario. Omitido si `false` (`omitzero`) |
+| `clarification_question` | string | Pregunta de aclaración generada. Omitido si vacío (`omitzero`) |
 
 ### Tipos de Intento
 
 | Tipo | Significado | Resultados incluidos | Acción del frontend |
 |------|-------------|---------------------|---------------------|
-| `"incomplete"` | Faltan datos esenciales para cualquier búsqueda | `flights: null`, `hotels: null` | Mostrar `message` como pregunta de seguimiento. Usar `missing_fields` para guiar al usuario |
-| `"ambiguous"` | Hay parámetros pero la intención no es clara (¿vuelos u hoteles?) | `flights: null`, `hotels: null` | Mostrar `message` como pregunta de aclaración. La AI pide que el usuario especifique |
-| `"flights"` | Búsqueda de vuelos completa | `flights: {...}`, `hotels: null` | Renderizar resultados de vuelos con los mismos componentes de `POST /v1/search/flights` |
-| `"hotels"` | Búsqueda de hoteles completa | `flights: null`, `hotels: {...}` | Renderizar resultados de hoteles con los mismos componentes de `POST /v1/search/hotels` |
-| `"both"` | Búsqueda combinada de vuelos y hoteles | `flights: {...}`, `hotels: {...}` | Renderizar ambos resultados. Si hay `flights_error` o `hotels_error`, mostrar mensaje de partial failure |
+| `"incomplete"` | Faltan datos esenciales | `flights: null`, `hotels: null` | Mostrar `message` como pregunta. Usar `missing_fields` para guiar al usuario |
+| `"ambiguous"` | Hay parámetros pero la intención no es clara | `flights: null`, `hotels: null` | Mostrar `message` como pregunta de aclaración |
+| `"flights"` | Búsqueda de vuelos completa | `flights: {...}`, `hotels: null` | Renderizar resultados con los mismos componentes de `POST /v1/search/flights` |
+| `"hotels"` | Búsqueda de hoteles completa | `flights: null`, `hotels: {...}` | Renderizar resultados con los mismos componentes de `POST /v1/search/hotels` |
+| `"both"` | Búsqueda combinada | `flights: {...}`, `hotels: {...}` | Renderizar ambos. Si hay `flights_error` o `hotels_error`, mostrar partial failure |
+| `"discovery"` | Recomendación de destinos | `message: "..."`, `candidates: [...]` | Renderizar recomendaciones en lenguaje natural y/o candidatos estructurados |
 
 ### Discovery Mode
 
-> **⚡ AI-Powered (DeepSeek v4 Flash).** El modo discovery ahora usa DeepSeek v4 Flash para interpretar consultas abiertas del tipo "recomiéndame playa", "destinos baratos para verano", o "a dónde viajar en diciembre". El intérprete AI recibe la consulta del usuario junto con contexto de ubicación (`lat`, `lng`, `country_code`, `timezone`), preferencias (`currency`, `language`) y la fecha actual, y genera recomendaciones de destinos en lenguaje natural. Ya no usa keyword-matching ni datos de favoritos del usuario.
->
-> El modo discovery se activa cuando el cliente envía `"search_mode": "discovery"` o cuando la consulta es detectada automáticamente como discovery por el sistema.
+> **AI-Powered (DeepSeek v4 Flash).** El modo discovery usa DeepSeek v4 Flash para interpretar consultas abiertas del tipo "recomiéndame playa", "destinos baratos para verano", o "a dónde viajar en diciembre". El intérprete AI recibe contexto de ubicación (resuelto por IP), preferencias (`currency`, `language`) y la fecha actual, y genera recomendaciones de destinos en lenguaje natural.
 
-#### Request con Discovery Mode
-
-```bash
-curl -X POST {base_url}/ai \
-  -H "Content-Type: application/json" \
-  -d '{
-    "message": "recomiéndame un lugar de playa para este verano",
-    "search_mode": "discovery"
-  }'
-```
-
-Con streaming SSE (recomendado para respuestas largas):
-
-```bash
-curl -N -X POST {base_url}/ai \
-  -H "Content-Type: application/json" \
-  -d '{
-    "message": "destinos de naturaleza cerca de mi ubicación",
-    "search_mode": "discovery",
-    "stream": true,
-    "lat": 40.4168,
-    "lng": -3.7038,
-    "country_code": "ES",
-    "timezone": "Europe/Madrid"
-  }'
-```
+La ruta al pipeline de discovery es interna — el AI decide si una consulta es discovery basándose en el contenido del mensaje. El frontend no necesita enviar `search_mode`.
 
 #### Response (JSON, non-streaming)
 
@@ -716,7 +704,7 @@ curl -N -X POST {base_url}/ai \
   "mode": "discovery",
   "intent": "discovery",
   "confidence": 1.0,
-  "message": "¡Claro! Para un verano de playa te recomiendo...\n\n**1. Punta Cana, República Dominicana** 🇩🇴\n- Playas caribeñas de arena blanca\n- Todo incluido disponible\n- Temporada seca de diciembre a abril\n\n**2. Cancún, México** 🇲🇽\n- Aguas turquesas y vida nocturna\n- Presupuesto medio\n- Vuelos directos desde Madrid\n\n**3. Bali, Indonesia** 🇮🇩\n- Paraíso tropical\n- Presupuesto accesible\n- Mejor época: abril a octubre",
+  "message": "¡Claro! Para un verano de playa te recomiendo...\n\n**1. Punta Cana, República Dominicana**\n- Playas caribeñas de arena blanca\n- Todo incluido disponible\n\n**2. Cancún, México**\n- Aguas turquesas y vida nocturna\n\n**3. Bali, Indonesia**\n- Paraíso tropical\n- Mejor época: abril a octubre",
   "from_cache": false
 }
 ```
@@ -725,185 +713,168 @@ curl -N -X POST {base_url}/ai \
 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
-| `mode` | string | `"discovery"` cuando el pipeline de discovery está activo. Omitido (`omitzero`) en respuestas de búsqueda exacta |
+| `mode` | string | `"discovery"` cuando el pipeline de discovery está activo. Omitido en búsqueda exacta |
 | `intent` | string | `"discovery"` — indica que la respuesta es del pipeline de descubrimiento |
 | `confidence` | float64 | Confianza (siempre 1.0 en discovery AI-powered) |
-| `message` | string | Respuesta en lenguaje natural generada por DeepSeek v4 Flash con recomendaciones de destinos, incluyendo detalles como presupuesto, temporada, y razones. Formateada en Markdown |
-| `from_cache` | boolean | `true` si la interpretación vino de caché (blake3 hash de query + contexto). `false` si fue llamada fresh a la AI |
-
-> **Nota:** El modo discovery NO devuelve `candidates[]` estructurados en el response JSON. En su lugar, la respuesta de DeepSeek v4 Flash es texto en lenguaje natural dentro del campo `message`. Si se necesita parseo estructurado, el frontend puede extraer destinos del Markdown generado.
-
-### SSE Streaming (Discovery)
-
-Cuando `stream: true` y el modo es discovery, el backend responde con `Content-Type: text/event-stream`. El flujo de eventos es:
-
-```
-event: status
-data: {"status":"thinking"}
-
-event: chunk
-data: {"content":"¡Claro"}
-
-event: chunk
-data: {"content":"! Para un"}
-
-event: chunk
-data: {"content":" verano"}
-
-...
-
-event: done
-data: {"full_text":"¡Claro! Para un verano de playa..."}
-```
-
-**Tipos de eventos SSE:**
-
-| Evento | Formato | Cuándo |
-|--------|--------|--------|
-| `status` | `{"status":"thinking"}` | Inmediatamente al recibir el request. Indica que el procesamiento comenzó |
-| `chunk` | `{"content":"..."}` | Fragmento de texto de la respuesta. Se envía en tiempo real a medida que la AI genera |
-| `done` | `{"full_text":"..."}` | Respuesta completa generada. Se envía al finalizar el stream |
-| `error` | `{"error":"mensaje"}` | Error durante el procesamiento (AI no disponible, rate limit, etc.) |
-
-**Formato wire:**
-```
-event: {tipo}\ndata: {json}\n\n
-```
-
-Ejemplo de chunk:
-```
-event: chunk\ndata: {"content":"te recomiendo visitar"}\n\n
-```
-
-Ejemplo de error:
-```
-event: error\ndata: {"error":"AI_UNAVAILABLE: el servicio de IA no está disponible"}\n\n
-```
-
-> **Importante para el frontend:** En modo streaming, usar `EventSource` o `fetch` con `ReadableStream`. El header `Content-Type` de la respuesta será `text/event-stream`. No confundir con las respuestas JSON estándar (no-streaming).
-
-### Resolución IATA
-
-Cuando la AI interpreta un mensaje, puede devolver nombres de ciudad en lugar de códigos IATA. El backend resuelve estos nombres a códigos de aeropuerto usando un sistema de 3 niveles:
-
-```
-Nivel 1: Coincidencia exacta (embedded JSON ~300 aeropuertos)
-  ├── IATA code:           "EZE" → Aeropuerto de Ezeiza
-  ├── Ciudad:              "Buenos Aires" → EZE
-  └── Alias:               "Madrid-Barajas" → MAD
-
-Nivel 2: Fuzzy matching (sahilm/fuzzy — corrección de typos)
-  ├── "bueno aires"        → EZE (score alto)
-  ├── "mdrid"              → MAD (score alto)
-  └── "barselona"          → BCN (score alto)
-
-Nivel 3: AI fallback (cacheado 24h en DragonflyDB)
-  └── Ciudades no cubiertas por el dataset → la AI las resuelve
-      y el resultado se cachea por 24 horas
-```
-
-> **Dataset:** ~300 aeropuertos principales del mundo embebidos en el binario vía `go:embed`. El fuzzy matching corrige errores de tipeo automáticamente (threshold score ≥ 15 en sahilm/fuzzy).
-
-### Contexto del Intérprete AI
-
-El backend inyecta automáticamente contexto adicional en la conversación para mejorar la precisión del intérprete AI:
-
-#### Inyección de Ubicación
-
-El backend detecta la ubicación del usuario (IP para anónimos, perfil para autenticados) e inyecta un mensaje de sistema con la ciudad/país detectado. Esto evita preguntas innecesarias como "¿Desde dónde?" cuando el usuario no especifica origen.
-
-#### Inyección de Fecha Actual
-
-Para corregir fechas alucinadas por la AI (modelos entrenados con datos de 2024-2025 que devuelven años incorrectos), el backend revisa todas las fechas extraídas por la AI (`outbound_date`, `return_date`, `check_in_date`, `check_out_date`). Si el año es anterior al año actual, se reemplaza automáticamente por el año en curso.
-
-> **Ejemplo:** La AI devuelve `"2025-06-15"` → el backend corrige a `"2026-06-15"`. El día y mes se preservan.
-
-#### Parámetros Soportados
-
-La AI puede extraer los siguientes parámetros del lenguaje natural:
-
-**Vuelos:**
-| Parámetro | Descripción | Ejemplo |
-|-----------|-------------|---------|
-| `departure` | Ciudad/aeropuerto de origen | `"Madrid"`, `"EZE"` |
-| `arrival` | Ciudad/aeropuerto de destino | `"Barcelona"`, `"LIM"` |
-| `outbound_date` | Fecha de ida (YYYY-MM-DD) | `"2026-06-10"` |
-| `return_date` | Fecha de vuelta (YYYY-MM-DD) | `"2026-06-15"` |
-| `adults` | Número de adultos (default: 1) | `2` |
-| `trip_type` | Tipo de viaje | `"round_trip"`, `"one_way"` |
-| `travel_class` | Clase de vuelo | `"economy"`, `"business"` |
-| `stops` | Número de escalas | `"nonstop"`, `"max_1"` |
-| `max_price` | Precio máximo total | `500.0` |
-| `sort_by` | Orden de resultados | `"price"`, `"duration"` |
-
-**Hoteles:**
-| Parámetro | Descripción | Ejemplo |
-|-----------|-------------|---------|
-| `query` | Ciudad/destino del hotel | `"Bali"`, `"París"` |
-| `check_in_date` | Fecha de entrada (YYYY-MM-DD) | `"2026-08-01"` |
-| `check_out_date` | Fecha de salida (YYYY-MM-DD) | `"2026-08-07"` |
-| `adults` | Número de adultos (default: 1) | `2` |
-| `children` | Número de niños | `1` |
-| `rating` | Puntuación mínima (3.5+) | `8` (4.0+) |
-| `max_price` | Precio máximo por noche | `200.0` |
-| `free_cancellation` | Solo cancelación gratuita | `true` |
-
-> **Defaults:** Cuando la AI no extrae un parámetro, se usan los defaults del backend: `adults=1`, `trip_type="round_trip"`, `travel_class="economy"`, `stops="any"`, `sort_by="top"`.
-
-### Posibles Errores (AI Search)
-
-| Código Go | HTTP | Problem Type | Cuándo |
-|-----------|------|-------------|--------|
-| `domain.ErrMissingRequiredField` | 400 | Validation Error | `message` vacío o solo espacios en blanco |
-| `domain.ErrInvalidParameterRange` | 422 | Validation Error | `search_mode` tiene un valor inválido (no es `"discovery"` ni `"exact"`) |
-| `domain.ErrInvalidTripType` | 400 | Bad Request | `trip_type` no es válido (no es `round_trip` ni `one_way`) |
-| `domain.ErrTurnLimitExceeded` | 400 | Bad Request | Se alcanzó el límite máximo de turnos en la conversación (5 anónimos, 10 autenticados) |
-| `domain.ErrConversationNotFound` | 400 | Bad Request | El `conversation_id` enviado no existe o expiró |
-| `domain.ErrTokenInvalid` | 401 | Unauthorized | Token de reserva inválido o expirado |
-| `domain.ErrTokenRequired` | 400 | Bad Request | Token de reserva requerido pero ausente |
-| `domain.ErrBookingTokenExpired` | 404 | Not Found | El token de reserva ha expirado o no es válido |
-| `domain.ErrPropertyNotFound` | 404 | Not Found | La propiedad no fue encontrada |
-| `domain.ErrRateLimitExceeded` | 429 | Too Many Requests | Demasiadas peticiones al proveedor de IA. Ver [Rate Limiting](#rate-limiting) |
-| `domain.ErrAIParseFailure` | 502 | Bad Gateway | La IA devolvió una respuesta inválida o malformada que no se pudo interpretar |
-| `domain.ErrProviderBadRequest` | 502 | Bad Gateway | El proveedor externo (SerpAPI) rechazó la solicitud por parámetros inválidos |
-| `domain.ErrAIUnavailable` | 503 | Service Unavailable | El servicio de IA no está configurado o no responde. Ver [Configuración](#variables-de-entorno-requeridas) |
-| `domain.ErrProviderUnavailable` | 503 | Service Unavailable | El proveedor externo (SerpAPI) no está disponible |
-| `domain.ErrProviderError` | 503 | Service Unavailable | Error interno del proveedor externo |
-| `domain.ErrConversationStoreFailed` | 503 | Service Unavailable | El almacenamiento de conversaciones (DragonflyDB) no está disponible |
-| `domain.ErrDiscoveryDisabled` | 503 | Service Unavailable | El modo discovery no está habilitado |
-| (genérico) | 500 | Internal Server Error | Error inesperado del servidor no capturado por ningún mapper |
-
-> **Diferencia clave entre 502 y 503:** `502 AI_PARSE_FAILURE` significa que la IA respondió pero con un formato inválido (ej: JSON malformado). `503 AI_UNAVAILABLE` significa que la IA no respondió (timeout, conexión rechazada) o no está configurada en el entorno.
+| `message` | string | Respuesta en lenguaje natural generada por DeepSeek v4 Flash con recomendaciones. Formateada en Markdown |
+| `candidates` | object[] | Destinos rankeados (top 3-5). Omitido si no aplica |
+| `from_cache` | boolean | `true` si la interpretación vino de caché, `false` si fue fresh |
 
 ---
 
-## Realtime Events (SSE)
+### Conversation CRUD
 
-El backend emite eventos en tiempo real vía Server-Sent Events (SSE) que el frontend debe escuchar para mantener la UI sincronizada sin refrescos de página.
+Endpoints para gestionar el estado de las conversaciones. Útiles para recuperación F5, lista de conversaciones activas, y eliminación.
 
-### Endpoint
+#### GET /conversations — Listar conversaciones activas
+
+```
+GET /v1/search/ai/conversations
+```
+
+Devuelve las conversaciones activas del usuario (autenticado o anónimo vía `__Secure-anon_token`).
+
+**Response 200:**
+```json
+[
+  {
+    "id": "019ef5439-cb43-716d-90b5-51dcbe980908",
+    "preview": "Quiero viajar a Barcelona desde Buenos Aires",
+    "turn_count": 3,
+    "updated_at": "2026-05-23T15:30:00Z"
+  },
+  {
+    "id": "019ef6789-ab12-345c-90d5-12ab34cd5678",
+    "preview": "Hoteles en Bali con pileta",
+    "turn_count": 1,
+    "updated_at": "2026-05-23T14:00:00Z"
+  }
+]
+```
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `id` | string | UUID v7 de la conversación |
+| `preview` | string | Primer mensaje del usuario |
+| `turn_count` | integer | Número de turnos |
+| `updated_at` | string | Timestamp ISO 8601 de la última actualización |
+
+> Si no hay conversaciones o el usuario no tiene identificador (sin auth y sin cookie anónima), devuelve `[]`.
+
+#### GET /conversations/{id} — Obtener estado completo (F5 recovery)
+
+```
+GET /v1/search/ai/conversations/{id}
+```
+
+Devuelve el estado completo de una conversación. Permite al frontend reconstruir el chat tras un refresh de página (F5).
+
+**Response 200:**
+```json
+{
+  "id": "019ef5439-cb43-716d-90b5-51dcbe980908",
+  "user_id": "",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Quiero viajar a Barcelona",
+      "timestamp": "2026-05-23T15:25:00Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Encontré 15 vuelos...",
+      "timestamp": "2026-05-23T15:25:02Z"
+    }
+  ],
+  "search_cache": {
+    "call_abc": {
+      "response": {...},
+      "destination": "Barcelona, España",
+      "type": "hotels"
+    }
+  },
+  "filters": {},
+  "context": {
+    "location": "Buenos Aires, Argentina",
+    "country_code": "AR",
+    "currency": "ARS",
+    "language": "es"
+  },
+  "turn_count": 2,
+  "max_turns": 5,
+  "created_at": "2026-05-23T15:25:00Z",
+  "updated_at": "2026-05-23T15:25:02Z"
+}
+```
+
+| Código | HTTP | Significado |
+|--------|------|-------------|
+| 200 | 200 OK | Conversación encontrada y devuelta |
+| 400 | 400 Bad Request | `id` vacío o inválido |
+| 403 | 403 Forbidden | La conversación pertenece a otro usuario |
+| 404 | 404 Not Found | Conversación no encontrada o expirada |
+
+#### DELETE /conversations/{id} — Eliminar conversación
+
+```
+DELETE /v1/search/ai/conversations/{id}
+```
+
+Elimina una conversación y la remueve del índice del usuario.
+
+| Código | HTTP | Significado |
+|--------|------|-------------|
+| 204 | 204 No Content | Conversación eliminada exitosamente |
+| 400 | 400 Bad Request | `id` vacío o inválido |
+| 403 | 403 Forbidden | La conversación pertenece a otro usuario |
+| 404 | 404 Not Found | Conversación no encontrada |
+
+---
+
+### Realtime Events (SSE)
+
+El backend emite eventos en tiempo real vía Server-Sent Events (SSE) para mantener la UI sincronizada.
+
+#### Endpoint
 
 ```
 GET /v1/realtime/events
 ```
 
-> **Requerido:** Autenticación vía cookie `__Secure-access_token`. El endpoint no está disponible para usuarios anónimos.
+> **Requerido:** Autenticación vía cookie `__Secure-access_token`. No disponible para usuarios anónimos.
 
-### Eventos
+#### Eventos
 
 | Evento | Payload | Cuándo |
 |--------|---------|--------|
-| `search.conversation.expired` | `{"conversation_id": "019ef..."}` | Una conversación de búsqueda expiró automáticamente (TTL de DragonflyDB agotado) |
+| `search.conversation.expired` | `{"conversation_id": "019ef..."}` | Una conversación expiró automáticamente (TTL de DragonflyDB agotado, 5 min sin actividad) |
+| `search.medical.alerts` | `{"alerts":[{"level":"warning"\|"info","type":"allergy"\|"medication_restricted"\|"vaccination"\|"condition"\|"travel"\|"document","message":"..."}]}` | Alertas médicas o de viaje detectadas por la AI durante una búsqueda. Solo usuarios autenticados |
 
-### Comportamiento Esperado del Frontend
+#### Comportamiento Esperado del Frontend
 
-Cuando el frontend recibe un evento `search.conversation.expired`:
+Cuando el frontend recibe `search.conversation.expired`:
 
-1. **Eliminar** la conversación expirada de la lista de conversaciones activas inmediatamente, sin esperar un refresco de página.
-2. **NO mostrar** ningún mensaje, notificación, toast, ni alerta al usuario. La eliminación debe ser silenciosa — la conversación simplemente desaparece de la lista.
-3. Si el usuario tiene abierta la conversación expirada en ese momento, el frontend debe mostrar un estado de "conversación expirada" (mismo comportamiento que al recibir 404 en `GET /conversations/{id}`).
+1. **Eliminar** la conversación expirada de la lista de conversaciones activas **inmediatamente**, sin esperar refresco de página.
+2. **NO mostrar** ningún mensaje, notificación, toast, ni alerta. La eliminación debe ser **silenciosa**.
+3. Si el usuario tiene abierta la conversación expirada, mostrar un estado de "conversación expirada" (mismo comportamiento que al recibir 404 en `GET /conversations/{id}`).
 
-### Formato Wire
+#### Comportamiento Esperado — Alertas Médicas
+
+Cuando el frontend recibe `search.medical.alerts`:
+
+1. **Mostrar** las alertas en una ventana emergente única con formato de lista (bullets).
+2. **NO mostrar** las alertas en el texto del chat — la AI no repite el contenido de las alertas en su respuesta.
+3. Las alertas se emiten solo para usuarios autenticados. Usuarios anónimos nunca reciben este evento.
+
+#### Formato Wire — Alertas Médicas
+
+```
+event: search.medical.alerts
+data: {"alerts":[{"level":"warning","type":"vaccination","message":"Se recomienda vacuna contra la fiebre amarilla para viajar a Brasil"},{"level":"info","type":"allergy","message":"Alta prevalencia de maní en la gastronomía tailandesa"}]}
+
+```
+
+#### Formato Wire — Conversación Expirada
 
 ```
 event: search.conversation.expired
@@ -911,42 +882,138 @@ data: {"conversation_id":"019ef..."}
 
 ```
 
-El header `Content-Type` de la respuesta es `text/event-stream`. El frontend debe usar `EventSource` o `fetch` con `ReadableStream` para consumir estos eventos.
+El header `Content-Type` de la respuesta es `text/event-stream`. Usar `EventSource` o `fetch` con `ReadableStream`.
 
-### Eventos Futuros
+#### Eventos Futuros
 
-Este endpoint está diseñado para extenderse. En el futuro puede emitir:
+Este endpoint está diseñado para extenderse:
 
 - `search.conversation.updated` — otra pestaña/dispositivo modificó la conversación
 - `search.provider_unavailable` — SerpAPI no está disponible temporalmente
 
-> **Nota de implementación:** Los eventos se publican vía el hub SSE central (`internal/shared/sse`). Cualquier módulo del backend puede publicar eventos para usuarios autenticados. El listener de expiración de DragonflyDB (keyspace notifications) es el publisher de `search.conversation.expired`.
+---
+
+### Resolución IATA
+
+Cuando la AI interpreta un mensaje, puede devolver nombres de ciudad en lugar de códigos IATA. El backend resuelve estos nombres a códigos de aeropuerto usando 3 niveles:
+
+```
+Nivel 1: Coincidencia exacta (embedded JSON ~300 aeropuertos)
+  ├── IATA code:           "EZE" → Aeropuerto de Ezeiza
+  ├── Ciudad:              "Buenos Aires" → EZE
+  └── Alias:               "Madrid-Barajas" → MAD
+
+Nivel 2: Country fallback
+  ├── "Perú"               → "LIM"
+  ├── "España"             → "MAD"
+  └── "Argentina"          → "EZE"
+
+Nivel 3: Fuzzy matching (sahilm/fuzzy)
+  ├── "bueno aires"        → EZE (score alto)
+  └── "barselona"          → BCN (score alto)
+```
+
+> **Dataset:** ~300 aeropuertos principales del mundo embebidos en el binario vía `go:embed`.
+
+### Contexto del Intérprete AI
+
+El backend inyecta automáticamente contexto adicional para mejorar la precisión:
+
+#### Inyección de Ubicación
+
+El backend detecta la ubicación del usuario por IP (`env:{ip}` en DragonflyDB) e inyecta un mensaje de sistema con la ciudad/país detectado. Esto evita preguntas innecesarias como "¿Desde dónde?".
+
+#### Corrección de Fechas
+
+Para corregir fechas alucinadas por la AI (modelos entrenados con datos históricos), el backend revisa todas las fechas extraídas. Si el año es anterior al año actual, se reemplaza automáticamente por el año en curso.
+
+> **Ejemplo:** La AI devuelve `"2025-06-15"` → el backend corrige a `"2026-06-15"`. El día y mes se preservan.
+
+---
+
+### Contexto Médico y de Viaje
+
+Cuando el usuario está autenticado, el backend inyecta automáticamente en el system prompt de la AI:
+
+- **Perfil médico**: alergias, condiciones, medicamentos activos, vacunas
+- **Preferencias de viaje**: clase preferida, asiento, comida, asistencias, evitar escalas
+- **Documentos**: pasaporte y visados (número, país emisor, nacionalidad, vigencia)
+- **Nacionalidad**: del perfil del usuario
+
+La AI usa este contexto para:
+- Alertar sobre alergias alimentarias prevalentes en el destino
+- Verificar si medicamentos están restringidos/prohibidos en el país destino
+- Recomendar vacunas faltantes
+- Detectar si el pasaporte vence durante el viaje
+- Evaluar requisitos de visa según nacionalidad
+
+Las alertas se emiten vía la herramienta `emit_medical_alerts` como eventos SSE `alert`, 
+y NO se repiten en el texto del chat. El frontend las muestra en una ventana emergente única 
+con formato de lista.
+
+Usuarios anónimos: este contexto se omite completamente.
+
+---
+
+### Posibles Errores (AI Search)
+
+| Código Go | HTTP | Problem Type | Cuándo |
+|-----------|------|-------------|--------|
+| `domain.ErrMissingRequiredField` | 400 | Validation Error | `message` vacío o solo espacios |
+| `domain.ErrConversationNotFound` | 400 | Bad Request | El `conversation_id` enviado no existe o expiró |
+| `domain.ErrTurnLimitExceeded` | 400 | Bad Request | Límite máximo de turnos alcanzado (5 anónimos, 10 autenticados) |
+| `domain.ErrInvalidTripType` | 400 | Bad Request | `trip_type` no es válido |
+| `domain.ErrTokenInvalid` | 401 | Unauthorized | Token de reserva inválido o expirado |
+| `domain.ErrTokenRequired` | 400 | Bad Request | Token de reserva requerido pero ausente |
+| `domain.ErrBookingTokenExpired` | 404 | Not Found | El token de reserva ha expirado |
+| `domain.ErrPropertyNotFound` | 404 | Not Found | La propiedad no fue encontrada |
+| `domain.ErrRateLimitExceeded` | 429 | Too Many Requests | Demasiadas peticiones. Ver [Rate Limiting](#rate-limiting) |
+| `domain.ErrAIParseFailure` | 502 | Bad Gateway | La IA devolvió una respuesta inválida o malformada |
+| `domain.ErrProviderBadRequest` | 502 | Bad Gateway | El proveedor externo (SerpAPI) rechazó la solicitud |
+| `domain.ErrAIUnavailable` | 503 | Service Unavailable | El servicio de IA no está configurado o no responde |
+| `domain.ErrProviderUnavailable` | 503 | Service Unavailable | El proveedor externo (SerpAPI) no está disponible |
+| `domain.ErrProviderError` | 503 | Service Unavailable | Error interno del proveedor externo |
+| `domain.ErrConversationStoreFailed` | 503 | Service Unavailable | El almacenamiento de conversaciones (DragonflyDB) no está disponible |
+| `domain.ErrDiscoveryDisabled` | 503 | Service Unavailable | El modo discovery no está habilitado |
+| `domain.ErrMedicalContextFailure` | 500 | Internal Server Error | Error al leer el perfil médico, preferencias o documentos del usuario |
+| (genérico) | 500 | Internal Server Error | Error inesperado no capturado por ningún mapper |
+
+> **Diferencia clave entre 502 y 503:** `502 AI_PARSE_FAILURE` significa que la IA respondió pero con formato inválido. `503 AI_UNAVAILABLE` significa que la IA no respondió (timeout, conexión rechazada) o no está configurada.
+
+#### Errores de Conversation CRUD
+
+| Código Go | HTTP | Problem Type | Cuándo |
+|-----------|------|-------------|--------|
+| Validación en handler | 400 | Bad Request | `id` vacío en `GET/DELETE /conversations/{id}` |
+| Validación en handler | 403 | Forbidden | La conversación pertenece a otro usuario |
+| Validación en handler | 404 | Not Found | Conversación no encontrada o expirada |
+| `domain.ErrConversationStoreFailed` | 503 | Service Unavailable | Fallo en DragonflyDB al leer/escribir |
 
 ---
 
 ## Rate Limiting
 
-Rate limiting multi-tier con DragonflyDB y scripts Lua atómicos. Distribuido y seguro en entornos multi-instancia. Todos los límites son configurables vía variables de entorno.
+Rate limiting multi-tier con DragonflyDB y scripts Lua atómicos. Todos los límites son configurables vía variables de entorno.
 
 ### Tiers Generales
 
 | Tier | Scope | Límite | Aplica a |
 |------|-------|--------|----------|
 | **Tier 1 — Global** | IP | 100 req/min | Todos los endpoints (DDoS shield) |
-| **Tier 2 — Authenticated** | UUID del usuario | 10 req/min | Usuarios autenticados que realizan búsquedas |
-| **Tier 3 — Anonymous** | Cookie `__Secure-anon_token` | 5 req/min | Usuarios no autenticados (la mayoría de las búsquedas) |
+| **Tier 2 — Authenticated** | UUID del usuario | 10 req/min | Usuarios autenticados |
+| **Tier 3 — Anonymous** | Cookie `__Secure-anon_token` | 5 req/min | Usuarios no autenticados |
 
 ### Provider-Aware Rate Limiting — AI
 
 | Proveedor | Límite | Descripción |
 |-----------|--------|-------------|
-| **AI** | 10 req/hora | Límite por IP para llamadas al proveedor de IA. Configurable vía `RATELIMIT_PROVIDER_AI_MAX` y `RATELIMIT_PROVIDER_AI_WINDOW_SEC`. Se aplica un bucket de tokens dedicado antes de cada llamada al intérprete |
+| **AI** | 10 req/hora | Límite por IP para llamadas al proveedor de IA. Configurable vía `RATELIMIT_PROVIDER_AI_MAX` y `RATELIMIT_PROVIDER_AI_WINDOW_SEC` |
 
-> El backend cachea los resultados de interpretación (blake3 hash, 10 min TTL) para reducir el consumo de créditos del proveedor de IA. Un mismo mensaje con el mismo historial no consume llamadas adicionales durante la ventana de caché.
+> El backend cachea resultados de interpretación (blake3 hash, 10 min TTL) para reducir el consumo de créditos del proveedor de IA.
 
 ### Cookie Anónima (`__Secure-anon_token`)
 
-Para búsquedas sin autenticación, el backend establece una cookie anónima para rate limiting:
+Para búsquedas sin autenticación, el backend establece una cookie anónima para rate limiting y tracking de conversaciones:
 
 ```
 Set-Cookie: __Secure-anon_token=019d5439-cb43-716d-90b5-51dcbe980908; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=315360000
@@ -955,12 +1022,12 @@ Set-Cookie: __Secure-anon_token=019d5439-cb43-716d-90b5-51dcbe980908; HttpOnly; 
 | Atributo | Valor | Propósito |
 |----------|-------|-----------|
 | Nombre | `__Secure-anon_token` | Identificador anónimo (UUID v7) |
-| TTL | 10 años (Max-Age=315360000) | Persiste entre sesiones — permite rate limiting consistente en usuarios no autenticados |
+| TTL | 10 años (Max-Age=315360000) | Persiste entre sesiones |
 | `HttpOnly` | `true` | Inaccesible vía JavaScript |
 | `Secure` | `true` | Solo HTTPS en producción |
 | `SameSite` | `Lax` | Se envía en navegación top-level |
 
-> El frontend no necesita hacer nada con esta cookie. El navegador la envía automáticamente. Si la cookie no existe, el backend la establece en la primera respuesta.
+> El frontend no necesita hacer nada con esta cookie. El navegador la envía automáticamente. El backend la usa para identificar conversaciones anónimas en `GET /conversations` y `DELETE /conversations/{id}`.
 
 ### Response on 429 (Rate Limit Exceeded)
 
@@ -979,34 +1046,29 @@ Formato **RFC 9457 Problem Details**:
 
 ### Rate Limit Headers
 
-Todas las respuestas incluyen estos headers (independientemente del status code):
-
 | Header | Descripción |
 |--------|-------------|
 | `RateLimit-Limit` | Máximo permitido en la ventana actual |
-| `RateLimit-Remaining` | Peticiones restantes en la ventana actual |
+| `RateLimit-Remaining` | Peticiones restantes |
 | `RateLimit-Reset` | Segundos hasta que se reinicia la ventana |
-| `Retry-After` | Segundos a esperar antes de reintentar (solo en respuestas 429) |
-| `X-Request-Id` | ID de request no-W3C para correlación de logs |
+| `Retry-After` | Segundos a esperar (solo en respuestas 429) |
 
 ---
 
 ## Cache
 
-El backend usa una estrategia de caché en dos niveles para el endpoint de AI search:
+El backend usa una estrategia de caché en dos niveles:
 
 ### Nivel 1: Caché de Interpretación (blake3)
 
-Las respuestas del intérprete de IA se cachean para reducir llamadas al proveedor externo.
-
 | Aspecto | Valor |
 |---------|-------|
-| TTL de caché | 10 minutos |
-| Backend de caché | DragonflyDB (Redis-compatible) |
+| TTL de caché | 10 minutos (configurable vía `AI_INTERPRETATION_CACHE_TTL`) |
+| Backend de caché | DragonflyDB |
 | Clave de caché | Hash blake3 de `(message + conversation_history)` |
 | Qué se cachea | Solo intents completos: `flights`, `hotels`, `both` |
-| Qué NO se cachea | Intents `incomplete` y `ambiguous` (necesitan preguntas frescas por contexto de conversación) |
-| Invalidación | Por TTL únicamente. No se invalida manualmente |
+| Qué NO se cachea | Intents `incomplete` y `ambiguous` (necesitan preguntas frescas por contexto) |
+| Invalidación | Por TTL únicamente |
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -1020,11 +1082,11 @@ Las respuestas del intérprete de IA se cachean para reducir llamadas al proveed
 └─────────────────────────────────────────────────────────┘
 ```
 
-> El campo `from_cache` en la respuesta indica si la **interpretación** vino de caché. No refleja si los resultados de búsqueda (vuelos/hoteles) estaban cacheados — esos tienen su propia estrategia de caché independiente (ver [Search Flights Cache](search_flights_api.md#cache) y [Search Hotels Cache](search_hotels_api.md#cache)).
+> El campo `from_cache` en la respuesta indica si la **interpretación** vino de caché. `cached_at` indica el timestamp de cacheo. No reflejan si los resultados de búsqueda (vuelos/hoteles) estaban cacheados — esos tienen su propia estrategia independiente.
 
 ### Nivel 2: Caché de Resultados de Búsqueda
 
-Cuando el intent es `flights`, `hotels`, o `both`, los buscadores de vuelos y hoteles aplican su propia estrategia de caché existente (blake3 sobre parámetros, 5 min TTL). Esta caché es idéntica a la de los endpoints directos `POST /v1/search/flights` y `POST /v1/search/hotels`.
+Cuando el intent es `flights`, `hotels`, o `both`, los buscadores aplican su propia estrategia de caché (blake3 sobre parámetros, 5 min TTL). Idéntica a la de los endpoints directos `POST /v1/search/flights` y `POST /v1/search/hotels`.
 
 ---
 
@@ -1035,53 +1097,36 @@ Cuando el intent es `flights`, `hotels`, o `both`, los buscadores de vuelos y ho
 | Aspecto | Anónimo | Autenticado |
 |---------|---------|-------------|
 | **Turnos máximos** | 5 | 10 |
-| **Persistencia de conversación** | Solo DragonflyDB (TTL 10 min) | DragonflyDB + PostgreSQL (historial) |
+| **Persistencia de conversación** | DragonflyDB (TTL 5 min) | DragonflyDB + PostgreSQL (historial) |
 | **Defaults de búsqueda** | Configuración del servidor (`DEFAULT_CURRENCY`, `DEFAULT_LANGUAGE`, `DEFAULT_COUNTRY_CODE`) | Perfil del usuario (`gl`, `hl`, `currency`) |
-| **Rate limiting de búsqueda** | 5 req/min por cookie anónima | 10 req/min por UUID |
-| **Resolución de ubicación** | IP del request → `GET /v1/environment` | Perfil del usuario (con fallback a IP) |
+| **Rate limiting de búsqueda** | 5 req/min por cookie `__Secure-anon_token` | 10 req/min por UUID |
+| **Resolución de ubicación** | IP del request → caché `env:{ip}` en DragonflyDB | Misma resolución por IP (ya no se lee `country_code` del perfil) |
+| **Contexto médico** | No disponible | Inyectado en system prompt de la AI |
 
 ### Resolución de Defaults (GL/HL/Currency)
 
-El backend usa una cadena de prioridad de 4 niveles para resolver los parámetros `gl`, `hl` y `currency` que se pasan a los buscadores de vuelos/hoteles:
+Cadena de prioridad para resolver `gl`, `hl` y `currency`:
 
 ```
-Tier 1: Parámetros explícitos del cliente  → AI Search no expone estos (no aplica)
-Tier 2: Preferencias del perfil (PG)       → Solo si el usuario está autenticado
-Tier 3: Caché de entorno (DragonflyDB)     → Detectado por IP en /v1/environment
-Tier 4: Configuración por defecto (.env)   → DEFAULT_CURRENCY, DEFAULT_LANGUAGE, DEFAULT_COUNTRY_CODE
+Tier 1: Preferencias del perfil (DragonflyDB) → Solo si el usuario está autenticado
+Tier 2: Configuración por defecto (.env)      → DEFAULT_CURRENCY, DEFAULT_LANGUAGE
 ```
+
+> La ubicación (`lat`, `lng`, `timezone`, `country_code`) se resuelve automáticamente desde la IP del cliente vía `env:{ip}` en DragonflyDB. Ya no se leen del perfil del usuario ni del body del request.
 
 ### Variables de Entorno Requeridas
 
-Para que el endpoint `POST /v1/search/ai` funcione, el servicio de IA debe estar configurado:
-
 | Variable | Descripción | Ejemplo |
 |----------|-------------|---------|
-| `AI_PROVIDER` | Proveedor de IA: `deepseek`, `ollama`, `openai` | `deepseek` |
-| `AI_SEARCH_BASE_URL` | URL base del API de IA para search (sin `/v1`, termina en `/chat/completions`) | `https://api.deepseek.com/chat/completions` |
-| `AI_SEARCH_MODEL` | Nombre del modelo para search AI | `deepseek-v4-flash` |
-| `AI_API_KEY` | API key del proveedor (omitir para ollama local) | `sk-xxxxxxxx` |
-| `AI_TIMEOUT` | Timeout para requests de IA (formato Go duration) | `30s` |
+| `AI_SEARCH_PROVIDER` | Proveedor de IA: `deepseek`, `ollama`, `openai` | `deepseek` |
+| `AI_SEARCH_BASE_URL` | URL base del API de IA | `https://api.deepseek.com/chat/completions` |
+| `AI_SEARCH_MODEL` | Nombre del modelo | `deepseek-v4-flash` |
+| `AI_SEARCH_API_KEY` | API key del proveedor (omitir para ollama local) | `sk-xxxxxxxx` |
+| `AI_SEARCH_TIMEOUT` | Timeout para requests de IA | `30s` |
 | `RATELIMIT_PROVIDER_AI_MAX` | Máximo de requests al proveedor de IA por ventana | `10` |
 | `RATELIMIT_PROVIDER_AI_WINDOW_SEC` | Ventana de rate limiting en segundos | `3600` |
 
-> Si `AI_PROVIDER` no está configurado o el usecase es `nil`, el endpoint devuelve **503 AI_UNAVAILABLE** con el mensaje: *"AI search no disponible — el servicio de IA no está configurado en este entorno"*.
-
-### Comportamiento sin AI Configurada
-
-```
-POST /v1/search/ai
-  → 503 Service Unavailable
-
-{
-  "type": "https://api.proactrip.com/errors/service-unavailable",
-  "title": "Service Unavailable",
-  "status": 503,
-  "detail": "AI search no disponible — el servicio de IA no está configurado en este entorno",
-  "instance": "/v1/search/ai",
-  "trace_id": "019d5439-cb43-716d-90b5-51dcbe980908"
-}
-```
+> Si el proveedor de IA no está configurado, el endpoint devuelve **503 AI_UNAVAILABLE**: *"AI search no disponible — el servicio de IA no está configurado en este entorno"*.
 
 ---
 
@@ -1115,8 +1160,6 @@ Strict-Transport-Security: max-age=31536000
 
 ### Tokens PASETO v4
 
-Todos los tokens internos son **PASETO v4 symmetric**. Son opacos para el cliente.
-
 | Token | TTL | Propósito |
 |-------|-----|-----------|
 | `access_token` (cookie `__Secure-access_token`) | 15 min | Autenticar requests |
@@ -1124,13 +1167,13 @@ Todos los tokens internos son **PASETO v4 symmetric**. Son opacos para el client
 
 ### Rotación de Refresh Tokens
 
-Cada vez que el backend refresca un `__Secure-access_token`, rota también el `__Secure-refresh_token` (token rotation). Si un `__Secure-refresh_token` revocado es reutilizado, **todas las sesiones del usuario se invalidan** automáticamente (detección de robo).
+Cada vez que el backend refresca un `__Secure-access_token`, rota también el `__Secure-refresh_token`. Si un refresh token revocado es reutilizado, **todas las sesiones del usuario se invalidan** (detección de robo).
 
 ### Comportamiento de Tokens en AI Search
 
 - El endpoint **no requiere autenticación**. Funciona con o sin cookies.
-- Si las cookies están presentes y son válidas, el backend personaliza resultados con las preferencias del usuario y aumenta el límite de turnos a 10.
-- Si las cookies expiraron, el backend intenta refrescarlas transparentemente. Si el refresh también falló, el request continúa sin autenticación (5 turnos).
+- Si las cookies están presentes, el backend personaliza resultados con preferencias del usuario y aumenta el límite de turnos a 10.
+- Si las cookies expiraron, el backend intenta refrescarlas transparentemente. Si el refresh falla, el request continúa sin autenticación (5 turnos).
 - El `conversation_id` **no** es un token de autenticación. Es un UUID v7 que identifica la conversación multi-turno.
 
 ### Prevención de Ataques
@@ -1141,10 +1184,10 @@ Cada vez que el backend refresca un `__Secure-access_token`, rota también el `_
 | CSRF | `SameSite=Lax` + cookies automáticas (sin `Authorization` manual) |
 | Token Exposure | Cookies HttpOnly — JavaScript no puede leerlas |
 | Replay de refresh | Rotación continua + invalidación total ante reúso |
-| Third-party cookies | No se usa Partitioned (CHIPS) — SameSite=Lax + Domain=.proactrip.com es suficiente para subdominios |
-| Rate limiting abuse | Multi-tier con DragonflyDB + Lua scripts atómicos (IP, usuario autenticado, cookie anónima) + provider bucket para AI |
+| Third-party cookies | No se usa Partitioned (CHIPS) — SameSite=Lax + Domain es suficiente |
+| Rate limiting abuse | Multi-tier con DragonflyDB + Lua scripts atómicos |
 | Cache poisoning | Clave de caché basada en blake3 hash de parámetros validados |
-| Prompt injection | La AI opera en modo restringido con system prompt fijo. Solo extrae parámetros de viaje, nunca ejecuta código ni modifica el sistema |
+| Prompt injection | La AI opera en modo restringido con system prompt fijo. Solo extrae parámetros de viaje |
 
 ---
 

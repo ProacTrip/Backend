@@ -120,17 +120,34 @@ func NewTripDeletedEvent(tripID, userID string) Event {
 	}
 }
 
-// NewSessionInvalidatedEvent crea un evento session.invalidated cuando un admin
-// deshabilita la cuenta de un usuario. El session manager lo consume para
-// invalidar todas las sesiones activas del usuario afectado.
-func NewSessionInvalidatedEvent(userID, invalidatedBy string) Event {
+// NewAccountDisabledEvent crea un evento account_disabled cuando un admin
+// deshabilita la cuenta de un usuario. El notification consumer lo consume
+// para enviar el email de cuenta deshabilitada.
+func NewAccountDisabledEvent(userID, email, disabledBy string) Event {
 	return Event{
-		EventType:   SessionInvalidated,
+		EventType:   AccountDisabled,
 		AggregateID: userID,
 		Timestamp:   time.Now().UnixMilli(),
 		Payload: map[string]interface{}{
-			"user_id":        userID,
-			"invalidated_by": invalidatedBy,
+			"user_id":     userID,
+			"email":       email,
+			"disabled_by": disabledBy,
+		},
+	}
+}
+
+// NewAccountEnabledEvent crea un evento account_enabled cuando un admin
+// habilita la cuenta de un usuario. El notification consumer lo consume
+// para enviar el email de cuenta habilitada.
+func NewAccountEnabledEvent(userID, email, enabledBy string) Event {
+	return Event{
+		EventType:   AccountEnabled,
+		AggregateID: userID,
+		Timestamp:   time.Now().UnixMilli(),
+		Payload: map[string]interface{}{
+			"user_id":    userID,
+			"email":      email,
+			"enabled_by": enabledBy,
 		},
 	}
 }

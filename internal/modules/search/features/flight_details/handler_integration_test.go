@@ -135,7 +135,6 @@ func TestHandlerIntegration_FlightDetails_AuthenticatedUser_UsesProfilePrefs(t *
 		UserID:    userID,
 		Email:     "brazilian@example.com",
 		RoleID:    uuid.Nil,
-		SessionID: uuid.Nil,
 		JTI:       uuid.Nil,
 	})
 

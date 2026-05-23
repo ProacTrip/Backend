@@ -161,7 +161,7 @@ func TestUseCase_Execute_Success(t *testing.T) {
 func TestUseCase_EmailAlreadyExists(t *testing.T) {
 	repo := newMockUserRepo()
 	// Pre-populate the user
-	existingUser := domain.NewUser("exists@example.com", "hashed", uuid.Must(uuid.NewV7()))
+	existingUser := domain.NewUser("exists@example.com", "hashed", "Existing", uuid.Must(uuid.NewV7()))
 	repo.users["exists@example.com"] = existingUser
 
 	uc := NewUseCase(UseCaseDeps{

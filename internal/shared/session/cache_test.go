@@ -113,58 +113,46 @@ func TestInvalidateSessionIdempotent(t *testing.T) {
 	}
 }
 
-func TestInvalidateAllUserSessions(t *testing.T) {
+func TestInvalidateSession_ByUserID(t *testing.T) {
 	rdb, _ := setupSessionTest(t)
 	ctx := t.Context()
 
 	userA := "user-a-123"
 	userB := "user-b-456"
 
-	// Create sessions for user A (should be deleted)
-	for i := range 3 {
-		sid := "sid-a-" + string(rune('A'+i))
-		data := &SessionData{UserID: userA, Status: "active", TokenVersion: "1"}
-		if err := SetSession(ctx, rdb, sid, data, SessionTTL); err != nil {
-			t.Fatalf("SetSession %s: %v", sid, err)
-		}
+	// Create session for user A (should be deleted)
+	data := &SessionData{UserID: userA, Status: "active", TokenVersion: "1"}
+	if err := SetSession(ctx, rdb, userA, data, SessionTTL); err != nil {
+		t.Fatalf("SetSession userA: %v", err)
 	}
 
-	// Create sessions for user B (should survive)
-	for i := range 2 {
-		sid := "sid-b-" + string(rune('A'+i))
-		data := &SessionData{UserID: userB, Status: "active", TokenVersion: "1"}
-		if err := SetSession(ctx, rdb, sid, data, SessionTTL); err != nil {
-			t.Fatalf("SetSession %s: %v", sid, err)
-		}
+	// Create session for user B (should survive)
+	dataB := &SessionData{UserID: userB, Status: "active", TokenVersion: "1"}
+	if err := SetSession(ctx, rdb, userB, dataB, SessionTTL); err != nil {
+		t.Fatalf("SetSession userB: %v", err)
 	}
 
-	// Invalidate only user A
-	if err := InvalidateAllUserSessions(ctx, rdb, userA); err != nil {
-		t.Fatalf("InvalidateAllUserSessions: %v", err)
+	// Invalidate only user A (single-key delete)
+	if err := InvalidateSession(ctx, rdb, userA); err != nil {
+		t.Fatalf("InvalidateSession: %v", err)
 	}
 
-	// Verify user A sessions deleted
-	for i := range 3 {
-		sid := "sid-a-" + string(rune('A'+i))
-		got, err := GetSession(ctx, rdb, sid)
-		if err != nil {
-			t.Fatalf("GetSession %s: %v", sid, err)
-		}
-		if got != nil {
-			t.Errorf("expected nil after InvalidateAll for user A, got %+v", got)
-		}
+	// Verify user A session deleted
+	gotA, err := GetSession(ctx, rdb, userA)
+	if err != nil {
+		t.Fatalf("GetSession userA: %v", err)
+	}
+	if gotA != nil {
+		t.Errorf("expected nil after InvalidateSession for user A, got %+v", gotA)
 	}
 
-	// Verify user B sessions intact
-	for i := range 2 {
-		sid := "sid-b-" + string(rune('A'+i))
-		got, err := GetSession(ctx, rdb, sid)
-		if err != nil {
-			t.Fatalf("GetSession %s: %v", sid, err)
-		}
-		if got == nil {
-			t.Errorf("user B session %s should NOT have been deleted", sid)
-		}
+	// Verify user B session intact
+	gotB, err := GetSession(ctx, rdb, userB)
+	if err != nil {
+		t.Fatalf("GetSession userB: %v", err)
+	}
+	if gotB == nil {
+		t.Errorf("user B session should NOT have been deleted")
 	}
 }
 

@@ -109,64 +109,6 @@ func TestHandler_ClearsProdCookies_InProductionMode(t *testing.T) {
 	}
 }
 
-func TestHandler_HandleAll_ClearsDevCookies_InDevMode(t *testing.T) {
-	e := echo.New()
-
-	uc := NewUseCase(UseCaseDeps{
-		TokenSvc:    &mockTokenSvc{},
-		DragonflyDB: nil,
-	})
-
-	h := NewHandler(uc, false, "")
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/auth/logout/all", nil)
-	req.AddCookie(&http.Cookie{Name: "access_token", Value: "dev-access-token"})
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	err := h.HandleAll(c)
-	if err != nil {
-		t.Fatalf("HandleAll() unexpected error: %v", err)
-	}
-
-	setCookies := rec.Header()["Set-Cookie"]
-	if !hasCookieClear(setCookies, "access_token") {
-		t.Errorf("expected Set-Cookie to clear 'access_token', got headers: %v", setCookies)
-	}
-	if !hasCookieClear(setCookies, "refresh_token") {
-		t.Errorf("expected Set-Cookie to clear 'refresh_token', got headers: %v", setCookies)
-	}
-}
-
-func TestHandler_HandleAll_ClearsProdCookies_InProductionMode(t *testing.T) {
-	e := echo.New()
-
-	uc := NewUseCase(UseCaseDeps{
-		TokenSvc:    &mockTokenSvc{},
-		DragonflyDB: nil,
-	})
-
-	h := NewHandler(uc, true, ".proactrip.com")
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/auth/logout/all", nil)
-	req.AddCookie(&http.Cookie{Name: "__Secure-access_token", Value: "prod-access-token"})
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	err := h.HandleAll(c)
-	if err != nil {
-		t.Fatalf("HandleAll() unexpected error: %v", err)
-	}
-
-	setCookies := rec.Header()["Set-Cookie"]
-	if !hasCookieClear(setCookies, "__Secure-access_token") {
-		t.Errorf("expected Set-Cookie to clear '__Secure-access_token', got headers: %v", setCookies)
-	}
-	if !hasCookieClear(setCookies, "__Secure-refresh_token") {
-		t.Errorf("expected Set-Cookie to clear '__Secure-refresh_token', got headers: %v", setCookies)
-	}
-}
-
 // =============================================================================
 // Helpers
 // =============================================================================

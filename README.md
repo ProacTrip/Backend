@@ -194,7 +194,6 @@ All errors follow **RFC 9457 Problem JSON** format with `type`, `title`, `status
 | POST   | `/v1/auth/verify-email`| No            | Global + Anon    |
 | POST   | `/v1/auth/login`       | No            | Global + Anon    |
 | POST   | `/v1/auth/logout`      | PASETO        | Auth (10 req/min)|
-| POST   | `/v1/auth/logout/all`  | PASETO        | Auth (10 req/min)|
 
 ### Search Endpoints
 

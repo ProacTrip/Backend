@@ -97,7 +97,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 	}
 
 	// 4. Crear usuario en DB
-	user := domain.NewUser(cmd.Email, passwordHash, role.ID)
+	user := domain.NewUser(cmd.Email, passwordHash, cmd.FirstName, role.ID)
 	if err := uc.repo.Create(ctx, user); err != nil {
 		return nil, err
 	}

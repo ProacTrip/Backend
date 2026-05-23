@@ -35,7 +35,7 @@ func (m *testUMPEventPub) Publish(ctx context.Context, stream string, payload ma
 
 func TestUpdateMedicalProfileHandler_Handle(t *testing.T) {
 	uid := uuid.Must(uuid.NewV7())
-	tc := &sharedauth.AccessClaims{UserID: uid, Email: "t@t.com", RoleID: uuid.Must(uuid.NewV7()), Role: "client", SessionID: uuid.Must(uuid.NewV7()), JTI: uuid.Must(uuid.NewV7())}
+	tc := &sharedauth.AccessClaims{UserID: uid, Email: "t@t.com", RoleID: uuid.Must(uuid.NewV7()), Role: "client", JTI: uuid.Must(uuid.NewV7())}
 	tests := []struct {
 		name string; claims *sharedauth.AccessClaims; body string; mp *testUMPMedicalRepo; enc *testUMPEncryption; ep *testUMPEventPub; wantStatus int
 	}{

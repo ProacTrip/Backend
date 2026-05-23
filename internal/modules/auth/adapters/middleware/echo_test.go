@@ -63,21 +63,19 @@ func (m *mockTokenSvc) ValidateAndRotateRefreshWithVersion(ctx context.Context, 
 
 var (
 	testAccessClaims = &token.AccessClaims{
-		UserID:    uuid.MustParse("11111111-1111-1111-1111-111111111111"),
-		Email:     "test@proactrip.com",
-		RoleID:    uuid.MustParse("22222222-2222-2222-2222-222222222222"),
-		Role:      "client",
-		SessionID: uuid.MustParse("33333333-3333-3333-3333-333333333333"),
-		JTI:       uuid.MustParse("44444444-4444-4444-4444-444444444444"),
+		UserID: uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+		Email:  "test@proactrip.com",
+		RoleID: uuid.MustParse("22222222-2222-2222-2222-222222222222"),
+		Role:   "client",
+		JTI:    uuid.MustParse("44444444-4444-4444-4444-444444444444"),
 	}
 
 	testRefreshClaims = &token.RefreshClaims{
-		UserID:    uuid.MustParse("11111111-1111-1111-1111-111111111111"),
-		Email:     "test@proactrip.com",
-		RoleID:    uuid.MustParse("22222222-2222-2222-2222-222222222222"),
-		Role:      "client",
-		SessionID: uuid.MustParse("33333333-3333-3333-3333-333333333333"),
-		JTI:       uuid.MustParse("55555555-5555-5555-5555-555555555555"),
+		UserID: uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+		Email:  "test@proactrip.com",
+		RoleID: uuid.MustParse("22222222-2222-2222-2222-222222222222"),
+		Role:   "client",
+		JTI:    uuid.MustParse("55555555-5555-5555-5555-555555555555"),
 	}
 )
 
@@ -219,7 +217,10 @@ func TestHandle(t *testing.T) {
 				return c.String(http.StatusOK, "ok")
 			})
 
-			_ = handler(c)
+			err := handler(c)
+			if err != nil {
+				c.Echo().HTTPErrorHandler(c, err)
+			}
 
 			// Verificar nextCalled
 			if nextCalled != tt.wantNext {
@@ -572,7 +573,10 @@ func TestHandle_RefreshRevocado(t *testing.T) {
 		return c.String(http.StatusOK, "ok")
 	})
 
-	_ = handler(c)
+	err := handler(c)
+	if err != nil {
+		c.Echo().HTTPErrorHandler(c, err)
+	}
 
 	if nextCalled {
 		t.Error("nextCalled = true, esperaba false (no debe llamar a next si el token está revocado)")
@@ -684,7 +688,6 @@ func TestHandle_ObserveMode_DisabledUser_PassesThrough(t *testing.T) {
 				Email:        "disabled@test.com",
 				RoleID:       uuid.MustParse("22222222-2222-2222-2222-222222222222"),
 				Role:         "client",
-				SessionID:    uuid.MustParse("33333333-3333-3333-3333-333333333333"),
 				JTI:          uuid.MustParse("44444444-4444-4444-4444-444444444444"),
 				TokenVersion: 1,
 			}, nil
@@ -747,7 +750,6 @@ func TestHandle_EnforceMode_DisabledUser_Returns403(t *testing.T) {
 				Email:        "disabled@test.com",
 				RoleID:       uuid.MustParse("22222222-2222-2222-2222-222222222222"),
 				Role:         "client",
-				SessionID:    uuid.MustParse("33333333-3333-3333-3333-333333333333"),
 				JTI:          uuid.MustParse("44444444-4444-4444-4444-444444444444"),
 				TokenVersion: 1,
 			}, nil
@@ -766,7 +768,10 @@ func TestHandle_EnforceMode_DisabledUser_Returns403(t *testing.T) {
 		return c.String(http.StatusOK, "ok")
 	})
 
-	_ = handler(c)
+	err := handler(c)
+	if err != nil {
+		c.Echo().HTTPErrorHandler(c, err)
+	}
 
 	if nextCalled {
 		t.Error("enforce mode: se esperaba nextCalled=false, disabled user debe ser bloqueado")
@@ -791,7 +796,6 @@ func TestHandle_ObserveMode_JTIBlacklisted_PassesThrough(t *testing.T) {
 	defer rdb.Close()
 
 	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
-	sessionID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
 	jti := uuid.MustParse("44444444-4444-4444-4444-444444444444")
 
 	// Blacklistear el JTI en Dragonfly
@@ -799,7 +803,7 @@ func TestHandle_ObserveMode_JTIBlacklisted_PassesThrough(t *testing.T) {
 	mr.Set(jtiKey, "1")
 
 	// Poblar cache de sesión para que el pipeline tenga datos
-	sessionKey := "{auth}:session:" + sessionID.String()
+	sessionKey := "{auth}:session:" + userID.String()
 	mr.HSet(sessionKey,
 		"permissions", "users:read,users:write",
 		"status", "active",
@@ -817,7 +821,6 @@ func TestHandle_ObserveMode_JTIBlacklisted_PassesThrough(t *testing.T) {
 				Email:        "test@proactrip.com",
 				RoleID:       uuid.MustParse("22222222-2222-2222-2222-222222222222"),
 				Role:         "client",
-				SessionID:    sessionID,
 				JTI:          jti,
 				TokenVersion: 1,
 			}, nil
@@ -877,7 +880,6 @@ func TestHandle_EnforceMode_JTIBlacklisted_Returns401(t *testing.T) {
 				Email:        "test@proactrip.com",
 				RoleID:       uuid.MustParse("22222222-2222-2222-2222-222222222222"),
 				Role:         "client",
-				SessionID:    uuid.MustParse("33333333-3333-3333-3333-333333333333"),
 				JTI:          jti,
 				TokenVersion: 1,
 			}, nil
@@ -902,7 +904,10 @@ func TestHandle_EnforceMode_JTIBlacklisted_Returns401(t *testing.T) {
 		return c.String(http.StatusOK, "ok")
 	})
 
-	_ = handler(c)
+	err := handler(c)
+	if err != nil {
+		c.Echo().HTTPErrorHandler(c, err)
+	}
 
 	if nextCalled {
 		t.Error("enforce mode: JTI blacklisteado debe ser bloqueado")
@@ -943,7 +948,6 @@ func TestHandle_RefreshRotation_DisabledUser_Rejected(t *testing.T) {
 				Email:     "disabled@test.com",
 				RoleID:    uuid.MustParse("22222222-2222-2222-2222-222222222222"),
 				Role:      "client",
-				SessionID: uuid.MustParse("33333333-3333-3333-3333-333333333333"),
 				JTI:       uuid.MustParse("55555555-5555-5555-5555-555555555555"),
 			}, nil
 		},
@@ -961,7 +965,10 @@ func TestHandle_RefreshRotation_DisabledUser_Rejected(t *testing.T) {
 		return c.String(http.StatusOK, "ok")
 	})
 
-	_ = handler(c)
+	err := handler(c)
+	if err != nil {
+		c.Echo().HTTPErrorHandler(c, err)
+	}
 
 	if nextCalled {
 		t.Error("rotación con usuario disabled: se esperaba nextCalled=false")
@@ -998,7 +1005,6 @@ func TestHandle_ObserveMode_SuspendedUser_PassesThrough(t *testing.T) {
 				Email:        "suspended@test.com",
 				RoleID:       uuid.MustParse("22222222-2222-2222-2222-222222222222"),
 				Role:         "client",
-				SessionID:    uuid.MustParse("33333333-3333-3333-3333-333333333333"),
 				JTI:          uuid.MustParse("44444444-4444-4444-4444-444444444444"),
 				TokenVersion: 1,
 			}, nil
@@ -1037,14 +1043,13 @@ func TestHandle_ObserveMode_TokenVersionMismatch_PassesThrough(t *testing.T) {
 	defer os.Unsetenv("AUTHZ_ENFORCE_MODE")
 
 	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
-	sessionID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
 
 	// Usar miniredis para cache de sesión (con token_version=5)
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	defer rdb.Close()
 
-	sessionKey := "{auth}:session:" + sessionID.String()
+	sessionKey := "{auth}:session:" + userID.String()
 	mr.HSet(sessionKey,
 		"permissions", "users:read",
 		"status", "active",
@@ -1058,7 +1063,6 @@ func TestHandle_ObserveMode_TokenVersionMismatch_PassesThrough(t *testing.T) {
 				Email:        "test@proactrip.com",
 				RoleID:       uuid.MustParse("22222222-2222-2222-2222-222222222222"),
 				Role:         "client",
-				SessionID:    sessionID,
 				JTI:          uuid.MustParse("44444444-4444-4444-4444-444444444444"),
 				TokenVersion: 1, // Token tiene versión 1, cache tiene 5 → mismatch
 			}, nil

@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/ProacTrip/Backend/internal/modules/notification/features/send_account_status_email"
 	"github.com/ProacTrip/Backend/internal/modules/notification/features/send_verification_email"
 	"github.com/ProacTrip/Backend/internal/shared/eventbus"
 )
@@ -26,25 +27,27 @@ import (
 // NotificationConsumer consume eventos del stream de notificaciones
 // y los despacha al caso de uso correspondiente.
 type NotificationConsumer struct {
-	rdb        *redis.Client
-	usecase    *send_verification_email.UseCase
-	group      string
-	consumer   string
-	streamName string
-	running    atomic.Bool // true mientras el loop principal de consumo está vivo
+	rdb             *redis.Client
+	usecase         *send_verification_email.UseCase
+	accountStatusUC *send_account_status_email.UseCase
+	group           string
+	consumer        string
+	streamName      string
+	running         atomic.Bool // true mientras el loop principal de consumo está vivo
 }
 
 // =============================================================================
 // Constructor
 // =============================================================================
 
-func NewNotificationConsumer(rdb *redis.Client, uc *send_verification_email.UseCase) *NotificationConsumer {
+func NewNotificationConsumer(rdb *redis.Client, uc *send_verification_email.UseCase, accountStatusUC *send_account_status_email.UseCase) *NotificationConsumer {
 	return &NotificationConsumer{
-		rdb:        rdb,
-		usecase:    uc,
-		group:      "notification-service",
-		consumer:   fmt.Sprintf("notification-worker-%d", time.Now().UnixMilli()),
-		streamName: eventbus.StreamName("auth.user.registered"),
+		rdb:             rdb,
+		usecase:         uc,
+		accountStatusUC: accountStatusUC,
+		group:           "notification-service",
+		consumer:        fmt.Sprintf("notification-worker-%d", time.Now().UnixMilli()),
+		streamName:      eventbus.StreamName("auth.user.registered"),
 	}
 }
 
@@ -168,6 +171,10 @@ func (c *NotificationConsumer) processMessage(ctx context.Context, msg redis.XMe
 	switch eventType {
 	case string(eventbus.UserRegistered):
 		handleErr = c.handleUserRegistered(ctx, msg.Values)
+	case string(eventbus.AccountDisabled):
+		handleErr = c.handleAccountDisabled(ctx, msg.Values)
+	case string(eventbus.AccountEnabled):
+		handleErr = c.handleAccountEnabled(ctx, msg.Values)
 	default:
 		slog.Warn("unknown event type", "type", eventType, "msg_id", msg.ID)
 		c.ackOrWarn(ctx, msg.ID)
@@ -261,7 +268,7 @@ func (c *NotificationConsumer) handleUserRegistered(ctx context.Context, payload
 		VerificationToken: verificationToken,
 		FirstName:         firstName,
 	}
-	if _, err := c.usecase.Execute(ctx, cmd); err != nil {
+	if err := c.usecase.Execute(ctx, cmd); err != nil {
 		slog.Error("failed to send verification email", "error", err, "user_id", userID)
 		// No hacer ACK — dejar en PEL para reintento con backoff.
 		return err
@@ -296,4 +303,82 @@ func (c *NotificationConsumer) rescueOrphans(ctx context.Context) {
 			c.processMessage(ctx, msg)
 		}
 	}
+}
+
+// =============================================================================
+// Handlers para eventos de cambio de estado de cuenta
+// =============================================================================
+
+// handleAccountDisabled procesa el evento account_disabled y envía el email
+// de cuenta deshabilitada via Resend template.
+// Los campos requeridos son user_id y email. Si falta email, retorna error (queda en PEL).
+func (c *NotificationConsumer) handleAccountDisabled(ctx context.Context, payload map[string]interface{}) error {
+	userIDStr, ok := payload["user_id"].(string)
+	if !ok {
+		slog.Warn("missing user_id in account_disabled payload, ACKing")
+		return nil // ACK — payload inválido, no reintentar.
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		slog.Warn("invalid user_id format in account_disabled, ACKing", "user_id", userIDStr)
+		return nil // ACK — UUID inválido, no reintentar.
+	}
+
+	email, ok := payload["email"].(string)
+	if !ok || email == "" {
+		slog.Error("missing email in account_disabled payload")
+		return fmt.Errorf("missing email")
+	}
+
+	cmd := send_account_status_email.Command{
+		UserID:     userID,
+		Email:      email,
+		TemplateID: send_account_status_email.TemplateAccountDisabled,
+	}
+
+	if err := c.accountStatusUC.Execute(ctx, cmd); err != nil {
+		slog.Error("failed to send account disabled email", "error", err, "user_id", userID)
+		return err
+	}
+
+	slog.Info("account disabled email sent", "user_id", userID, "email", email)
+	return nil
+}
+
+// handleAccountEnabled procesa el evento account_enabled y envía el email
+// de cuenta habilitada via Resend template.
+// Los campos requeridos son user_id y email. Si falta email, retorna error (queda en PEL).
+func (c *NotificationConsumer) handleAccountEnabled(ctx context.Context, payload map[string]interface{}) error {
+	userIDStr, ok := payload["user_id"].(string)
+	if !ok {
+		slog.Warn("missing user_id in account_enabled payload, ACKing")
+		return nil // ACK — payload inválido, no reintentar.
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		slog.Warn("invalid user_id format in account_enabled, ACKing", "user_id", userIDStr)
+		return nil // ACK — UUID inválido, no reintentar.
+	}
+
+	email, ok := payload["email"].(string)
+	if !ok || email == "" {
+		slog.Error("missing email in account_enabled payload")
+		return fmt.Errorf("missing email")
+	}
+
+	cmd := send_account_status_email.Command{
+		UserID:     userID,
+		Email:      email,
+		TemplateID: send_account_status_email.TemplateAccountEnabled,
+	}
+
+	if err := c.accountStatusUC.Execute(ctx, cmd); err != nil {
+		slog.Error("failed to send account enabled email", "error", err, "user_id", userID)
+		return err
+	}
+
+	slog.Info("account enabled email sent", "user_id", userID, "email", email)
+	return nil
 }

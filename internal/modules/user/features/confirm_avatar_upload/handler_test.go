@@ -24,12 +24,12 @@ func (m *testConfirmEventPub) Publish(ctx context.Context, stream string, payloa
 
 func TestConfirmAvatarUploadHandler_Handle(t *testing.T) {
 	uid := uuid.Must(uuid.NewV7())
-	tc := &sharedauth.AccessClaims{UserID: uid, Email: "t@t.com", RoleID: uuid.Must(uuid.NewV7()), Role: "client", SessionID: uuid.Must(uuid.NewV7()), JTI: uuid.Must(uuid.NewV7())}
+	tc := &sharedauth.AccessClaims{UserID: uid, Email: "t@t.com", RoleID: uuid.Must(uuid.NewV7()), Role: "client", JTI: uuid.Must(uuid.NewV7())}
 	tests := []struct {
 		name string; claims *sharedauth.AccessClaims; body string; storage *testConfirmStorage; ep *testConfirmEventPub; wantStatus int
 	}{
 		{"debe retornar 202 con confirmacion aceptada", tc, `{"storage_key":"`+uuid.Must(uuid.NewV7()).String()+`"}`, &testConfirmStorage{}, &testConfirmEventPub{}, http.StatusAccepted},
-		{"debe retornar error cuando no hay claims", nil, `{"storage_key":"test"}`, &testConfirmStorage{}, &testConfirmEventPub{}, http.StatusInternalServerError},
+		{"debe retornar error cuando no hay claims", nil, `{"storage_key":"test"}`, &testConfirmStorage{}, &testConfirmEventPub{}, http.StatusUnauthorized},
 		{"debe retornar error cuando storage_key vacio", tc, `{}`, &testConfirmStorage{}, &testConfirmEventPub{}, http.StatusInternalServerError},
 	}
 	for _, tt := range tests {

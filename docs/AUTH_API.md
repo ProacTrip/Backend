@@ -16,7 +16,6 @@
 | [Verify Email](#verify-email) | ✅ Implementado |
 | [Login](#login) | ✅ Implementado |
 | [Logout](#logout) | ✅ Implementado |
-| [Logout All Sessions](#logout-all-sessions) | ✅ Implementado |
 | [OAuth Google](#oauth-google) | ✅ Implementado |
 | [OAuth Google Callback](#oauth-google-callback) | ✅ Implementado |
 ---
@@ -472,50 +471,6 @@ Clear-Site-Data: "cookies"
 
 ---
 
-## Logout All Sessions
-
-Revoca **todas** las sesiones activas del usuario en todos los dispositivos. El backend lee la cookie automáticamente.
-
-### Request
-
-```
-POST /v1/auth/logout/all
-```
-
-**Ejemplo:**
-
-```bash
-curl -X POST {base_url}/logout/all \
-  -c cookies.txt -b cookies.txt
-```
-
-### Responses
-
-#### 200 OK
-
-```json
-{
-  "message": "Todas las sesiones fueron revocadas."
-}
-```
-
-**Headers de limpieza:**
-
-```
-Set-Cookie: __Secure-access_token=; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=0
-Set-Cookie: __Secure-refresh_token=; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.proactrip.com; Max-Age=0
-Clear-Site-Data: "cookies"
-```
-
-#### Posibles Errores
-
-| Código | HTTP | Problem Type | Cuándo |
-|--------|------|-------------|--------|
-| `ErrNotAuthenticated` | 401 | `unauthorized` | No hay cookie de sesión (rechazado por middleware de auth) |
-| `ErrTokenInvalid` | 401 | `unauthorized` | Token inválido o expirado (rechazado por middleware de auth) |
-
----
-
 ## OAuth Google
 
 Inicia el flujo de autenticación OAuth con Google. El frontend llama a este endpoint, obtiene la `auth_url` y redirige al usuario.
@@ -764,7 +719,6 @@ Esto previene almacenamiento en caches compartidos o del navegador.
 | `POST /v1/auth/verify-email` | `no-store, private` | Datos de usuario + emisión de sesión |
 | `POST /v1/auth/login` | `no-store, private` | Datos de sesión sensibles |
 | `POST /v1/auth/logout` | `no-store, private` | Invalidación de sesión |
-| `POST /v1/auth/logout/all` | `no-store, private` | Invalidación masiva de sesiones |
 | `GET /v1/auth/oauth/:provider` | `no-store` | State anti-CSRF one-time — nunca cachear |
 
 ---
@@ -789,7 +743,7 @@ Todos los tokens internos son **PASETO v4 symmetric**. Son opacos para el client
 
 ### Rotación de Refresh Tokens
 
-Cada vez que el middleware refresca un `access_token`, rota también el `refresh_token`. Si un `refresh_token` revocado es reutilizado, **todas las sesiones del usuario se invalidan** automáticamente (detección de robo de sesión).
+Cada vez que el middleware refresca un `access_token`, rota también el `refresh_token`. Si un `refresh_token` revocado es reutilizado, se invalida la sesión del usuario (detección de robo de sesión).
 
 ### Flujo de Eventos y Preferencias
 

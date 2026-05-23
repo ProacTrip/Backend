@@ -20,6 +20,7 @@ import (
 
 	"github.com/ProacTrip/Backend/internal/config"
 	"github.com/ProacTrip/Backend/internal/modules/notification/domain"
+	"github.com/ProacTrip/Backend/internal/modules/notification/features/send_account_status_email"
 	"github.com/ProacTrip/Backend/internal/modules/notification/features/send_verification_email"
 	"github.com/ProacTrip/Backend/internal/shared/eventbus"
 )
@@ -55,16 +56,7 @@ func (m *mockNotificationRepo) Save(_ context.Context, _ *domain.Notification) (
 func (m *mockNotificationRepo) GetByID(_ context.Context, _ uuid.UUID) (*domain.Notification, error) {
 	return nil, nil
 }
-func (m *mockNotificationRepo) MarkSent(_ context.Context, _ uuid.UUID, _ string) error { return nil }
-func (m *mockNotificationRepo) MarkFailed(_ context.Context, _ uuid.UUID, _ string) error {
-	return nil
-}
-func (m *mockNotificationRepo) MarkDelivered(_ context.Context, _ uuid.UUID, _ time.Time) error {
-	return nil
-}
-func (m *mockNotificationRepo) UpdateFromWebhook(_ context.Context, _ string, _ domain.NotificationStatus, _ time.Time) error {
-	return nil
-}
+func (m *mockNotificationRepo) MarkSent(_ context.Context, _ uuid.UUID) error { return nil }
 
 // =============================================================================
 // Helpers
@@ -292,7 +284,7 @@ func TestNewNotificationConsumer_NoNil(t *testing.T) {
 	mr := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 
-	nc := NewNotificationConsumer(client, nil)
+	nc := NewNotificationConsumer(client, nil, nil)
 	if nc == nil {
 		t.Fatal("NewNotificationConsumer retornó nil")
 	}
@@ -494,5 +486,430 @@ func TestStart_Lifecycle(t *testing.T) {
 
 	if nc.IsRunning() {
 		t.Error("IsRunning debería ser false después de cancelar el contexto")
+	}
+}
+
+// =============================================================================
+// Account Status UseCase mock para tests de dispatch
+// =============================================================================
+
+// mockAccountStatusSender implementa send_account_status_email.EmailSender para tests.
+type mockAccountStatusSender struct {
+	called     bool
+	to         string
+	templateID string
+	vars       map[string]any
+	shouldErr  error
+}
+
+func (m *mockAccountStatusSender) SendWithTemplate(_ context.Context, to, templateID string, vars map[string]any) (string, error) {
+	m.called = true
+	m.to = to
+	m.templateID = templateID
+	m.vars = vars
+	if m.shouldErr != nil {
+		return "", m.shouldErr
+	}
+	return "msg_acc_status_stub_001", nil
+}
+
+// newTestConsumerWithAccountStatus crea un NotificationConsumer con ambos usecases
+// respaldados por mocks (mockEmailSender para verification, mockAccountStatusSender para account status).
+func newTestConsumerWithAccountStatus(t *testing.T) (*NotificationConsumer, *mockAccountStatusSender, *mockEmailSender, *miniredis.Miniredis) {
+	t.Helper()
+
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+
+	_ = eventbus.EnsureConsumerGroup(t.Context(), client,
+		eventbus.StreamName("auth.user.registered"),
+		"notification-service",
+	)
+
+	accSender := &mockAccountStatusSender{}
+	verifSender := &mockEmailSender{}
+	repo := &mockNotificationRepo{}
+
+	accUC := send_account_status_email.NewUseCase(send_account_status_email.Deps{
+		Repo:   repo,
+		Sender: accSender,
+	})
+	verifUC := send_verification_email.NewUseCase(send_verification_email.Deps{
+		Repo:           repo,
+		Sender:         verifSender,
+		FrontendConfig: config.FrontendConfig{DevURL: "http://localhost:3000"},
+	})
+
+	nc := &NotificationConsumer{
+		rdb:             client,
+		usecase:         verifUC,
+		accountStatusUC: accUC,
+		group:           "notification-service",
+		consumer:        "test-worker-acc-status",
+		streamName:      eventbus.StreamName("auth.user.registered"),
+	}
+
+	return nc, accSender, verifSender, mr
+}
+
+// =============================================================================
+// H6.15 — TestHandleAccountDisabled_PayloadCompleto: dispatch con payload completo
+// =============================================================================
+
+func TestHandleAccountDisabled_PayloadCompleto(t *testing.T) {
+	nc, accSender, _, _ := newTestConsumerWithAccountStatus(t)
+
+	userID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	payload := map[string]any{
+		"user_id":     userID.String(),
+		"email":       "disabled-test@example.com",
+		"disabled_by": "admin-001",
+	}
+
+	err := nc.handleAccountDisabled(t.Context(), payload)
+	if err != nil {
+		t.Fatalf("handleAccountDisabled con payload completo falló: %v", err)
+	}
+
+	if !accSender.called {
+		t.Fatal("se esperaba que el sender fuera invocado")
+	}
+	if accSender.templateID != send_account_status_email.TemplateAccountDisabled {
+		t.Errorf("TemplateID = %q, want %q", accSender.templateID, send_account_status_email.TemplateAccountDisabled)
+	}
+	if accSender.to != "disabled-test@example.com" {
+		t.Errorf("to = %q, want %q", accSender.to, "disabled-test@example.com")
+	}
+	if accSender.vars["user_email"] != "disabled-test@example.com" {
+		t.Errorf("user_email in vars = %v, want 'disabled-test@example.com'", accSender.vars["user_email"])
+	}
+}
+
+// =============================================================================
+// H6.16 — TestHandleAccountEnabled_PayloadCompleto: dispatch con payload completo
+// =============================================================================
+
+func TestHandleAccountEnabled_PayloadCompleto(t *testing.T) {
+	nc, accSender, _, _ := newTestConsumerWithAccountStatus(t)
+
+	userID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	payload := map[string]any{
+		"user_id":    userID.String(),
+		"email":      "enabled-test@example.com",
+		"enabled_by": "admin-002",
+	}
+
+	err := nc.handleAccountEnabled(t.Context(), payload)
+	if err != nil {
+		t.Fatalf("handleAccountEnabled con payload completo falló: %v", err)
+	}
+
+	if !accSender.called {
+		t.Fatal("se esperaba que el sender fuera invocado")
+	}
+	if accSender.templateID != send_account_status_email.TemplateAccountEnabled {
+		t.Errorf("TemplateID = %q, want %q", accSender.templateID, send_account_status_email.TemplateAccountEnabled)
+	}
+	if accSender.to != "enabled-test@example.com" {
+		t.Errorf("to = %q, want %q", accSender.to, "enabled-test@example.com")
+	}
+	if accSender.vars["user_email"] != "enabled-test@example.com" {
+		t.Errorf("user_email in vars = %v, want 'enabled-test@example.com'", accSender.vars["user_email"])
+	}
+}
+
+// =============================================================================
+// H6.17 — TestHandleAccountDisabled_SinEmail: payload sin email → error (queda en PEL)
+// =============================================================================
+
+func TestHandleAccountDisabled_SinEmail(t *testing.T) {
+	nc, _ := newTestConsumer(t)
+
+	payload := map[string]any{
+		"user_id": "22222222-2222-2222-2222-222222222222",
+		// email ausente
+	}
+
+	err := nc.handleAccountDisabled(t.Context(), payload)
+	if err == nil {
+		t.Error("handleAccountDisabled sin email debería retornar error (missing email)")
+	}
+}
+
+// H6.17b — TestHandleAccountEnabled_SinEmail: payload sin email → error (missing email)
+func TestHandleAccountEnabled_SinEmail(t *testing.T) {
+	nc, _ := newTestConsumer(t)
+
+	payload := map[string]any{
+		"user_id": "33333333-3333-3333-3333-333333333333",
+		// email ausente
+	}
+
+	err := nc.handleAccountEnabled(t.Context(), payload)
+	if err == nil {
+		t.Error("handleAccountEnabled sin email debería retornar error (missing email)")
+	}
+}
+
+// =============================================================================
+// H6.18 — TestHandleAccountDisabled_UserIDInvalido: UUID mal formado → ACK + log
+// =============================================================================
+
+func TestHandleAccountDisabled_UserIDInvalido(t *testing.T) {
+	nc, _ := newTestConsumer(t)
+
+	payload := map[string]any{
+		"user_id": "no-es-un-uuid",
+		"email":   "invalid-uuid@example.com",
+	}
+
+	err := nc.handleAccountDisabled(t.Context(), payload)
+	if err != nil {
+		t.Errorf("handleAccountDisabled con UUID inválido debería retornar nil (ACK), obtuvo: %v", err)
+	}
+}
+
+// =============================================================================
+// H6.19 — TestHandleAccountDisabled_SinUserID: payload sin user_id → ACK
+// =============================================================================
+
+func TestHandleAccountDisabled_SinUserID(t *testing.T) {
+	nc, _ := newTestConsumer(t)
+
+	payload := map[string]any{
+		"email": "nouserid@example.com",
+	}
+
+	err := nc.handleAccountDisabled(t.Context(), payload)
+	if err != nil {
+		t.Errorf("handleAccountDisabled sin user_id debería retornar nil (ACK), obtuvo: %v", err)
+	}
+}
+
+// =============================================================================
+// H6.21 — TestProcessMessage_AccountDisabled: dispatch completo con ACK (integración)
+// =============================================================================
+
+func TestProcessMessage_AccountDisabled(t *testing.T) {
+	nc, accSender, _, _ := newTestConsumerWithAccountStatus(t)
+
+	userID := uuid.MustParse("55555555-5555-5555-5555-555555555555")
+	streamName := nc.streamName
+
+	// XADD: publicar mensaje account_disabled
+	_, err := nc.rdb.XAdd(t.Context(), &redis.XAddArgs{
+		Stream: streamName,
+		Values: map[string]any{
+			"event_type":  "account_disabled",
+			"user_id":     userID.String(),
+			"email":       "integration-disabled@example.com",
+			"disabled_by": "admin-099",
+		},
+	}).Result()
+	if err != nil {
+		t.Fatalf("XAdd falló: %v", err)
+	}
+
+	// XREADGROUP: reclamar mensaje
+	msgs, err := nc.rdb.XReadGroup(t.Context(), &redis.XReadGroupArgs{
+		Group:    nc.group,
+		Consumer: nc.consumer,
+		Streams:  []string{streamName, ">"},
+		Count:    1,
+		Block:    0,
+	}).Result()
+	if err != nil {
+		t.Fatalf("XReadGroup falló: %v", err)
+	}
+	if len(msgs) == 0 || len(msgs[0].Messages) == 0 {
+		t.Fatal("XReadGroup no retornó mensajes")
+	}
+
+	claimedMsg := msgs[0].Messages[0]
+
+	// Procesar el mensaje
+	err = nc.processMessage(t.Context(), claimedMsg)
+	if err != nil {
+		t.Fatalf("processMessage falló: %v", err)
+	}
+
+	// Verificar que el sender fue invocado con el template correcto
+	if !accSender.called {
+		t.Fatal("se esperaba que el sender fuera invocado")
+	}
+	if accSender.templateID != send_account_status_email.TemplateAccountDisabled {
+		t.Errorf("TemplateID = %q, want %q", accSender.templateID, send_account_status_email.TemplateAccountDisabled)
+	}
+
+	// Verificar que el mensaje fue ACK'd (fuera del PEL)
+	pending, err := nc.rdb.XPending(t.Context(), streamName, nc.group).Result()
+	if err != nil {
+		t.Fatalf("XPending post-ACK falló: %v", err)
+	}
+	if pending.Count != 0 {
+		t.Errorf("se esperaba PEL vacío después de ACK, count = %d", pending.Count)
+	}
+}
+
+// =============================================================================
+// H6.22 — TestProcessMessage_AccountEnabled: dispatch completo con ACK (integración)
+// =============================================================================
+
+func TestProcessMessage_AccountEnabled(t *testing.T) {
+	nc, accSender, _, _ := newTestConsumerWithAccountStatus(t)
+
+	userID := uuid.MustParse("66666666-6666-6666-6666-666666666666")
+	streamName := nc.streamName
+
+	_, err := nc.rdb.XAdd(t.Context(), &redis.XAddArgs{
+		Stream: streamName,
+		Values: map[string]any{
+			"event_type": "account_enabled",
+			"user_id":    userID.String(),
+			"email":      "integration-enabled@example.com",
+			"enabled_by": "admin-100",
+		},
+	}).Result()
+	if err != nil {
+		t.Fatalf("XAdd falló: %v", err)
+	}
+
+	msgs, err := nc.rdb.XReadGroup(t.Context(), &redis.XReadGroupArgs{
+		Group:    nc.group,
+		Consumer: nc.consumer,
+		Streams:  []string{streamName, ">"},
+		Count:    1,
+		Block:    0,
+	}).Result()
+	if err != nil {
+		t.Fatalf("XReadGroup falló: %v", err)
+	}
+	if len(msgs) == 0 || len(msgs[0].Messages) == 0 {
+		t.Fatal("XReadGroup no retornó mensajes")
+	}
+
+	claimedMsg := msgs[0].Messages[0]
+
+	err = nc.processMessage(t.Context(), claimedMsg)
+	if err != nil {
+		t.Fatalf("processMessage falló: %v", err)
+	}
+
+	if !accSender.called {
+		t.Fatal("se esperaba que el sender fuera invocado")
+	}
+	if accSender.templateID != send_account_status_email.TemplateAccountEnabled {
+		t.Errorf("TemplateID = %q, want %q", accSender.templateID, send_account_status_email.TemplateAccountEnabled)
+	}
+
+	pending, err := nc.rdb.XPending(t.Context(), streamName, nc.group).Result()
+	if err != nil {
+		t.Fatalf("XPending post-ACK falló: %v", err)
+	}
+	if pending.Count != 0 {
+		t.Errorf("se esperaba PEL vacío después de ACK, count = %d", pending.Count)
+	}
+}
+
+// =============================================================================
+// H6.23 — TestNewNotificationConsumer_ConAccountStatus: constructor con ambos usecases
+// =============================================================================
+
+func TestNewNotificationConsumer_ConAccountStatus(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+
+	nc := NewNotificationConsumer(client, nil, nil)
+	if nc == nil {
+		t.Fatal("NewNotificationConsumer retornó nil")
+	}
+	if nc.Name() != "notification-consumer" {
+		t.Errorf("Name() = %q, want 'notification-consumer'", nc.Name())
+	}
+}
+
+// =============================================================================
+// H6.24 — TestOrphanRescue_ReclaimsAndProcesses: integración de rescate de huérfanos
+// =============================================================================
+
+// TestOrphanRescue_ReclaimsAndProcesses verifica que RescueOrphanedMessages
+// reclama mensajes del PEL y los procesa correctamente.
+func TestOrphanRescue_ReclaimsAndProcesses(t *testing.T) {
+	nc, accSender, _, _ := newTestConsumerWithAccountStatus(t)
+
+	userID := uuid.MustParse("77777777-7777-7777-7777-777777777777")
+	streamName := nc.streamName
+
+	// 1. Publicar un mensaje account_disabled al stream
+	_, err := nc.rdb.XAdd(t.Context(), &redis.XAddArgs{
+		Stream: streamName,
+		Values: map[string]any{
+			"event_type":  "account_disabled",
+			"user_id":     userID.String(),
+			"email":       "orphan-test@example.com",
+			"disabled_by": "admin-orphan",
+		},
+	}).Result()
+	if err != nil {
+		t.Fatalf("XAdd falló: %v", err)
+	}
+
+	// 2. Reclamar via XREADGROUP (pone en PEL, NO hace ACK)
+	msgs, err := nc.rdb.XReadGroup(t.Context(), &redis.XReadGroupArgs{
+		Group:    nc.group,
+		Consumer: nc.consumer,
+		Streams:  []string{streamName, ">"},
+		Count:    1,
+		Block:    0,
+	}).Result()
+	if err != nil {
+		t.Fatalf("XReadGroup falló: %v", err)
+	}
+	if len(msgs) == 0 || len(msgs[0].Messages) == 0 {
+		t.Fatal("XReadGroup no retornó mensajes")
+	}
+
+	// 3. Verificar que el mensaje está en PEL (no ACK'd)
+	pending, err := nc.rdb.XPending(t.Context(), streamName, nc.group).Result()
+	if err != nil {
+		t.Fatalf("XPending falló: %v", err)
+	}
+	if pending.Count == 0 {
+		t.Fatal("se esperaba que el mensaje estuviera en PEL después de XREADGROUP sin ACK")
+	}
+
+	// 4. Reclamar el mensaje huérfano via RescueOrphanedMessages
+	//    Usar idle timeout 0 para que miniredis permita reclamar inmediatamente.
+	rescued, err := eventbus.RescueOrphanedMessages(t.Context(), nc.rdb, streamName, nc.group, 0)
+	if err != nil {
+		t.Fatalf("RescueOrphanedMessages falló: %v", err)
+	}
+	if len(rescued) == 0 {
+		t.Fatal("RescueOrphanedMessages debería haber reclamado al menos 1 mensaje")
+	}
+
+	// 5. Procesar el mensaje reclamado
+	for _, msg := range rescued {
+		err := nc.processMessage(t.Context(), msg)
+		if err != nil {
+			t.Fatalf("processMessage del huérfano reclamado falló: %v", err)
+		}
+	}
+
+	// 6. Verificar que el sender fue invocado con el email correcto
+	if !accSender.called {
+		t.Fatal("se esperaba que el sender fuera invocado al procesar el huérfano")
+	}
+	if accSender.to != "orphan-test@example.com" {
+		t.Errorf("to = %q, want %q", accSender.to, "orphan-test@example.com")
+	}
+
+	// 7. Verificar que el mensaje fue ACK'd (ya no está en PEL)
+	pending, err = nc.rdb.XPending(t.Context(), streamName, nc.group).Result()
+	if err != nil {
+		t.Fatalf("XPending post-ACK falló: %v", err)
+	}
+	if pending.Count != 0 {
+		t.Errorf("se esperaba PEL vacío después de procesar el huérfano, count = %d", pending.Count)
 	}
 }

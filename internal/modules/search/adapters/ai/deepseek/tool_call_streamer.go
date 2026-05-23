@@ -91,7 +91,7 @@ func toChatMessages(messages []domain.ChatMessage) ([]chatMessage, error) {
 					if err != nil {
 						return nil, fmt.Errorf("marshal tool call %d arguments: %w", j, err)
 					}
-					tcOut.Function.Parameters = argsJSON
+					tcOut.Function.Arguments = string(argsJSON)
 				}
 				chatMsgs[i].ToolCalls[j] = tcOut
 			}

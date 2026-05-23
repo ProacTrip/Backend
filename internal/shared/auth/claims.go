@@ -19,7 +19,6 @@ type AccessClaims struct {
 	Email     string
 	RoleID    uuid.UUID
 	Role      string
-	SessionID uuid.UUID
 	JTI       uuid.UUID
 
 	// Permissions es la lista de permisos efectivos resueltos para el usuario.

@@ -17,6 +17,7 @@ import (
 
 	"github.com/ProacTrip/Backend/internal/modules/user/domain"
 	"github.com/ProacTrip/Backend/internal/modules/user/pipeline"
+	sse "github.com/ProacTrip/Backend/internal/shared/sse"
 )
 
 // =============================================================================
@@ -102,6 +103,7 @@ func newQueuedDoc(userID uuid.UUID, docTypeID uuid.UUID, mime string) *domain.Us
 // =============================================================================
 
 func TestValidatorWorker_ProcesaJPEGCorrectamente(t *testing.T) {
+	sse.Init()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -169,6 +171,7 @@ func TestValidatorWorker_ProcesaJPEGCorrectamente(t *testing.T) {
 // =============================================================================
 
 func TestValidatorWorker_MIMENoAceptado_RechazaDocumento(t *testing.T) {
+	sse.Init()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

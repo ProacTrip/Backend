@@ -19,17 +19,15 @@ var testKey = []byte("abcdefghijklmnopqrstuvwxyz123456")
 
 // testUser contiene datos fijos de prueba reutilizados en todos los escenarios.
 var testUser = struct {
-	userID    uuid.UUID
-	email     string
-	role      string
-	roleID    uuid.UUID
-	sessionID uuid.UUID
+	userID uuid.UUID
+	email  string
+	role   string
+	roleID uuid.UUID
 }{
-	userID:    uuid.MustParse("11111111-1111-1111-1111-111111111111"),
-	email:     "test@proactrip.com",
-	role:      "user",
-	roleID:    uuid.MustParse("22222222-2222-2222-2222-222222222222"),
-	sessionID: uuid.MustParse("33333333-3333-3333-3333-333333333333"),
+	userID: uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+	email:  "test@proactrip.com",
+	role:   "user",
+	roleID: uuid.MustParse("22222222-2222-2222-2222-222222222222"),
 }
 
 // newTestService crea un PasetoService respaldado por una instancia fresca de miniredis.
@@ -54,7 +52,7 @@ func newTestService(t *testing.T) (*token.PasetoService, *miniredis.Miniredis) {
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Escenario 1: GenerateTokenPair — ambos tokens no vacíos, distintos,
-// 6 claims presentes (sub, email, role, type, jti, exp).
+// claims presentes (sub, email, role, type, jti, exp).
 // ──────────────────────────────────────────────────────────────────────────────
 
 func TestGenerateTokenPair_DevuelveAmbosTokensYContieneClaimsRequeridos(t *testing.T) {
@@ -65,7 +63,6 @@ func TestGenerateTokenPair_DevuelveAmbosTokensYContieneClaimsRequeridos(t *testi
 		testUser.email,
 		testUser.role,
 		testUser.roleID,
-		testUser.sessionID,
 	)
 	if err != nil {
 		t.Fatalf("GenerateTokenPair: %v", err)
@@ -84,7 +81,7 @@ func TestGenerateTokenPair_DevuelveAmbosTokensYContieneClaimsRequeridos(t *testi
 		t.Error("AccessToken y RefreshToken son idénticos, deberían ser distintos")
 	}
 
-	// Verificar 6 claims en el access token parseándolo directamente.
+	// Verificar claims en el access token parseándolo directamente.
 	parser := paseto.NewParser()
 	parsed, err := parser.ParseV4Local(svc.SymmetricKey(), pair.AccessToken, nil)
 	if err != nil {
@@ -153,11 +150,10 @@ func TestGenerateTokenPair_DevuelveAmbosTokensYContieneClaimsRequeridos(t *testi
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Escenario 2: ValidateRefreshToken válido — extrae 5 claims
-// (sub, email, role, type, jti).
+// Escenario 2: ValidateRefreshToken válido — extrae claims
 // ──────────────────────────────────────────────────────────────────────────────
 
-func TestValidateRefreshToken_Valido_ExtraeCincoClaims(t *testing.T) {
+func TestValidateRefreshToken_Valido_ExtraeClaims(t *testing.T) {
 	svc, _ := newTestService(t)
 
 	refreshToken, err := svc.GenerateRefreshToken(
@@ -165,7 +161,6 @@ func TestValidateRefreshToken_Valido_ExtraeCincoClaims(t *testing.T) {
 		testUser.email,
 		testUser.role,
 		testUser.roleID,
-		testUser.sessionID,
 	)
 	if err != nil {
 		t.Fatalf("GenerateRefreshToken: %v", err)
@@ -223,7 +218,6 @@ func TestValidateRefreshToken_Expirado_DevuelveErrTokenExpired(t *testing.T) {
 	expiredToken.SetString("email", testUser.email)
 	expiredToken.SetString("role", testUser.role)
 	expiredToken.SetString("role_id", testUser.roleID.String())
-	expiredToken.SetString("session_id", testUser.sessionID.String())
 	expiredToken.SetJti(uuid.New().String())
 	expiredToken.SetString("type", "refresh")
 	expiredToken.SetExpiration(time.Now().Add(-1 * time.Hour))
@@ -253,7 +247,6 @@ func TestValidateRefreshToken_TipoIncorrecto_DevuelveError(t *testing.T) {
 		testUser.email,
 		testUser.role,
 		testUser.roleID,
-		testUser.sessionID,
 	)
 	if err != nil {
 		t.Fatalf("GenerateAccessToken: %v", err)
@@ -292,13 +285,11 @@ func TestIsJTIBlacklisted_FailOpen_DevuelveFalseNil(t *testing.T) {
 
 	mr.Close()
 
-	// Use the unexported via export — test the public ValidateRefreshToken
 	refreshToken, genErr := svc.GenerateRefreshToken(
 		testUser.userID,
 		testUser.email,
 		testUser.role,
 		testUser.roleID,
-		testUser.sessionID,
 	)
 	if genErr != nil {
 		t.Fatalf("GenerateRefreshToken: %v", genErr)
@@ -334,7 +325,6 @@ func TestIsJTIBlacklisted_Blacklisteada_DevuelveTrueNil(t *testing.T) {
 		testUser.email,
 		testUser.role,
 		testUser.roleID,
-		testUser.sessionID,
 	)
 	if err != nil {
 		t.Fatalf("GenerateTokenPair: %v", err)
@@ -367,7 +357,6 @@ func TestIsJTIBlacklisted_NoBlacklisteada_DevuelveExito(t *testing.T) {
 		testUser.email,
 		testUser.role,
 		testUser.roleID,
-		testUser.sessionID,
 	)
 	if err != nil {
 		t.Fatalf("GenerateRefreshToken: %v", err)
@@ -381,9 +370,6 @@ func TestIsJTIBlacklisted_NoBlacklisteada_DevuelveExito(t *testing.T) {
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Escenario 8: isExpiredTokenError — 3 sub-casos.
-//   (a) nil error → false
-//   (b) error de expiración → true
-//   (c) error que no es de expiración → false
 // ──────────────────────────────────────────────────────────────────────────────
 
 func TestIsExpiredTokenError(t *testing.T) {
@@ -562,7 +548,6 @@ func TestValidateRefreshToken_FailOpen_DragonflyCaidoDevuelveClaims(t *testing.T
 		testUser.email,
 		testUser.role,
 		testUser.roleID,
-		testUser.sessionID,
 	)
 	if genErr != nil {
 		t.Fatalf("GenerateRefreshToken: %v", genErr)

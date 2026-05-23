@@ -37,7 +37,8 @@ func TestNuevoUsuario(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.nombre, func(t *testing.T) {
 			roleID := uuid.Must(uuid.NewV7())
-			user := domain.NewUser(tt.email, tt.passwordHash, roleID)
+			firstName := "TestUser"
+			user := domain.NewUser(tt.email, tt.passwordHash, firstName, roleID)
 
 			// ID debe ser UUIDv7 no nulo
 			if user.ID == uuid.Nil {
@@ -501,6 +502,7 @@ func crearUsuarioBase() *domain.User {
 	return domain.NewUser(
 		"base@example.com",
 		"hashed_base",
+		"UsuarioBase",
 		uuid.Must(uuid.NewV7()),
 	)
 }

@@ -4,7 +4,7 @@
 // Pipeline (nuevo desde Batch 3):
 //  1. Validar token PASETO (existente)
 //  2. Verificar JTI blacklist en Dragonfly
-//  3. Leer cache de sesión ({auth}:session:{SID})
+//  3. Leer cache de sesión ({auth}:session:{userID})
 //  4. Comparar token_version (token vs cache/DB)
 //  5. Verificar estado de la cuenta (active requerido)
 //  6. Inyectar claims con Permissions[] resueltos
@@ -202,12 +202,11 @@ func (m *AuthMiddleware) runAccessPipeline(c *echo.Context, claims *token.Access
 	}
 
 	// Paso 4-6: Validar sesión (cache → DB fallback)
-	sessionData, err := m.getOrResolveSession(ctx, claims.UserID, claims.RoleID, claims.SessionID)
+	sessionData, err := m.getOrResolveSession(ctx, claims.UserID, claims.RoleID)
 	if err != nil {
 		// Error al resolver sesión → loguear, continuar con claims vacíos (fail-open)
 		slog.WarnContext(ctx, "sesión no resuelta, continuando sin permisos (fail-open)",
 			slog.String("user_id", claims.UserID.String()),
-			slog.String("session_id", claims.SessionID.String()),
 			slog.String("error", err.Error()),
 		)
 	}
@@ -336,7 +335,7 @@ func (m *AuthMiddleware) rotateWithPipeline(c *echo.Context, refreshToken string
 	}
 
 	// Poblar el cache de sesión con los datos del usuario
-	m.populateSessionCache(ctx, user, refreshClaims.SessionID)
+	m.populateSessionCache(ctx, user)
 
 	return newClaims, newAccess, newRefresh, nil
 }
@@ -345,8 +344,8 @@ func (m *AuthMiddleware) rotateWithPipeline(c *echo.Context, refreshToken string
 // getOrResolveSession — cache de sesión con fallback a DB
 // =============================================================================
 
-func (m *AuthMiddleware) getOrResolveSession(ctx context.Context, userID, roleID, sessionID uuid.UUID) (*sessionpkg.SessionData, error) {
-	sessionKey := sessionID.String()
+func (m *AuthMiddleware) getOrResolveSession(ctx context.Context, userID, roleID uuid.UUID) (*sessionpkg.SessionData, error) {
+	userKey := userID.String()
 
 	// Si no hay RedisClient, ir directo a DB
 	if m.config.RedisClient == nil {
@@ -354,10 +353,10 @@ func (m *AuthMiddleware) getOrResolveSession(ctx context.Context, userID, roleID
 	}
 
 	// Intentar cache hit
-	cached, err := sessionpkg.GetSession(ctx, m.config.RedisClient, sessionKey)
+	cached, err := sessionpkg.GetSession(ctx, m.config.RedisClient, userKey)
 	if err != nil {
 		slog.WarnContext(ctx, "session cache read error (fail-open, usando DB)",
-			slog.String("session_id", sessionKey),
+			slog.String("user_id", userKey),
 			slog.String("error", err.Error()),
 		)
 		return m.resolveSessionFromDB(ctx, userID, roleID)
@@ -365,7 +364,7 @@ func (m *AuthMiddleware) getOrResolveSession(ctx context.Context, userID, roleID
 
 	if cached != nil {
 		// Cache hit — refrescar TTL
-		m.refreshSessionTTL(ctx, sessionKey)
+		m.refreshSessionTTL(ctx, userKey)
 		return cached, nil
 	}
 
@@ -379,9 +378,9 @@ func (m *AuthMiddleware) getOrResolveSession(ctx context.Context, userID, roleID
 	}
 
 	// Guardar en cache (best-effort)
-	if setErr := sessionpkg.SetSession(ctx, m.config.RedisClient, sessionKey, data, sessionpkg.SessionTTL); setErr != nil {
+	if setErr := sessionpkg.SetSession(ctx, m.config.RedisClient, userKey, data, sessionpkg.SessionTTL); setErr != nil {
 		slog.WarnContext(ctx, "session cache write failed (non-blocking)",
-			slog.String("session_id", sessionKey),
+			slog.String("user_id", userKey),
 			slog.String("error", setErr.Error()),
 		)
 	}
@@ -453,7 +452,7 @@ func (m *AuthMiddleware) resolveFromDB(ctx context.Context, userID, roleID uuid.
 // populateSessionCache — guarda datos de sesión en cache después de rotación
 // =============================================================================
 
-func (m *AuthMiddleware) populateSessionCache(ctx context.Context, user *domain.User, sessionID uuid.UUID) {
+func (m *AuthMiddleware) populateSessionCache(ctx context.Context, user *domain.User) {
 	if m.config.RedisClient == nil || user == nil {
 		return
 	}
@@ -478,7 +477,7 @@ func (m *AuthMiddleware) populateSessionCache(ctx context.Context, user *domain.
 		TokenVersion: fmt.Sprintf("%d", user.TokenVersion),
 	}
 
-	if err := sessionpkg.SetSession(ctx, m.config.RedisClient, sessionID.String(), data, sessionpkg.SessionTTL); err != nil {
+	if err := sessionpkg.SetSession(ctx, m.config.RedisClient, user.ID.String(), data, sessionpkg.SessionTTL); err != nil {
 		slog.WarnContext(ctx, "session cache population failed (non-blocking)",
 			slog.String("user_id", user.ID.String()),
 			slog.String("error", err.Error()),
@@ -490,14 +489,14 @@ func (m *AuthMiddleware) populateSessionCache(ctx context.Context, user *domain.
 // refreshSessionTTL — extiende el TTL del cache de sesión en cada request
 // =============================================================================
 
-func (m *AuthMiddleware) refreshSessionTTL(ctx context.Context, sessionID string) {
+func (m *AuthMiddleware) refreshSessionTTL(ctx context.Context, userID string) {
 	if m.config.RedisClient == nil {
 		return
 	}
-	key := fmt.Sprintf("{auth}:session:%s", sessionID)
+	key := fmt.Sprintf("{auth}:session:%s", userID)
 	if err := m.config.RedisClient.Expire(ctx, key, sessionpkg.SessionTTL).Err(); err != nil {
 		slog.WarnContext(ctx, "session TTL refresh failed (non-blocking)",
-			slog.String("session_id", sessionID),
+			slog.String("user_id", userID),
 			slog.String("error", err.Error()),
 		)
 	}

@@ -130,7 +130,7 @@ GET /v1/environment
 
 | Header | Tipo | Requerido | Descripción |
 |--------|------|-----------|-------------|
-| `Accept-Language` | string | No | Idioma para la descripción del clima y `location.language`. Fallback: `"es"`. Ej: `en`, `fr` |
+| `Accept-Language` | string | No | Idioma para la descripción del clima y `location.language`. Fallback: `"es"`. Acepta locales completos (ej: `en-US`, `es-AR`) y los normaliza al código ISO 639-1 de 2 caracteres (ej: `en`, `es`) |
 | `X-Real-IP` | string | No | IP del cliente (override de auto-detección). Útil para testing |
 
 **Ejemplo:**
@@ -303,12 +303,14 @@ Si el cache MISS, se resuelve IP → GeoIP → Weather, se cachea cada capa por 
 
 ### Resolución de idioma
 
-`location.language` se resuelve en este orden:
-1. `Accept-Language` del navegador (primer idioma, código ISO 639-1 de 2 chars)
-2. Fallback: `CountryMetadata[country_code].Language` (257 países mapeados)
-3. Si el país no está en CountryMetadata: se mantiene el valor de `Accept-Language` (con fallback a `"es"`)
+El backend **normaliza** el header `Accept-Language`: acepta locales completos (ej: `en-US`, `es-AR`, `fr-CA`) y extrae el código primario ISO 639-1 de 2 caracteres (ej: `en`, `es`, `fr`). También maneja parámetros de calidad (`;q=...`).
 
-`weather.description` usa el mismo idioma del `Accept-Language`, con fallback a `"es"`.
+`location.language` se resuelve en este orden:
+1. `Accept-Language` del navegador, normalizado a código ISO 639-1 de 2 caracteres
+2. Fallback: `CountryMetadata[country_code].Language` (257 países mapeados)
+3. Si el país no está en CountryMetadata: se mantiene el valor normalizado de `Accept-Language` (con fallback a `"es"`)
+
+`weather.description` usa el mismo idioma normalizado del `Accept-Language`, con fallback a `"es"`.
 
 ### Moneda
 

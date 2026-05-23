@@ -34,14 +34,14 @@ func (m *testUTPEventPub) Publish(ctx context.Context, stream string, payload ma
 
 func TestUpdateTravelPrefsHandler_Handle(t *testing.T) {
 	uid := uuid.Must(uuid.NewV7())
-	tc := &sharedauth.AccessClaims{UserID: uid, Email: "t@t.com", RoleID: uuid.Must(uuid.NewV7()), Role: "client", SessionID: uuid.Must(uuid.NewV7()), JTI: uuid.Must(uuid.NewV7())}
+	tc := &sharedauth.AccessClaims{UserID: uid, Email: "t@t.com", RoleID: uuid.Must(uuid.NewV7()), Role: "client", JTI: uuid.Must(uuid.NewV7())}
 	tests := []struct {
 		name string; claims *sharedauth.AccessClaims; body string; repo *testUTPTRepo; ep *testUTPEventPub; wantStatus int
 	}{
 		{"debe retornar 200 con preferencias actualizadas", tc, `{"preferred_class":"business","avoid_layovers":false}`, &testUTPTRepo{getByUserIDFn: func(ctx context.Context, uid uuid.UUID) (*domain.TravelPreferences, error) {
 			return domain.NewTravelPreferences(uid), nil
 		}}, &testUTPEventPub{}, http.StatusOK},
-		{"debe retornar error sin claims", nil, `{"preferred_class":"economy"}`, &testUTPTRepo{}, &testUTPEventPub{}, http.StatusInternalServerError},
+		{"debe retornar error sin claims", nil, `{"preferred_class":"economy"}`, &testUTPTRepo{}, &testUTPEventPub{}, http.StatusUnauthorized},
 		{"debe retornar 200 con preferred_class custom", tc, `{"preferred_class":"first"}`, &testUTPTRepo{}, &testUTPEventPub{}, http.StatusOK},
 	}
 	for _, tt := range tests {

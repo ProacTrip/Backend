@@ -97,8 +97,7 @@ func testClaims() *sharedauth.AccessClaims {
 		Email:     "test@example.com",
 		RoleID:    uuid.Must(uuid.NewV7()),
 		Role:      "client",
-		SessionID: uuid.Must(uuid.NewV7()),
-		JTI:       uuid.Must(uuid.NewV7()),
+		JTI: uuid.Must(uuid.NewV7()),
 	}
 }
 

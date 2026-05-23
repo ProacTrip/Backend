@@ -58,7 +58,7 @@ type mockTokenService struct {
 	err  error
 }
 
-func (m *mockTokenService) GenerateTokenPair(_ uuid.UUID, _ string, _ string, _ uuid.UUID, _ uuid.UUID) (*token.TokenPair, error) {
+func (m *mockTokenService) GenerateTokenPair(_ uuid.UUID, _ string, _ string, _ uuid.UUID) (*token.TokenPair, error) {
 	if m.err != nil {
 		return nil, m.err
 	}

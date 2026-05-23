@@ -18,7 +18,8 @@ const (
 	TripUpdated         EventType = "trip_updated"
 	TripDeleted         EventType = "trip_deleted"
 	ConversationSaved   EventType = "conversation_saved"
-	SessionInvalidated  EventType = "session.invalidated"
+	AccountDisabled     EventType = "account_disabled"
+	AccountEnabled      EventType = "account_enabled"
 )
 
 type Event struct {

@@ -82,8 +82,6 @@ El rol `admin` existe a nivel de base de datos como una agrupación de permisos.
 | `PermUsersRead` | `users:read` | ✅ Grupo base — requerido en todos los endpoints |
 | `PermUsersWrite` | `users:write` | ✅ Account Status |
 | `PermFeatureLimitsWrite` | `feature_limits:write` | ✅ Feature Limits (crear/eliminar) |
-| `PermSessionsWrite` | `sessions:write` | ✅ Account Status — requerido para invalidar sesiones al deshabilitar |
-| `PermSessionsRead` | `sessions:read` | — |
 
 ### Modelo de Grupo Base + Aditivo
 
@@ -92,14 +90,14 @@ Cada endpoint del dashboard recibe una combinación de permisos:
 1. **Grupo base**: `users:read` — aplicado a nivel de grupo (`RequirePermission` en `app.go:527`). Todo endpoint del dashboard requiere este permiso como mínimo.
 
 2. **Permisos aditivos**: los endpoints de mutación añaden un segundo `RequirePermission` con un permiso más específico:
-   - `PUT /users/:id/status` → `users:read` + `users:write` + `sessions:write`
+   - `PUT /users/:id/status` → `users:read` + `users:write`
    - `POST/DELETE /users/:id/feature-limits` → `users:read` + `feature_limits:write`
 
 ### Quién puede acceder
 
 | Rol | Acceso al Dashboard |
 |-----|---------------------|
-| **admin** | ✅ **Acceso total** — el rol admin tiene los 5 permisos asignados. Todos los `RequirePermission` pasan. |
+| **admin** | ✅ **Acceso total** — el rol admin tiene los 3 permisos activos asignados. Todos los `RequirePermission` pasan. |
 | **client** | ❌ **Sin acceso** — el rol client no tiene permisos administrativos. Cualquier request a `/v1/dashboard` recibe 403. |
 
 ---
@@ -341,9 +339,7 @@ curl -X GET "http://localhost:8080/v1/dashboard/users/0193c8c6-1234-7abc-8def-01
   "effective_permissions": [
     "users:read",
     "users:write",
-    "feature_limits:write",
-    "sessions:read",
-    "sessions:write"
+    "feature_limits:write"
   ]
 }
 ```
@@ -386,7 +382,21 @@ curl -X GET "http://localhost:8080/v1/dashboard/users/0193c8c6-1234-7abc-8def-01
 
 ## Account Status ✅
 
-Habilita o deshabilita la cuenta de un usuario. Al deshabilitar, se invalidan todas las sesiones activas.
+Habilita o deshabilita la cuenta de un usuario. Al deshabilitar, se invalidan todas las sesiones activas y se notifica al usuario por email.
+
+### Flujo de Notificación por Email
+
+Cuando un admin cambia el estado de una cuenta, el usecase publica un evento en el stream `{events}:auth.user.registered` de DragonflyDB con el tipo `account_disabled` o `account_enabled`. El consumer del módulo **Notification** consume estos eventos y envía un email al usuario afectado usando templates de Resend:
+
+| Evento | Template Resend | Variable |
+|--------|----------------|----------|
+| `account_disabled` | `d96a15e5-59e2-4c2a-b561-023287e858c5` | `user_email` |
+| `account_enabled` | `01929326-fe76-40cd-83bd-1cfeff4ed477` | `user_email` |
+
+- **Fire-and-forget**: el evento se publica en un goroutine con timeout de 2s. Si falla, no revierte el cambio de estado.
+- **Idempotencia**: el consumer de Notification verifica que el email no haya sido enviado previamente (vía `sent_at IS NOT NULL` en la tabla `notifications`).
+- **Reintentos**: si Resend falla, el mensaje queda en PEL (Pending Entries List) del consumer group y se reintenta. Un goroutine de orphan rescue (`XAUTOCLAIM`) reclama mensajes abandonados cada 30s.
+- **Rate limiting**: el adapter de Resend aplica rate limiting fail-closed antes de cada envío.
 
 ### Request
 
@@ -400,7 +410,7 @@ PUT /v1/dashboard/users/:id/status
 |-----------|------|-----------|-------------|
 | `id` | UUID | Sí | ID del usuario objetivo |
 
-**Permisos requeridos:** `users:read` (grupo base) + `users:write` + `sessions:write` (aditivo)
+**Permisos requeridos:** `users:read` (grupo base) + `users:write` (aditivo)
 
 **Body:**
 
@@ -427,8 +437,7 @@ curl -X PUT "http://localhost:8080/v1/dashboard/users/0193c8c6-1234-7abc-8def-01
   "user_id": "0193c8c6-1234-7abc-8def-0123456789ab",
   "previous_status": "active",
   "new_status": "disabled",
-  "token_version": 3,
-  "sessions_invalidated": 2
+  "token_version": 3
 }
 ```
 
@@ -440,7 +449,6 @@ curl -X PUT "http://localhost:8080/v1/dashboard/users/0193c8c6-1234-7abc-8def-01
 | `PreviousStatus` | string | `previous_status` | Estado anterior a la modificación |
 | `NewStatus` | string | `new_status` | Nuevo estado aplicado |
 | `TokenVersion` | int | `token_version` | Nueva versión del token (incrementada en disable) |
-| `SessionsInvalidated` | int | `sessions_invalidated` | Cantidad de sesiones activas invalidadas |
 
 #### Posibles Errores
 
@@ -449,7 +457,7 @@ curl -X PUT "http://localhost:8080/v1/dashboard/users/0193c8c6-1234-7abc-8def-01
 | `TOKEN_INVALID` | 401 | `unauthorized` | Cookie ausente, token inválido o expirado |
 | `TOKEN_EXPIRED` | 401 | `unauthorized` | Token PASETO expirado |
 | `NOT_AUTHENTICATED` | 401 | `unauthorized` | No hay token de acceso en la cookie |
-| `PERMISSION_DENIED` | 403 | `forbidden` | El usuario no tiene `users:read` + `users:write` + `sessions:write` |
+| `PERMISSION_DENIED` | 403 | `forbidden` | El usuario no tiene `users:read` + `users:write` |
 | `USER_NOT_FOUND` | 404 | `not-found` | El `:id` no existe en la DB |
 | `INVALID_INPUT` | 400 | `invalid-input` | UUID inválido, `status` faltante, o valor no permitido (distinto de `active`/`disabled`) |
 | `CANNOT_DISABLE_SELF` | 400 | `bad-request` | El `actorID` (extraído del token PASETO) coincide con el `:id` del path param — un admin no puede deshabilitar su propia cuenta |

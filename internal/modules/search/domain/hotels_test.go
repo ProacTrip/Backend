@@ -208,7 +208,7 @@ func TestHotelDetailsResponseJSONRoundtrip(t *testing.T) {
 		},
 		ExternalReviews: []HotelExternalReview{
 			{
-				Source:       "TripAdvisor",
+				Source:       "HotelReviews",
 				LogoURL:      "https://logo.example.com/ta.png",
 				Score:        4.3,
 				MaxScore:     5.0,

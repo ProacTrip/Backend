@@ -55,12 +55,12 @@ func (m *useCasePasswordSvc) Verify(password, encoded string) (bool, error) {
 }
 
 type useCaseTokenSvc struct {
-	generate func(userID uuid.UUID, email, role string, roleID, sessionID uuid.UUID) (*token.TokenPair, error)
+	generate func(userID uuid.UUID, email, role string, roleID uuid.UUID) (*token.TokenPair, error)
 }
 
-func (m *useCaseTokenSvc) GenerateTokenPair(userID uuid.UUID, email, role string, roleID, sessionID uuid.UUID) (*token.TokenPair, error) {
+func (m *useCaseTokenSvc) GenerateTokenPair(userID uuid.UUID, email, role string, roleID uuid.UUID) (*token.TokenPair, error) {
 	if m.generate != nil {
-		return m.generate(userID, email, role, roleID, sessionID)
+		return m.generate(userID, email, role, roleID)
 	}
 	return &token.TokenPair{AccessToken: "at", RefreshToken: "rt"}, nil
 }
@@ -119,7 +119,7 @@ func TestUseCase_Execute(t *testing.T) {
 				verify: func(password, encoded string) (bool, error) { return true, nil },
 			},
 			tokens: &useCaseTokenSvc{
-				generate: func(userID uuid.UUID, email, role string, roleID, sessionID uuid.UUID) (*token.TokenPair, error) {
+				generate: func(userID uuid.UUID, email, role string, roleID uuid.UUID) (*token.TokenPair, error) {
 					return &token.TokenPair{AccessToken: "at-abc", RefreshToken: "rt-xyz"}, nil
 				},
 			},
@@ -224,7 +224,7 @@ func TestUseCase_Execute(t *testing.T) {
 				verify: func(password, encoded string) (bool, error) { return true, nil },
 			},
 			tokens: &useCaseTokenSvc{
-				generate: func(userID uuid.UUID, email, role string, roleID, sessionID uuid.UUID) (*token.TokenPair, error) {
+				generate: func(userID uuid.UUID, email, role string, roleID uuid.UUID) (*token.TokenPair, error) {
 					return nil, errors.New("dragonfly connection refused")
 				},
 			},

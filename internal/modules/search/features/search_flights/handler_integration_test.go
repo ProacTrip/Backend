@@ -155,7 +155,6 @@ func TestHandlerIntegration_AuthenticatedUser_UsesProfilePrefs(t *testing.T) {
 		UserID:    userID,
 		Email:     "brazilian@example.com",
 		RoleID:    uuid.Nil,
-		SessionID: uuid.Nil,
 		JTI:       uuid.Nil,
 	})
 

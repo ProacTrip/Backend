@@ -77,12 +77,12 @@ func (m *stubPasswordSvc) Verify(password, encoded string) (bool, error) {
 }
 
 type stubTokenSvc struct {
-	generate func(userID uuid.UUID, email, role string, roleID, sessionID uuid.UUID) (*token.TokenPair, error)
+	generate func(userID uuid.UUID, email, role string, roleID uuid.UUID) (*token.TokenPair, error)
 }
 
-func (m *stubTokenSvc) GenerateTokenPair(userID uuid.UUID, email, role string, roleID, sessionID uuid.UUID) (*token.TokenPair, error) {
+func (m *stubTokenSvc) GenerateTokenPair(userID uuid.UUID, email, role string, roleID uuid.UUID) (*token.TokenPair, error) {
 	if m.generate != nil {
-		return m.generate(userID, email, role, roleID, sessionID)
+		return m.generate(userID, email, role, roleID)
 	}
 	return &token.TokenPair{AccessToken: "at", RefreshToken: "rt"}, nil
 }
@@ -115,7 +115,7 @@ func nuevoHandlerExitoso() *login.Handler {
 		verify: func(password, encoded string) (bool, error) { return true, nil },
 	}
 	tokens := &stubTokenSvc{
-		generate: func(userID uuid.UUID, email, role string, roleID, sessionID uuid.UUID) (*token.TokenPair, error) {
+		generate: func(userID uuid.UUID, email, role string, roleID uuid.UUID) (*token.TokenPair, error) {
 			return &token.TokenPair{AccessToken: "at-test", RefreshToken: "rt-test"}, nil
 		},
 	}
