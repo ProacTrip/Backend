@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/ProacTrip/Backend/internal/modules/environment/features/get_destination_weather"
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/search_flights"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/search_hotels"
@@ -646,6 +647,70 @@ func stringPtrOrNil(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// =============================================================================
+// get_destination_weather tool definition + parsing
+// =============================================================================
+
+// GetDestinationWeatherToolDef returns the get_destination_weather tool definition
+// as a JSON Schema function definition for DeepSeek tool calling.
+//
+// The AI provides lat/lng from its internal knowledge (not from search results).
+// Date is in YYYY-MM-DD format, all three params are required.
+func GetDestinationWeatherToolDef() ToolDef {
+	// language=json
+	const params = `{
+		"type": "object",
+		"properties": {
+			"lat": {
+				"type": "number",
+				"description": "Latitud del destino (entre -90 y 90)"
+			},
+			"lng": {
+				"type": "number",
+				"description": "Longitud del destino (entre -180 y 180)"
+			},
+			"date": {
+				"type": "string",
+				"description": "Fecha en formato YYYY-MM-DD"
+			}
+		},
+		"required": ["lat", "lng", "date"]
+	}`
+
+	return ToolDef{
+		Type: "function",
+		Function: ToolFunction{
+			Name:        "get_destination_weather",
+			Description: "Obtiene el clima para una ubicación geográfica en una fecha específica. Usa latitud y longitud de tu conocimiento interno — NO uses resultados de búsqueda para obtener coordenadas. Fecha en formato YYYY-MM-DD.",
+			Parameters:  json.RawMessage(params),
+		},
+	}
+}
+
+// ParseDestinationWeatherToolCall parses tool call arguments into a get_destination_weather.Command.
+// Validates required fields (lat, lng, date) and returns error with details on missing/invalid fields.
+func ParseDestinationWeatherToolCall(args map[string]interface{}) (get_destination_weather.Command, error) {
+	if err := ValidateRequiredOrError("get_destination_weather", args, "lat", "lng", "date"); err != nil {
+		return get_destination_weather.Command{}, err
+	}
+
+	lat := parseFloat(args, "lat")
+	lng := parseFloat(args, "lng")
+	date := parseString(args, "date")
+
+	if lat == nil || lng == nil {
+		return get_destination_weather.Command{}, fmt.Errorf("get_destination_weather: lat/lng must be valid numbers")
+	}
+
+	cmd := get_destination_weather.Command{
+		Lat:  *lat,
+		Lng:  *lng,
+		Date: date,
+	}
+
+	return cmd, nil
 }
 
 // =============================================================================

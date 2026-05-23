@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	envDomain "github.com/ProacTrip/Backend/internal/modules/environment/domain"
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
 )
 
@@ -91,6 +92,17 @@ func WriteDoneEvent(w http.ResponseWriter, conversationID string, turnCount int)
 // WriteErrorEvent writes an SSE "error" event.
 func WriteErrorEvent(w http.ResponseWriter, message string) error {
 	return writeSSEEventJSON(w, "error", map[string]string{"error": message})
+}
+
+// WriteWeatherEvent writes an SSE "weather" event with destination weather data.
+// destination is a human-readable location name (e.g., "Barcelona, España").
+// weather may be nil (graceful fallback: provider unavailable).
+// Format: {"destination":"...","weather":{...}} or {"destination":"...","weather":null}
+func WriteWeatherEvent(w http.ResponseWriter, destination string, weather *envDomain.WeatherData) error {
+	return writeSSEEventJSON(w, "weather", map[string]interface{}{
+		"destination": destination,
+		"weather":     weather,
+	})
 }
 
 // WriteMedicalAlertsEvent writes an SSE "alert" event with medical/travel alerts.

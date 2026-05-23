@@ -421,12 +421,14 @@ func (h *Handler) buildMedicalContextMessage(ctx context.Context, userID string)
 func buildDefaultTools(includeMedicalAlerts bool) []map[string]interface{} {
 	hotelJSON, _ := json.Marshal(SearchHotelsToolDef())
 	flightJSON, _ := json.Marshal(SearchFlightsToolDef())
+	weatherJSON, _ := json.Marshal(GetDestinationWeatherToolDef())
 
-	var hotelMap, flightMap map[string]interface{}
+	var hotelMap, flightMap, weatherMap map[string]interface{}
 	json.Unmarshal(hotelJSON, &hotelMap)
 	json.Unmarshal(flightJSON, &flightMap)
+	json.Unmarshal(weatherJSON, &weatherMap)
 
-	tools := []map[string]interface{}{hotelMap, flightMap}
+	tools := []map[string]interface{}{hotelMap, flightMap, weatherMap}
 
 	if includeMedicalAlerts {
 		alertJSON, _ := json.Marshal(EmitMedicalAlertsToolDef())
