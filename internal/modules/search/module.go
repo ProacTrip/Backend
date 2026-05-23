@@ -100,8 +100,9 @@ type Config struct {
 	HotelDetailsTTL  time.Duration
 
 	// AI Search
-	AIInterpreter       domain.AIInterpreter       // AI natural language interpreter (nil = AI disabled)
+	AIInterpreter        domain.AIInterpreter        // AI natural language interpreter (nil = AI disabled)
 	DiscoveryInterpreter domain.DiscoveryInterpreter // AI discovery interpreter (nil = discovery disabled)
+	ToolCallStreamer     domain.ToolCallStreamer     // AI tool calling streamer (nil = tool calling disabled)
 
 	// SavedSearchProvider — provides access to saved searches from the user module.
 	SavedSearchProvider domain.SavedSearchProvider
@@ -244,6 +245,7 @@ func NewModule(cfg Config) (*Module, error) {
 		aiSearchUC = ai_search.NewUseCase(ai_search.UseCaseDeps{
 			AIInterpreter:        cfg.AIInterpreter,
 			DiscoveryInterpreter: cfg.DiscoveryInterpreter,
+			ToolCallStreamer:     cfg.ToolCallStreamer,
 			FlightSearcher:       searchUC,
 			HotelSearcher:        hotelsUC,
 			ConvStore:            convStore,

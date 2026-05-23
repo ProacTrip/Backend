@@ -424,6 +424,7 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		},
 		AIInterpreter:        aiInterpreter,
 		DiscoveryInterpreter: discoveryInterpreterFrom(aiInterpreter),
+		ToolCallStreamer:     toolCallStreamerFrom(aiInterpreter),
 		SavedSearchProvider:  nil,
 		UserProfilePort:      userProfilePort,
 		UserHealthPort:       userHealthPort,
@@ -746,4 +747,15 @@ func (app *App) Shutdown(ctx context.Context) error {
 func discoveryInterpreterFrom(ai searchDomain.AIInterpreter) searchDomain.DiscoveryInterpreter {
 	di, _ := ai.(searchDomain.DiscoveryInterpreter)
 	return di
+}
+
+// toolCallStreamerFrom creates a domain.ToolCallStreamer from an AIInterpreter.
+// Returns nil if the adapter doesn't support tool calling.
+// For the deepseek adapter, wraps it in a ToolCallStreamerAdapter that converts
+// domain types to the adapter's internal types and back.
+func toolCallStreamerFrom(ai searchDomain.AIInterpreter) searchDomain.ToolCallStreamer {
+	if adapter, ok := ai.(*ai_deepseek.Adapter); ok {
+		return ai_deepseek.NewToolCallStreamer(adapter)
+	}
+	return nil
 }
