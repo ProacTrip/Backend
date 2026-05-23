@@ -41,6 +41,8 @@ var integrationDefaults = shared.SearchDefaultConfig{
 func init() {
 	serrors.RegisterDomainErrorMapper(func(err error) *serrors.Problem {
 		switch {
+		case errors.Is(err, domain.ErrMissingRequiredField):
+			return serrors.ErrValidationError("Falta un campo requerido", err)
 		case errors.Is(err, domain.ErrAIUnavailable):
 			return serrors.ErrServiceUnavailable("Servicio de IA no disponible", err)
 		case errors.Is(err, domain.ErrAIParseFailure):
@@ -686,16 +688,11 @@ func TestIntegration_ErrorHandling_EmptyMessage(t *testing.T) {
 	c, rec := newAIEchoContext(`{"message": ""}`)
 
 	err := handler.Handle(c)
-	if err == nil {
-		t.Fatal("expected error for empty message")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-
-	he, ok := errors.AsType[*echo.HTTPError](err)
-	if !ok {
-		t.Fatalf("expected HTTPError, got: %v", err)
-	}
-	if he.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", he.Code)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rec.Code)
 	}
 	_ = rec
 }

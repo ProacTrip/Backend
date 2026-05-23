@@ -46,11 +46,12 @@ func UserIDFromContext(c *echo.Context) string {
 // =============================================================================
 
 // SearchDefaultConfig holds the hardcoded fallback defaults for search params.
-// CountryCode was removed in Phase 2 of ai-discovery-rewrite — country code
-// resolution now comes from the env:{ip} cache or DEFAULT_COUNTRY_CODE env var.
+// CountryCode is used as the final fallback when env:{ip} cache is empty and
+// no other location data is available (e.g., first request in local dev).
 type SearchDefaultConfig struct {
-	Currency string // e.g. "EUR"
-	Language string // e.g. "es"
+	Currency    string // e.g. "EUR"
+	Language    string // e.g. "es"
+	CountryCode string // e.g. "AR" — default country for location fallback
 }
 
 // ResolveSearchDefaults resolves HL (language) and Currency for search requests.

@@ -409,8 +409,9 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		RateLimiter:       rateLimiter,
 		RedisClient:       rdb,
 		SearchDefaults: searchShared.SearchDefaultConfig{
-			Currency: cfg.DefaultCurrency,
-			Language: cfg.DefaultLanguage,
+			Currency:    cfg.DefaultCurrency,
+			Language:    cfg.DefaultLanguage,
+			CountryCode: cfg.DefaultCountryCode,
 		},
 		AIInterpreter:        aiInterpreter,
 		DiscoveryInterpreter: discoveryInterpreterFrom(aiInterpreter),

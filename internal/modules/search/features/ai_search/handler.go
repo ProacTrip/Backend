@@ -3,7 +3,6 @@
 package ai_search
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,7 +16,6 @@ import (
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
 	"github.com/ProacTrip/Backend/internal/modules/search/features/shared"
 	serrors "github.com/ProacTrip/Backend/internal/shared/errors"
-	sharedEnv "github.com/ProacTrip/Backend/internal/shared/environment"
 	httperr "github.com/ProacTrip/Backend/internal/shared/http"
 	"github.com/ProacTrip/Backend/internal/shared/ratelimit"
 )
@@ -99,6 +97,13 @@ func (h *Handler) Handle(c *echo.Context) error {
 		// Send "thinking" event so the client knows processing has started
 		sseEvent(c, "status", map[string]string{"status": "thinking"})
 
+		// Dispatch to Tool Calling streaming path if available.
+		// Falls back to legacy Execute() for non-tool-calling deployments.
+		if h.usecase.toolCallStreamer != nil {
+			h.handleToolCallingStream(c, cmd, userID)
+			return nil
+		}
+
 		resp, err := h.usecase.Execute(c.Request().Context(), cmd, userID)
 		if err != nil {
 			slog.ErrorContext(c.Request().Context(), "ai_search stream failed",
@@ -122,7 +127,14 @@ func (h *Handler) Handle(c *echo.Context) error {
 			}
 		}
 
-		data, _ := json.Marshal(resp)
+		data, err := json.Marshal(resp)
+		if err != nil {
+			slog.ErrorContext(c.Request().Context(), "ai_search: json marshal failed",
+				slog.String("error", err.Error()),
+			)
+			sseError(c, "internal error")
+			return nil
+		}
 		sseEventRaw(c, "result", string(data))
 		return nil
 	}
@@ -136,13 +148,7 @@ func (h *Handler) Handle(c *echo.Context) error {
 		).WithInstance(c.Request().URL.Path))
 	}
 
-	// Validate the command before delegating to usecase.
-	// This gives us explicit control over the HTTP status code
-	// without relying on domain error mappers in the handler layer.
-	if err := cmd.Validate(); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-
+	// Validation is handled by the usecase (uc.Execute calls cmd.Validate()).
 	// Resolve user prefs + env data + fallback defaults
 	h.resolveContext(c, &cmd)
 
@@ -216,27 +222,6 @@ func (h *Handler) resolveContext(c *echo.Context, cmd *Command) {
 	cmd.ClientIP = clientIP
 }
 
-// resolveEnvCacheEntry reads the full env:{ip} cache entry from DragonflyDB.
-// Returns nil if the cache is unavailable or cannot be parsed.
-func (h *Handler) resolveEnvCacheEntry(ctx context.Context, ip string) *sharedEnv.CacheEntry {
-	if h.rdb == nil {
-		return nil
-	}
-	key := sharedEnv.CacheKey(ip)
-	raw, err := h.rdb.Get(ctx, key).Result()
-	if err != nil {
-		return nil
-	}
-	if raw == "" {
-		return nil
-	}
-	var entry sharedEnv.CacheEntry
-	if err := json.Unmarshal([]byte(raw), &entry); err != nil {
-		return nil
-	}
-	return &entry
-}
-
 // sseEvent sends a named SSE event with JSON payload.
 func sseEvent(c *echo.Context, event string, data any) {
 	payload, err := json.Marshal(data)
@@ -258,6 +243,70 @@ func sseEventRaw(c *echo.Context, event, data string) {
 // sseError sends an error SSE event to the client.
 func sseError(c *echo.Context, message string) {
 	sseEventRaw(c, "error", fmt.Sprintf(`{"error":"%s"}`, message))
+}
+
+// =============================================================================
+// Tool Calling streaming dispatch (Phase 2)
+// =============================================================================
+
+// handleToolCallingStream dispatches the request to ExecuteChatStream for
+// tool-calling-aware AI streaming. It builds the initial chat messages with
+// location context, constructs the tool definitions, and delegates SSE
+// streaming to the usecase.
+func (h *Handler) handleToolCallingStream(c *echo.Context, cmd Command, userID string) {
+	ctx := c.Request().Context()
+
+	// Resolve location hint for system context injection
+	hint := h.usecase.resolveLocationHint(ctx, userID, cmd.ClientIP)
+
+	// Build initial chat messages
+	messages := make([]domain.ChatMessage, 0, 2)
+	if hint != "" {
+		messages = append(messages, domain.ChatMessage{
+			Role:    "system",
+			Content: hint,
+		})
+	}
+	messages = append(messages, domain.ChatMessage{
+		Role:    "user",
+		Content: cmd.Message,
+	})
+
+	// Build tool definitions from typed ToolDefs
+	tools := buildDefaultTools()
+
+	// Build conversation context from resolved defaults.
+	// CountryCode comes from config defaults (DEFAULT_COUNTRY_CODE env).
+	convCtx := ConversationContext{
+		CountryCode: h.defaultsCfg.CountryCode,
+		Language:    cmd.HL,
+		Currency:    cmd.Currency,
+	}
+
+	maxTurns := h.usecase.maxTurnsForUser(userID)
+
+	_, err := h.usecase.ExecuteChatStream(ctx, c.Response(), messages, tools, maxTurns, convCtx)
+	if err != nil {
+		// Error already sent as SSE event by ExecuteChatStream.
+		slog.ErrorContext(ctx, "ai_search: ExecuteChatStream failed",
+			slog.String("error", err.Error()),
+			slog.String("message", cmd.Message),
+		)
+	}
+}
+
+// buildDefaultTools converts the typed ToolDefs for search_hotels and
+// search_flights into the []map[string]interface{} format expected by the
+// ToolCallStreamer interface.
+func buildDefaultTools() []map[string]interface{} {
+	hotelJSON, _ := json.Marshal(SearchHotelsToolDef())
+	flightJSON, _ := json.Marshal(SearchFlightsToolDef())
+
+	var hotelMap, flightMap map[string]interface{}
+	json.Unmarshal(hotelJSON, &hotelMap)
+	json.Unmarshal(flightJSON, &flightMap)
+
+	return []map[string]interface{}{hotelMap, flightMap}
 }
 
 // =============================================================================

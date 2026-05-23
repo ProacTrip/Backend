@@ -1,10 +1,10 @@
 // SSE streaming helpers para el handler de AI search.
 //
 // Proporciona funciones para escribir eventos Server-Sent Events (SSE)
-// al http.ResponseWriter. Usado por el handler para enviar respuestas
-// de discovery en tiempo real al frontend.
+// al http.ResponseWriter. Usado por Tool Calling y el handler para enviar
+// respuestas en tiempo real al frontend.
 //
-// Event types:
+// Event types (payloads match JSON objects sent over SSE):
 //   - "chunk": {"content": "partial text..."} — AI text delta
 //   - "search": {"destination": "...", "type": "hotels|flights", "data": {...}} — search results
 //   - "filters": {"available": {...}, "active": {...}} — filter options
@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 )
 
 // =============================================================================
@@ -48,48 +47,7 @@ func writeSSEEventJSON(w http.ResponseWriter, event string, data any) error {
 	return writeSSEEvent(w, event, string(payload))
 }
 
-// =============================================================================
-// streamDiscoveryResponse — lee un string y lo emite como chunks SSE
-// =============================================================================
 
-// streamDiscoveryResponse chunks a discovery AI response into SSE events.
-// Splits the full AI response into word-chunked SSE events so the frontend
-// can progressively render the response.
-//
-// Event types emitted:
-//   - "status": {"status": "thinking"} — immediately, before first chunk
-//   - "chunk": {"content": "partial text..."} — content delta
-//   - "done": {"full_text": "..."} — final event with complete response
-func streamDiscoveryResponse(w http.ResponseWriter, fullText string) error {
-	// Emit initial "thinking" status
-	if err := writeSSEEventJSON(w, "status", map[string]string{"status": "thinking"}); err != nil {
-		return err
-	}
-
-	// Split text into word-based chunks for progressive rendering.
-	// Simple approach: split on spaces, emit chunks of ~5 words each.
-	words := strings.Fields(fullText)
-	chunkSize := 5
-	totalWords := len(words)
-
-	for i := 0; i < totalWords; i += chunkSize {
-		end := i + chunkSize
-		if end > totalWords {
-			end = totalWords
-		}
-		chunk := strings.Join(words[i:end], " ")
-		if i+chunkSize < totalWords {
-			chunk += " "
-		}
-
-		if err := writeSSEEventJSON(w, "chunk", map[string]string{"content": chunk}); err != nil {
-			return err
-		}
-	}
-
-	// Emit final "done" event
-	return writeSSEEventJSON(w, "done", map[string]string{"full_text": fullText})
-}
 
 // =============================================================================
 // Public SSE event writers

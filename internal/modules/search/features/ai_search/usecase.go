@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -173,12 +172,6 @@ func NewUseCase(deps UseCaseDeps) *UseCase {
 // Dispatch: si DiscoveryEnabled y la consulta es de discovery (o el hint lo fuerza),
 // ejecuta el pipeline de discovery. Si no, ejecuta el flujo exact search existente.
 func (uc *UseCase) Execute(ctx context.Context, cmd Command, userID string) (*Response, error) {
-	slog.DebugContext(ctx, "ai_search.Execute: start",
-		slog.String("message", cmd.Message[:min(len(cmd.Message), 80)]),
-		slog.String("conversation_id", cmd.ConversationID),
-		slog.String("user_id", userID),
-	)
-
 	// 1. Validate command
 	if err := cmd.Validate(); err != nil {
 		slog.WarnContext(ctx, "ai_search.Execute: command validation failed",
@@ -187,14 +180,13 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command, userID string) (*Re
 		return nil, err
 	}
 
-	// 2. Discovery dispatch — if discovery interpreter is wired and the query
-	//    is a discovery query, route to AI-powered discovery pipeline.
-	//    The AI tool calling path has replaced prompt-based discovery.
-	if uc.discoveryInterpreter != nil && isDiscoveryQuery(cmd.Message) {
-		return uc.runDiscovery(ctx, cmd, userID)
-	}
+	slog.DebugContext(ctx, "ai_search.Execute: start",
+		slog.String("message", cmd.Message[:min(len(cmd.Message), 80)]),
+		slog.String("conversation_id", cmd.ConversationID),
+		slog.String("user_id", userID),
+	)
 
-	// 3. Default: exact search (existing behavior)
+	// 2. Default: exact search (existing behavior)
 	return uc.runExactSearch(ctx, cmd, userID)
 }
 
@@ -420,7 +412,6 @@ func (uc *UseCase) runExactSearch(ctx context.Context, cmd Command, userID strin
 	conv.TurnCount++
 
 	// Store results as JSON RawMessage
-	var resultsJSON json.RawMessage
 	if flightResp != nil || hotelResp != nil {
 		combined := struct {
 			Flights *search_flights.Response `json:"flights,omitzero"`
@@ -429,8 +420,16 @@ func (uc *UseCase) runExactSearch(ctx context.Context, cmd Command, userID strin
 			Flights: flightResp,
 			Hotels:  hotelResp,
 		}
-		resultsJSON, _ = json.Marshal(combined)
-		conv.Results = resultsJSON
+		resultsJSON, err := json.Marshal(combined)
+		if err != nil {
+			// Non-fatal: log and skip storing results (response already has separate fields).
+			slog.ErrorContext(ctx, "ai_search: failed to marshal combined results",
+				slog.String("conversation_id", conv.ID),
+				slog.String("error", err.Error()),
+			)
+		} else {
+			conv.Results = resultsJSON
+		}
 	}
 
 	if saveErr := uc.convStore.SaveConversation(ctx, conv); saveErr != nil {
@@ -505,21 +504,6 @@ func (uc *UseCase) runExactSearch(ctx context.Context, cmd Command, userID strin
 	return resp, nil
 }
 
-// =============================================================================
-// isDiscoveryQuery — determina si una consulta debe ir al pipeline de discovery
-// =============================================================================
-
-// isDiscoveryQuery returns true when the query should be routed to the
-// AI-powered discovery pipeline (natural language recommendation requests).
-// Used as a simple heuristic: checks for discovery-intent keywords.
-// The main dispatch mechanism is SearchModeHint="discovery" from the frontend.
-func isDiscoveryQuery(message string) bool {
-	// Only auto-detect when SearchModeHint is not explicitly set.
-	// Keep simple — the frontend should set search_mode="discovery" explicitly.
-	return false
-}
-
-// =============================================================================
 // runDiscovery — AI-powered discovery pipeline
 // =============================================================================
 
@@ -792,11 +776,10 @@ func (uc *UseCase) resolveLocationHint(ctx context.Context, userID, clientIP str
 		}
 	}
 
-	// Fallback: use DEFAULT_COUNTRY_CODE env var when no location data is available
+	// Fallback: use config defaults when no location data is available
 	// (e.g. first request in local dev where /v1/environment hasn't been called).
-	// Phase 2 ai-discovery-rewrite: reads env var directly instead of defaultsCfg.CountryCode.
 	if city == "" && country == "" && countryCode == "" {
-		if defaultCC := os.Getenv("DEFAULT_COUNTRY_CODE"); defaultCC != "" {
+		if defaultCC := uc.defaultsCfg.CountryCode; defaultCC != "" {
 			// Intentar obtener CountryInfo desde la caché de entorno para la IP.
 			ci, ciErr := sharedEnv.GetCountryInfo(ctx, uc.rdb, clientIP)
 			if ciErr == nil && ci.Country != "" {

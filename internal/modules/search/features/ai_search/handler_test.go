@@ -79,6 +79,9 @@ func TestHandler_ValidMessage(t *testing.T) {
 }
 
 // TestHandler_EmptyMessage verifies that an empty message returns 400.
+// Validation is handled by the usecase (cmd.Validate()), which returns
+// a domain error. The handler delegates to MapError which writes the
+// HTTP response directly via c.JSON().
 func TestHandler_EmptyMessage(t *testing.T) {
 	convStore := &stubConversationStore{}
 	uc := ai_search.NewUseCase(ai_search.UseCaseDeps{
@@ -92,21 +95,11 @@ func TestHandler_EmptyMessage(t *testing.T) {
 
 	c, rec := newEchoContext(`{"message": ""}`)
 
-	err := handler.Handle(c)
-	// Handler validates command before usecase and returns HTTPError(400).
-	// In direct handler tests (not routed through Echo middleware),
-	// the error is returned directly and rec.Code is not set.
-	if err == nil {
-		t.Fatal("expected error for empty message, got nil")
+	_ = handler.Handle(c)
+	// MapError writes the response directly via c.JSON(); handler returns nil.
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request, got %d", rec.Code)
 	}
-	he, ok := errors.AsType[*echo.HTTPError](err)
-	if !ok {
-		t.Fatalf("expected *echo.HTTPError, got %T: %v", err, err)
-	}
-	if he.Code != http.StatusBadRequest {
-		t.Errorf("HTTPError code = %d, want %d", he.Code, http.StatusBadRequest)
-	}
-	_ = rec
 }
 
 // TestHandler_AuthUser verifies that an authenticated user's request

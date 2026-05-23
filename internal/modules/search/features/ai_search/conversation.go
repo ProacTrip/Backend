@@ -139,8 +139,14 @@ func (s *ConvStore) Save(ctx context.Context, conv *Conversation) error {
 	pipe := s.rdb.Pipeline()
 	pipe.Set(ctx, key, string(data), conversationTTL)
 
-	pipe.SAdd(ctx, userConvsKey(conv.UserID), conv.ID)
-	pipe.Expire(ctx, userConvsKey(conv.UserID), conversationTTL)
+	if conv.UserID != "" {
+		pipe.SAdd(ctx, userConvsKey(conv.UserID), conv.ID)
+		pipe.Expire(ctx, userConvsKey(conv.UserID), conversationTTL)
+	} else {
+		slog.DebugContext(ctx, "ConversationStore.Save: skipping user index for anonymous conversation",
+			slog.String("conversation_id", conv.ID),
+		)
+	}
 
 	if _, err := pipe.Exec(ctx); err != nil {
 		slog.ErrorContext(ctx, "ConversationStore.Save: pipeline failed",
