@@ -113,7 +113,6 @@ func TestRequireAdmin_RoleNoAdmin_Retorna403(t *testing.T) {
 	}{
 		{"role_client", "client"},
 		{"role_user", "user"},
-		{"role_staff", "staff"},
 		{"role_vacio", ""},
 	}
 

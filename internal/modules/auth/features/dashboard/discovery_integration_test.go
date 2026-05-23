@@ -1,5 +1,5 @@
 // Test de integración end-to-end para el flujo completo del dashboard:
-// crear usuario staff → autenticar → listar → deshabilitar → verificar 401.
+// crear usuario client → autenticar → listar → deshabilitar → verificar 401.
 //
 // Este test ejercita el pipeline completo: handler → usecase → repo (mock)
 // con el middleware RequirePermission y el flujo de invalidación de token_version.
@@ -36,16 +36,16 @@ type mockDashboardRepo struct {
 
 func newMockDashboardRepo() *mockDashboardRepo {
 	roleID := uuid.Must(uuid.NewV7())
-	staffID := uuid.Must(uuid.NewV7())
+	clientID := uuid.Must(uuid.NewV7())
 
 	return &mockDashboardRepo{
 		users: map[uuid.UUID]*domain.User{
-			staffID: {
-				ID:            staffID,
-				Email:         "staff@proactrip.com",
+			clientID: {
+				ID:            clientID,
+				Email:         "client@proactrip.com",
 				Status:        domain.StatusActive,
 				RoleID:        roleID,
-				RoleName:      "staff",
+				RoleName:      "client",
 				EmailVerified: true,
 				TokenVersion:  1,
 			},
@@ -147,7 +147,7 @@ func TestDashboardIntegration_ListThenDisableThenUnauthorized(t *testing.T) {
 
 	repo := newMockDashboardRepo()
 	resolver := &mockPermissionResolver{}
-	staffUser := repo.users[findStaffID(repo.users)]
+	clientUser := repo.users[findFirstUserID(repo.users)]
 
 	// 1. Crear handlers con los mismos deps que module.go
 	listUsersUC := listusers.NewUseCase(repo)
@@ -162,16 +162,16 @@ func TestDashboardIntegration_ListThenDisableThenUnauthorized(t *testing.T) {
 	// ========== SETUP: Registrar rutas del dashboard ==========
 	dashboard := e.Group("/v1/dashboard")
 
-	// Simular claims con permisos de staff (inyectados por middleware en producción)
-	staffClaims := &mockPermissionClaims{
-		userID:      staffUser.ID,
+	// Simular claims con permisos de admin (inyectados por middleware en producción)
+	adminClaims := &mockPermissionClaims{
+		userID:      clientUser.ID,
 		permissions: []string{"users:read", "users:write"},
 	}
 
 	// Middleware que inyecta claims de usuario (simula auth middleware)
 	authSimulator := func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
-			c.Set("user_claims", staffClaims)
+			c.Set("user_claims", adminClaims)
 			return next(c)
 		}
 	}
@@ -193,14 +193,14 @@ func TestDashboardIntegration_ListThenDisableThenUnauthorized(t *testing.T) {
 	}
 	t.Logf("✓ List users → 200 OK")
 
-	// Verificar que la respuesta contiene al staff user
-	if !strings.Contains(rec.Body.String(), staffUser.Email) {
-		t.Errorf("TEST 1 — List users: respuesta no contiene email del staff user: %s", rec.Body.String())
+	// Verificar que la respuesta contiene al client user
+	if !strings.Contains(rec.Body.String(), clientUser.Email) {
+		t.Errorf("TEST 1 — List users: respuesta no contiene email del client user: %s", rec.Body.String())
 	}
 
 	// ========== TEST 2: Disable account ==========
 	body := `{"status":"disabled"}`
-	req = httptest.NewRequest(http.MethodPut, "/v1/dashboard/users/"+staffUser.ID.String()+"/status",
+	req = httptest.NewRequest(http.MethodPut, "/v1/dashboard/users/"+clientUser.ID.String()+"/status",
 		strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec = httptest.NewRecorder()
@@ -212,7 +212,7 @@ func TestDashboardIntegration_ListThenDisableThenUnauthorized(t *testing.T) {
 	t.Logf("✓ Disable account → 200 OK")
 
 	// Verificar que el status cambió en el repo
-	updatedUser, _ := repo.GetByID(ctx, staffUser.ID)
+	updatedUser, _ := repo.GetByID(ctx, clientUser.ID)
 	if updatedUser.Status != domain.StatusDisabled {
 		t.Errorf("TEST 2 — Disable account: status esperado 'disabled', recibido '%s'", updatedUser.Status)
 	}
@@ -235,7 +235,7 @@ func TestDashboardIntegration_ListThenDisableThenUnauthorized(t *testing.T) {
 	// ========== TEST 4: Account status endpoint validation ==========
 	// Intentar estado inválido
 	body = `{"status":"suspended"}`
-	req = httptest.NewRequest(http.MethodPut, "/v1/dashboard/users/"+staffUser.ID.String()+"/status",
+	req = httptest.NewRequest(http.MethodPut, "/v1/dashboard/users/"+clientUser.ID.String()+"/status",
 		strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec = httptest.NewRecorder()
@@ -247,7 +247,7 @@ func TestDashboardIntegration_ListThenDisableThenUnauthorized(t *testing.T) {
 	t.Logf("✓ Invalid status (suspended) → 400 Bad Request")
 
 	// ========== TEST 5: User detail con permisos efectivos ==========
-	req = httptest.NewRequest(http.MethodGet, "/v1/dashboard/users/"+staffUser.ID.String(), nil)
+	req = httptest.NewRequest(http.MethodGet, "/v1/dashboard/users/"+clientUser.ID.String(), nil)
 	rec = httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
@@ -292,14 +292,14 @@ func TestDashboardErrorMappers(t *testing.T) {
 	userDetailUC := userdetail.NewUseCase(repo, resolver)
 	userDetailHandler := userdetail.NewHandler(userDetailUC)
 
-	staffClaims := &mockPermissionClaims{
+	adminClaims := &mockPermissionClaims{
 		userID:      uuid.Must(uuid.NewV7()),
 		permissions: []string{"users:read", "users:write"},
 	}
 
 	authSimulator := func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
-			c.Set("user_claims", staffClaims)
+			c.Set("user_claims", adminClaims)
 			return next(c)
 		}
 	}
@@ -401,7 +401,7 @@ var _ sharedmiddleware.PermissionClaims = (*mockPermissionClaims)(nil)
 // Helpers
 // =============================================================================
 
-func findStaffID(users map[uuid.UUID]*domain.User) uuid.UUID {
+func findFirstUserID(users map[uuid.UUID]*domain.User) uuid.UUID {
 	for id := range users {
 		return id
 	}

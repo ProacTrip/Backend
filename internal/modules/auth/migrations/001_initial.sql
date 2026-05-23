@@ -3,7 +3,7 @@
 -- MIGRACIÓN 001: Schema base del módulo Auth
 -- =============================================================================
 -- Crea las tablas core del sistema de autenticación:
---   roles              — roles del sistema (client, staff, admin)
+--   roles              — roles del sistema (client, admin)
 --   permissions        — permisos RBAC (recurso + acción)
 --   role_permissions   — relación roles ↔ permisos (M:N)
 --   users              — usuarios con email, contraseña, estado, rol
@@ -12,7 +12,7 @@
 --   default_feature_limits    — límites de features por rol
 --   user_auth_identities      — identidades OAuth vinculadas a usuarios
 --
--- También incluye seeds: roles (3), permisos admin (9), admin user.
+-- También incluye seeds: roles (2), permisos admin (9), admin user.
 -- =============================================================================
 --
 -- =============================================================================
@@ -52,7 +52,6 @@ CREATE TRIGGER update_roles_updated_at
 INSERT INTO roles(name, description, is_system)
     VALUES
         ('client', 'Usuario estándar de la plataforma', TRUE),
-        ('staff', 'Personal interno con permisos elevados', FALSE),
         ('admin', 'Administrador con control total', TRUE);
 
 -- =============================================================================
