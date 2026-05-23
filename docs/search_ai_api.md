@@ -83,6 +83,7 @@ El endpoint `POST /v1/search/ai` usa **Tool Calling** — el modelo de AI decide
 |------|-----------|-------------------|
 | `search_flights` | Busca vuelos entre dos aeropuertos | `trip_type`, `departure`, `arrival`, `outbound_date` |
 | `search_hotels` | Busca hoteles en un destino | `query`, `check_in_date`, `check_out_date` |
+| `get_destination_weather` | Obtiene el clima en un destino para una fecha específica | `lat`, `lng`, `date` |
 
 **Flujo:**
 1. El frontend envía `{"message": "..."}` (y opcionalmente `conversation_id`, `stream`)
@@ -333,6 +334,9 @@ data: {"status":"thinking"}
 event: chunk
 data: {"content":"Voy a buscar vuelos..."}
 
+event: weather
+data: {"destination":"Bali, Indonesia","weather":{"temp":28.5,"feels_like":31.2,"description":"cielo claro","icon":"01d","icon_url":"https://openweathermap.org/img/wn/01d@4x.png","humidity":65,"wind_speed":4.2}}
+
 event: search
 data: {"destination":"MAD→BCN","type":"flights","data":{...}}
 
@@ -359,6 +363,7 @@ data: {"error":"mensaje de error"}
 | `status` | `{"status":"thinking"}` | Inmediatamente al recibir el request. Indica que el procesamiento comenzó |
 | `chunk` | `{"content":"..."}` | Fragmento de texto generado por la AI. Se envía en tiempo real |
 | `search` | `{"destination":"...","type":"hotels\|flights","data":{...}}` | Resultados de una búsqueda ejecutada (tool call completado) |
+| `weather` | `{"destination":"Bali, Indonesia","weather":{"temp":28.5,"feels_like":31.2,"description":"cielo claro","icon":"01d","icon_url":"https://openweathermap.org/img/wn/01d@4x.png","humidity":65,"wind_speed":4.2}}` | Datos climáticos del destino para la fecha solicitada. La AI decide si llamar a esta tool según la consulta del usuario. Cacheado 10 min en DragonflyDB |
 | `result` | `{...respuesta JSON completa...}` | Respuesta final unificada. Contiene todos los campos de la respuesta JSON estándar |
 | `error` | `{"error":"mensaje"}` | Error durante el procesamiento (AI no disponible, rate limit, etc.) |
 | `alert` | `{"alerts":[{"level":"warning"\|"info","type":"allergy"\|"medication_restricted"\|"vaccination"\|"condition"\|"travel"\|"document","message":"..."}]}` | Alertas médicas o de viaje detectadas por la AI. Solo para usuarios autenticados |
