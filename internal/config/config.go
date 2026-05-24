@@ -67,6 +67,7 @@ type Config struct {
 	Documents          DocumentLimitsConfig       // Límites de documentos
 	R2                 R2StorageConfig            // Configuración de R2 (S3-compatible)
 	CookieDomain       string                     // Dominio para cookies de auth (.proactrip.com en prod, vacío en dev)
+	AvatarBaseURL      string                     // URL base para CDN de avatares (AVATAR_BASE_URL env, ej. "https://cdn.proactrip.com")
 }
 
 // Configuración de la base de datos PostgreSQL
@@ -384,6 +385,7 @@ func Load() *Config {
 			}
 			return ""
 		}()),
+		AvatarBaseURL: getEnv("AVATAR_BASE_URL", ""),
 	}
 }
 

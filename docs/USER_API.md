@@ -421,10 +421,10 @@ curl -X GET {base_url}/profile \
 |-------|------|-------------|
 | `id` | string (UUID v7) | ID del perfil (diferente de `user_id`) |
 | `user_id` | string (UUID v7) | ID del usuario en la tabla `users` |
-| `first_name` | string\|null | Nombre del usuario |
+| `first_name` | string\|null | Nombre del usuario. Obligatorio para usuarios registrados sin OAuth (proviene del formulario de registro). Usuarios OAuth obtienen `given_name` de Google. |
 | `last_name` | string\|null | Apellido del usuario |
 | `email` | string | Email del usuario |
-| `avatar_url` | string | URL del avatar actual |
+| `avatar_url` | string\|null | URL del avatar actual. `null` para usuarios nuevos sin OAuth. Usuarios OAuth (Google) obtienen el avatar de Google automáticamente desde el evento `auth.user.registered`. |
 | `date_of_birth` | string\|null | Fecha de nacimiento (YYYY-MM-DD) |
 | `gender` | string\|null | `male`, `female`, `non_binary`, `prefer_not_to_say` |
 | `nationality` | string\|null | Código ISO 3166-1 alpha-2 (ej: `AR`) |
@@ -512,6 +512,7 @@ curl -X PATCH {base_url}/profile \
 | `PROFILE_NOT_FOUND` | 404 | `profile-not-found` | No existe perfil para el usuario autenticado |
 | `INVALID_ENUM` | 400 | `invalid-gender` | Valor de `gender` no válido |
 | `VALIDATION_ERROR` | 400 | `validation-error` | Body malformado o campo con formato inválido |
+| `INVALID_PHONE` | 400 | `invalid-phone` | `phone` no cumple formato E.164 (`^\+[1-9]\d{1,14}$`) |
 | `TOKEN_INVALID` | 401 | `unauthorized` | Cookie inválida o expirada |
 | `INTERNAL_ERROR` | 500 | `internal-error` | Error inesperado |
 | `INVALID_LANGUAGE_CODE` | 400 | `invalid-language-code` | `language_code` no es un código ISO 639 válido |
@@ -633,6 +634,7 @@ curl -X PATCH {base_url}/travel-preferences \
 | `PROFILE_NOT_FOUND` | 404 | `profile-not-found` | No existe perfil para el usuario autenticado |
 | `INVALID_ENUM` | 400 | `invalid-enum` | Valor de `preferred_class` o `seat_preference` no válido |
 | `VALIDATION_ERROR` | 400 | `validation-error` | Body malformado o `max_layover_duration` negativo |
+| `INVALID_MAX_LAYOVER` | 400 | `invalid-max-layover` | `max_layover_duration` es negativo (debe ser ≥ 0) |
 | `TOKEN_INVALID` | 401 | `unauthorized` | Cookie inválida o expirada |
 | `INTERNAL_ERROR` | 500 | `internal-error` | Error inesperado |
 
