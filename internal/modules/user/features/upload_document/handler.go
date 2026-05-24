@@ -1,4 +1,4 @@
-// Handler HTTP para POST /v1/user/documents.
+// Handler HTTP para POST /v1/user/profile/documents.
 // Recibe el archivo como multipart/form-data.
 // Handler es thin: extrae claims, parsea el form y delega toda validación al usecase.
 package upload_document
@@ -16,7 +16,7 @@ import (
 	httperr "github.com/ProacTrip/Backend/internal/shared/http"
 )
 
-// Handler procesa POST /v1/user/documents.
+// Handler procesa POST /v1/user/profile/documents.
 type Handler struct {
 	usecase *UseCase
 }

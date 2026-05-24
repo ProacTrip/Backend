@@ -1,4 +1,4 @@
-// Caso de uso: Actualizar perfil de usuario (PUT /v1/user/profile).
+// Caso de uso: Actualizar perfil de usuario (PATCH /v1/user/profile).
 // Valida género y nacionalidad antes de actualizar.
 package update_profile
 

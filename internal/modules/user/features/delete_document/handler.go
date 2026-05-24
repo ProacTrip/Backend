@@ -1,4 +1,4 @@
-// Handler HTTP para DELETE /v1/user/documents/:document_id.
+// Handler HTTP para DELETE /v1/user/profile/documents/:document_id.
 // Thin handler: extrae claims y document_id, delega al usecase.
 package delete_document
 
@@ -11,7 +11,7 @@ import (
 	httperr "github.com/ProacTrip/Backend/internal/shared/http"
 )
 
-// Handler procesa DELETE /v1/user/documents/:document_id.
+// Handler procesa DELETE /v1/user/profile/documents/:document_id.
 type Handler struct {
 	usecase *UseCase
 }

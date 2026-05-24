@@ -1,4 +1,4 @@
-// Caso de uso: Listar documentos (GET /v1/user/documents).
+// Caso de uso: Listar documentos (GET /v1/user/profile/documents).
 // Valida filtros y consulta el repositorio.
 package list_documents
 
@@ -41,10 +41,21 @@ func NewUseCase(deps UseCaseDeps) *UseCase {
 }
 
 // Execute lista los documentos del usuario con filtros opcionales.
+// Valida status y document_type contra los enums documentados en USER_API.md.
 func (uc *UseCase) Execute(ctx context.Context, userIDStr, statusFilter, docTypeFilter string) ([]*domain.UserDocument, error) {
 	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid user_id: %w", err)
+	}
+
+	// Validar status filter — solo los 5 estados OCR documentados
+	if statusFilter != "" && !isValidOCRStatus(statusFilter) {
+		return nil, domain.ErrInvalidEnum
+	}
+
+	// Validar document_type filter contra el catálogo de códigos
+	if docTypeFilter != "" && !isValidDocumentType(docTypeFilter) {
+		return nil, domain.ErrInvalidDocumentType
 	}
 
 	var docs []*domain.UserDocument
@@ -62,4 +73,26 @@ func (uc *UseCase) Execute(ctx context.Context, userIDStr, statusFilter, docType
 	}
 
 	return docs, nil
+}
+
+// isValidOCRStatus verifica que el status sea uno de los 5 estados documentados.
+func isValidOCRStatus(s string) bool {
+	switch domain.OCRStatus(s) {
+	case domain.OCRStatusQueued, domain.OCRStatusProcessing,
+		domain.OCRStatusCompleted, domain.OCRStatusRejected, domain.OCRStatusFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+// isValidDocumentType verifica que el código de tipo de documento sea válido.
+func isValidDocumentType(code string) bool {
+	switch code {
+	case "passport", "national_id", "drivers_license", "visa",
+		"travel_insurance", "vaccination_cert", "boarding_pass", "receipt":
+		return true
+	default:
+		return false
+	}
 }

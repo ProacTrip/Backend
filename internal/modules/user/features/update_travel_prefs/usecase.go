@@ -1,4 +1,4 @@
-// Caso de uso: Actualizar preferencias de viaje (PUT /v1/user/profile/travel-preferences).
+// Caso de uso: Actualizar preferencias de viaje (PATCH /v1/user/profile/travel-preferences).
 // Si no existen, las crea. Si existen, actualiza los campos no-nil.
 package update_travel_prefs
 
@@ -67,6 +67,9 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) error {
 		if !isValidSeatPreference(*cmd.SeatPreference) {
 			return domain.ErrInvalidSeatPreference
 		}
+	}
+	if cmd.MaxLayoverDuration != nil && *cmd.MaxLayoverDuration < 0 {
+		return domain.ErrInvalidMaxLayover
 	}
 
 	// Intentar obtener prefs existentes

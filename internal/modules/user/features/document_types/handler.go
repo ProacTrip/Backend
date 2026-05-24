@@ -1,4 +1,4 @@
-// Handler HTTP para GET /v1/user/documents/types.
+// Handler HTTP para GET /v1/user/profile/documents/types.
 // Thin handler: público sin autenticación, delega al usecase.
 package document_types
 
@@ -10,7 +10,7 @@ import (
 	httperr "github.com/ProacTrip/Backend/internal/shared/http"
 )
 
-// Handler procesa GET /v1/user/documents/types.
+// Handler procesa GET /v1/user/profile/documents/types.
 type Handler struct {
 	usecase *UseCase
 }

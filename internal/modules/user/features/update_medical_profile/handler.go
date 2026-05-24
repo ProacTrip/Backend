@@ -10,7 +10,7 @@ import (
 	"github.com/labstack/echo/v5"
 )
 
-// Handler procesa PUT /v1/user/profile/medical.
+// Handler procesa PATCH /v1/user/profile/medical.
 type Handler struct {
 	usecase *UseCase
 }

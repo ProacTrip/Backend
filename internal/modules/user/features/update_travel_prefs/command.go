@@ -1,4 +1,4 @@
-// Comando para PUT /v1/user/profile/travel-preferences.
+// Comando para PATCH /v1/user/profile/travel-preferences.
 package update_travel_prefs
 
 import (
