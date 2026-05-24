@@ -14,7 +14,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/ProacTrip/Backend/internal/modules/user/adapters/storage"
 	"github.com/ProacTrip/Backend/internal/modules/user/domain"
 	"github.com/ProacTrip/Backend/internal/shared/eventbus"
 )
@@ -40,9 +39,9 @@ var AcceptedAvatarMimeTypes = map[string]bool{
 // Ports
 // =============================================================================
 
-// R2Client es el puerto para interactuar con R2 storage.
-type R2Client interface {
-	Exists(ctx context.Context, bucket, key string) (bool, error)
+// AvatarStorage es el puerto para generar URLs prefirmadas de R2.
+type AvatarStorage interface {
+	GenerateDownloadURL(ctx context.Context, bucket, key string, expiry time.Duration) (string, error)
 }
 
 // =============================================================================
@@ -52,28 +51,28 @@ type R2Client interface {
 // AvatarValidator consume el stream {events}:avatar:validate, valida
 // archivos en R2 y actualiza el avatar del usuario.
 type AvatarValidator struct {
-	rdb          *redis.Client
-	repo         domain.ProfileRepository
-	group        string
-	consumer     string
-	dlqStream    string
-	storage      *storage.R2Storage // R2 client para generar presigned URLs
-	bucket       string             // bucket de assets (proactrip-assets)
-	running      atomic.Bool
-	orphanDone   chan struct{} // cerrado cuando rescueOrphans termina
+	rdb        *redis.Client
+	repo       domain.ProfileRepository
+	group      string
+	consumer   string
+	dlqStream  string
+	storage    AvatarStorage // genera presigned URLs de R2
+	bucket     string        // bucket de assets (proactrip-assets)
+	running    atomic.Bool
+	orphanDone chan struct{} // cerrado cuando rescueOrphans termina
 }
 
 // NewAvatarValidator crea un nuevo validador de avatares.
 // Genera URLs prefirmadas de R2 con TTL de 24 horas.
-func NewAvatarValidator(rdb *redis.Client, repo domain.ProfileRepository, r2Storage *storage.R2Storage, bucket string) *AvatarValidator {
+func NewAvatarValidator(rdb *redis.Client, repo domain.ProfileRepository, r2Storage AvatarStorage, bucket string) *AvatarValidator {
 	return &AvatarValidator{
-		rdb:       rdb,
-		repo:      repo,
-		group:     avatarGroup,
-		consumer:  fmt.Sprintf("avatar-validator-%d", time.Now().UnixMilli()),
+		rdb:      rdb,
+		repo:     repo,
+		group:    avatarGroup,
+		consumer: fmt.Sprintf("avatar-validator-%d", time.Now().UnixMilli()),
 		dlqStream: AvatarDLQStream,
-		storage:   r2Storage,
-		bucket:    bucket,
+		storage:  r2Storage,
+		bucket:   bucket,
 	}
 }
 
