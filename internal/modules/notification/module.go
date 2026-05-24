@@ -13,6 +13,7 @@ import (
 	"github.com/ProacTrip/Backend/internal/modules/notification/consumer"
 	"github.com/ProacTrip/Backend/internal/modules/notification/features/send_account_status_email"
 	"github.com/ProacTrip/Backend/internal/modules/notification/features/send_verification_email"
+	"github.com/ProacTrip/Backend/internal/shared/eventbus"
 	"github.com/ProacTrip/Backend/internal/shared/ratelimit"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
@@ -27,13 +28,16 @@ type Module struct {
 	EmailSender *email.ResendService
 
 	// Use Cases
-	SendVerificationEmailUseCase    *send_verification_email.UseCase
-	SendAccountStatusEmailUseCase   *send_account_status_email.UseCase
+	SendVerificationEmailUseCase  *send_verification_email.UseCase
+	SendAccountStatusEmailUseCase *send_account_status_email.UseCase
 
-	// Event Consumer
+	// Event Consumers
+	// EventConsumer listens to auth.user.registered for verification emails.
 	EventConsumer *consumer.NotificationConsumer
+	// StatusEventConsumer listens to auth.account.events for account status emails.
+	StatusEventConsumer *consumer.NotificationConsumer
 
-	// Control de apagado del consumer
+	// Control de apagado
 	cancel context.CancelFunc
 }
 
@@ -79,16 +83,28 @@ func NewModule(cfg Config) (*Module, error) {
 		},
 	)
 
-	// 4. Inicializar Event Consumer (Dragonfly Streams)
+	// 4. Inicializar Event Consumers (Dragonfly Streams)
+	// Consumer 1: Verification emails from auth.user.registered
 	m.EventConsumer = consumer.NewNotificationConsumer(
 		cfg.RedisClient,
 		m.SendVerificationEmailUseCase,
 		m.SendAccountStatusEmailUseCase,
+		eventbus.StreamName("auth.user.registered"),
+		"notification-verify",
+	)
+
+	// Consumer 2: Account status emails from auth.account.events
+	m.StatusEventConsumer = consumer.NewNotificationConsumer(
+		cfg.RedisClient,
+		m.SendVerificationEmailUseCase,
+		m.SendAccountStatusEmailUseCase,
+		eventbus.StreamName("auth.account.events"),
+		"notification-status",
 	)
 
 	slog.Info("Notification module initialized",
 		"features", []string{"send_verification_email", "send_account_status_email"},
-		"consumer", "notification-consumer",
+		"consumers", []string{"notification-verify", "notification-status"},
 	)
 
 	return m, nil

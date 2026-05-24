@@ -33,6 +33,7 @@ type NotificationConsumer struct {
 	group           string
 	consumer        string
 	streamName      string
+	name            string
 	running         atomic.Bool // true mientras el loop principal de consumo está vivo
 }
 
@@ -40,14 +41,15 @@ type NotificationConsumer struct {
 // Constructor
 // =============================================================================
 
-func NewNotificationConsumer(rdb *redis.Client, uc *send_verification_email.UseCase, accountStatusUC *send_account_status_email.UseCase) *NotificationConsumer {
+func NewNotificationConsumer(rdb *redis.Client, uc *send_verification_email.UseCase, accountStatusUC *send_account_status_email.UseCase, streamName string, group string) *NotificationConsumer {
 	return &NotificationConsumer{
 		rdb:             rdb,
 		usecase:         uc,
 		accountStatusUC: accountStatusUC,
-		group:           "notification-service",
+		group:           group,
 		consumer:        fmt.Sprintf("notification-worker-%d", time.Now().UnixMilli()),
-		streamName:      eventbus.StreamName("auth.user.registered"),
+		streamName:      streamName,
+		name:            group, // e.g. "notification-verify" or "notification-status"
 	}
 }
 
@@ -74,7 +76,7 @@ func (c *NotificationConsumer) Start(ctx context.Context) error {
 func (c *NotificationConsumer) IsRunning() bool { return c.running.Load() }
 
 // Name retorna un identificador legible para reportes de health check.
-func (c *NotificationConsumer) Name() string { return "notification-consumer" }
+func (c *NotificationConsumer) Name() string { return c.name }
 
 // =============================================================================
 // Worker loop con backoff exponencial

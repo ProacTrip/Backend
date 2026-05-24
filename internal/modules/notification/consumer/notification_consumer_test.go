@@ -81,6 +81,7 @@ func newTestConsumer(t *testing.T) (*NotificationConsumer, *miniredis.Miniredis)
 		group:      "notification-service",
 		consumer:   "test-worker",
 		streamName: eventbus.StreamName("auth.user.registered"),
+		name:       "notification-consumer",
 	}
 
 	return nc, mr
@@ -114,6 +115,7 @@ func newTestConsumerWithUsecase(t *testing.T) (*NotificationConsumer, *mockEmail
 		group:      "notification-service",
 		consumer:   "test-worker",
 		streamName: eventbus.StreamName("auth.user.registered"),
+		name:       "notification-consumer",
 	}
 
 	return nc, sender, mr
@@ -271,8 +273,8 @@ func TestName(t *testing.T) {
 	nc, _ := newTestConsumer(t)
 
 	name := nc.Name()
-	if name != "notification-consumer" {
-		t.Errorf("Name() = %q, se esperaba 'notification-consumer'", name)
+	if name != "notification-service" {
+		t.Errorf("Name() = %q, se esperaba 'notification-service'", name)
 	}
 }
 
@@ -284,12 +286,12 @@ func TestNewNotificationConsumer_NoNil(t *testing.T) {
 	mr := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 
-	nc := NewNotificationConsumer(client, nil, nil)
+	nc := NewNotificationConsumer(client, nil, nil, eventbus.StreamName("auth.user.registered"), "notification-service")
 	if nc == nil {
 		t.Fatal("NewNotificationConsumer retornó nil")
 	}
-	if nc.Name() != "notification-consumer" {
-		t.Errorf("Name() = %q, se esperaba 'notification-consumer'", nc.Name())
+	if nc.Name() != "notification-service" {
+		t.Errorf("Name() = %q, se esperaba 'notification-service'", nc.Name())
 	}
 }
 
@@ -456,6 +458,7 @@ func TestStart_Lifecycle(t *testing.T) {
 		group:      "notification-service",
 		consumer:   "test-worker-lifecycle",
 		streamName: eventbus.StreamName("auth.user.registered"),
+		name:       "notification-consumer",
 	}
 
 	if nc.IsRunning() {
@@ -547,6 +550,7 @@ func newTestConsumerWithAccountStatus(t *testing.T) (*NotificationConsumer, *moc
 		group:           "notification-service",
 		consumer:        "test-worker-acc-status",
 		streamName:      eventbus.StreamName("auth.user.registered"),
+		name:            "notification-consumer",
 	}
 
 	return nc, accSender, verifSender, mr
@@ -819,12 +823,12 @@ func TestNewNotificationConsumer_ConAccountStatus(t *testing.T) {
 	mr := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 
-	nc := NewNotificationConsumer(client, nil, nil)
+	nc := NewNotificationConsumer(client, nil, nil, eventbus.StreamName("auth.user.registered"), "notification-service")
 	if nc == nil {
 		t.Fatal("NewNotificationConsumer retornó nil")
 	}
-	if nc.Name() != "notification-consumer" {
-		t.Errorf("Name() = %q, want 'notification-consumer'", nc.Name())
+	if nc.Name() != "notification-service" {
+		t.Errorf("Name() = %q, want 'notification-service'", nc.Name())
 	}
 }
 

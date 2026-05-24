@@ -163,7 +163,7 @@ func (uc *UseCase) publishAccountDisabledEvent(userID uuid.UUID, email string, a
 			"email":        email,
 			"disabled_by":  actorID.String(),
 		}
-		stream := eventbus.StreamName("auth.user.registered")
+		stream := eventbus.StreamName("auth.account.events")
 		_, err := uc.eventPublisher.Publish(ctx, stream, flatPayload)
 		if err != nil {
 			_ = err // fire-and-forget
@@ -188,7 +188,7 @@ func (uc *UseCase) publishAccountEnabledEvent(userID uuid.UUID, email string, ac
 			"email":        email,
 			"enabled_by":   actorID.String(),
 		}
-		stream := eventbus.StreamName("auth.user.registered")
+		stream := eventbus.StreamName("auth.account.events")
 		_, err := uc.eventPublisher.Publish(ctx, stream, flatPayload)
 		if err != nil {
 			_ = err // fire-and-forget

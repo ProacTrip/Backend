@@ -21,6 +21,7 @@ import (
 	authmiddleware "github.com/ProacTrip/Backend/internal/modules/auth/adapters/middleware"
 	environmentModule "github.com/ProacTrip/Backend/internal/modules/environment"
 	notifModule "github.com/ProacTrip/Backend/internal/modules/notification"
+	notifConsumer "github.com/ProacTrip/Backend/internal/modules/notification/consumer"
 	searchModule "github.com/ProacTrip/Backend/internal/modules/search"
 	searchDomain "github.com/ProacTrip/Backend/internal/modules/search/domain"
 	ai_deepseek "github.com/ProacTrip/Backend/internal/modules/search/adapters/ai/deepseek"
@@ -335,10 +336,12 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		return nil, err
 	}
 
-	// Start notification consumer (BACKGROUND - consume eventos de Dragonfly Streams)
+	// Start notification consumers (BACKGROUND - consume eventos de Dragonfly Streams)
 	if err := notifMod.EventConsumer.Start(appCtx); err != nil {
-		slog.Warn("notification consumer failed to start", "error", err)
-		// No es fatal - el servidor puede iniciar sin el consumer
+		slog.Warn("notification verify consumer failed to start", "error", err)
+	}
+	if err := notifMod.StatusEventConsumer.Start(appCtx); err != nil {
+		slog.Warn("notification status consumer failed to start", "error", err)
 	}
 
 	// Wire resend-verification feature (notification module must exist first).
@@ -653,13 +656,19 @@ func (app *App) readyCheckHandler(rdb *redis.Client, poolMgr *database.PoolManag
 			}
 		}
 
-		// Check event consumers (notification + user + conversation)
-		if app.NotificationModule != nil && app.NotificationModule.EventConsumer != nil {
-			nc := app.NotificationModule.EventConsumer
-			if nc.IsRunning() {
-				checks[nc.Name()] = "ok"
-			} else {
-				checks[nc.Name()] = "error: consumer not running"
+		// Check event consumers (notification + user)
+		if app.NotificationModule != nil {
+			for _, nc := range []*notifConsumer.NotificationConsumer{
+				app.NotificationModule.EventConsumer,
+				app.NotificationModule.StatusEventConsumer,
+			} {
+				if nc != nil {
+					if nc.IsRunning() {
+						checks[nc.Name()] = "ok"
+					} else {
+						checks[nc.Name()] = "error: consumer not running"
+					}
+				}
 			}
 		}
 
