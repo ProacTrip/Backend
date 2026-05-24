@@ -318,7 +318,6 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		R2Storage:     r2Storage,
 		OCRConfig:     cfg.OCR,
 		RateLimiter:   rateLimiter,
-		AvatarBaseURL: cfg.AvatarBaseURL,
 	})
 	if err != nil {
 		return nil, err

@@ -119,7 +119,6 @@ type Config struct {
 	R2Storage     *storage.R2Storage
 	OCRConfig     config.AIOCRConfig // Configuración del servicio OCR (modelo, API key, base URL)
 	RateLimiter   *ratelimit.RateLimiter // opcional — rate limiting para uploads
-	AvatarBaseURL string               // URL base para CDN de avatares (ej. "https://cdn.proactrip.com")
 }
 
 // ProfileRepo expone el repositorio de perfiles de usuario.
