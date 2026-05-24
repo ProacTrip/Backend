@@ -7,12 +7,22 @@ ALTER TABLE user_documents
     ADD COLUMN IF NOT EXISTS verification_status VARCHAR(20) NOT NULL DEFAULT 'unverified';
 
 -- 2. Backfill: mapear is_verified=true → 'verified', is_verified=false → 'unverified'
-UPDATE user_documents
-   SET verification_status = CASE
-       WHEN is_verified = true THEN 'verified'
-       ELSE 'unverified'
-   END
- WHERE verification_status = 'unverified';
+--    Solo aplica en DBs donde la columna is_verified existe (migraciones legacy).
+--    En fresh installs, verification_status ya se crea con default 'unverified' desde 001.
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'user_documents' AND column_name = 'is_verified'
+    ) THEN
+        UPDATE user_documents
+           SET verification_status = CASE
+               WHEN is_verified = true THEN 'verified'
+               ELSE 'unverified'
+           END
+         WHERE verification_status = 'unverified';
+    END IF;
+END $$;
 
 -- 3. Agregar CHECK constraint
 DO $$

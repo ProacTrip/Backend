@@ -8,11 +8,20 @@
 ALTER TABLE user_profiles
     ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'client';
 
--- 2. Agregar CHECK constraint para valores válidos
-ALTER TABLE user_profiles
-    ADD CONSTRAINT chk_user_role CHECK (
-        role IN ('client', 'admin')
-    );
+-- 2. Agregar CHECK constraint para valores válidos (idempotente:
+--    001_initial.sql ya lo incluye inline en fresh installs)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'chk_user_role' AND conrelid = 'user_profiles'::regclass
+    ) THEN
+        ALTER TABLE user_profiles
+            ADD CONSTRAINT chk_user_role CHECK (
+                role IN ('client', 'admin')
+            );
+    END IF;
+END $$;
 
 -- 3. El admin real se crea durante el deployment (no se incluye semilla aquí
 --    por seguridad — las credenciales de admin nunca deben estar en migraciones)
