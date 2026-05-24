@@ -36,6 +36,8 @@ func TestSentinelErrors_Format(t *testing.T) {
 		"ErrPendingUpdateExpired":    ErrPendingUpdateExpired,
 		"ErrInvalidPendingAction":    ErrInvalidPendingAction,
 		"ErrPermissionDenied":        ErrPermissionDenied,
+		"ErrInvalidPhone":           ErrInvalidPhone,
+		"ErrInvalidMaxLayover":      ErrInvalidMaxLayover,
 	}
 
 	for name, err := range errs {
@@ -85,7 +87,7 @@ func TestSentinelErrors_IsWrapping(t *testing.T) {
 }
 
 func TestSentinelErrors_Count(t *testing.T) {
-	// Debe haber al menos 24 sentinels
+	// Debe haber al menos 26 sentinels (24 originales + ErrInvalidPhone + ErrInvalidMaxLayover)
 	allErrors := []error{
 		ErrProfileNotFound, ErrMedicalProfileNotFound, ErrTravelPrefsNotFound,
 		ErrInvalidEnum, ErrInvalidGender,
@@ -97,6 +99,7 @@ func TestSentinelErrors_Count(t *testing.T) {
 		ErrDocumentNotReady, ErrMaxDocumentsReached,
 		ErrPendingUpdateNotFound,
 		ErrPendingUpdateExpired, ErrInvalidPendingAction, ErrPermissionDenied,
+		ErrInvalidPhone, ErrInvalidMaxLayover,
 	}
 
 	for i, err := range allErrors {
@@ -105,7 +108,7 @@ func TestSentinelErrors_Count(t *testing.T) {
 		}
 	}
 
-	if len(allErrors) < 24 {
-		t.Errorf("se esperaban al menos 24 errores, hay %d", len(allErrors))
+	if len(allErrors) < 26 {
+		t.Errorf("se esperaban al menos 26 errores, hay %d", len(allErrors))
 	}
 }

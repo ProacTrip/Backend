@@ -316,3 +316,313 @@ func TestDocumentType_JSON(t *testing.T) {
 		t.Error("is_identity debería ser true")
 	}
 }
+
+// =============================================================================
+// T-1.1: Medication struct
+// =============================================================================
+
+func TestMedication_Struct(t *testing.T) {
+	m := Medication{
+		Name:      "Ibuprofeno",
+		Dosage:    "600mg",
+		Frequency: "Cada 8 horas",
+		Duration:  "5 días",
+		Status:    "active",
+	}
+
+	if m.Name != "Ibuprofeno" {
+		t.Errorf("Name = %s, se esperaba Ibuprofeno", m.Name)
+	}
+	if m.Status != "active" {
+		t.Errorf("Status = %s, se esperaba active", m.Status)
+	}
+}
+
+func TestMedication_JSON(t *testing.T) {
+	m := Medication{
+		Name:      "Omeprazol",
+		Dosage:    "20mg",
+		Frequency: "Cada 24 horas (ayunas)",
+		Duration:  "crónico",
+		Status:    "active",
+	}
+
+	data, err := json.Marshal(m)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if decoded["name"] != "Omeprazol" {
+		t.Errorf("name = %v, se esperaba Omeprazol", decoded["name"])
+	}
+	if decoded["dosage"] != "20mg" {
+		t.Errorf("dosage = %v, se esperaba 20mg", decoded["dosage"])
+	}
+	if decoded["frequency"] != "Cada 24 horas (ayunas)" {
+		t.Errorf("frequency = %v, mismatch", decoded["frequency"])
+	}
+	if decoded["duration"] != "crónico" {
+		t.Errorf("duration = %v, se esperaba crónico", decoded["duration"])
+	}
+	if decoded["status"] != "active" {
+		t.Errorf("status = %v, se esperaba active", decoded["status"])
+	}
+}
+
+// =============================================================================
+// T-1.1: Vaccination struct
+// =============================================================================
+
+func TestVaccination_Struct(t *testing.T) {
+	v := Vaccination{
+		Name:          "COVID-19",
+		DosesReceived: 3,
+		Status:        "completed",
+	}
+
+	if v.Name != "COVID-19" {
+		t.Errorf("Name = %s, se esperaba COVID-19", v.Name)
+	}
+	if v.DosesReceived != 3 {
+		t.Errorf("DosesReceived = %d, se esperaba 3", v.DosesReceived)
+	}
+	if v.Status != "completed" {
+		t.Errorf("Status = %s, se esperaba completed", v.Status)
+	}
+}
+
+func TestVaccination_JSON(t *testing.T) {
+	v := Vaccination{
+		Name:          "Fiebre amarilla",
+		DosesReceived: 1,
+		Status:        "active",
+	}
+
+	data, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if decoded["name"] != "Fiebre amarilla" {
+		t.Errorf("name = %v, se esperaba Fiebre amarilla", decoded["name"])
+	}
+	if decoded["doses_received"] != float64(1) {
+		t.Errorf("doses_received = %v, se esperaba 1", decoded["doses_received"])
+	}
+	if decoded["status"] != "active" {
+		t.Errorf("status = %v, se esperaba active", decoded["status"])
+	}
+}
+
+// =============================================================================
+// T-1.1: EmergencyContact struct
+// =============================================================================
+
+func TestEmergencyContact_Struct(t *testing.T) {
+	ec := EmergencyContact{
+		Name:         "María García",
+		Phone:        "+5491123456790",
+		Relationship: nil,
+	}
+
+	if ec.Name != "María García" {
+		t.Errorf("Name = %s, se esperaba María García", ec.Name)
+	}
+	if ec.Phone != "+5491123456790" {
+		t.Errorf("Phone = %s, se esperaba +5491123456790", ec.Phone)
+	}
+	if ec.Relationship != nil {
+		t.Error("Relationship debería ser nil")
+	}
+}
+
+func TestEmergencyContact_JSON(t *testing.T) {
+	rel := "Madre"
+	ec := EmergencyContact{
+		Name:         "María García",
+		Phone:        "+5491123456790",
+		Relationship: &rel,
+	}
+
+	data, err := json.Marshal(ec)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if decoded["name"] != "María García" {
+		t.Errorf("name = %v, se esperaba María García", decoded["name"])
+	}
+	if decoded["phone"] != "+5491123456790" {
+		t.Errorf("phone = %v, se esperaba +5491123456790", decoded["phone"])
+	}
+	if decoded["relationship"] != "Madre" {
+		t.Errorf("relationship = %v, se esperaba Madre", decoded["relationship"])
+	}
+}
+
+func TestEmergencyContact_JSON_NilRelationship(t *testing.T) {
+	ec := EmergencyContact{
+		Name:         "Juan Pérez",
+		Phone:        "+5491123456789",
+		Relationship: nil,
+	}
+
+	data, err := json.Marshal(ec)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	// nil relationship debe omitirse con omitzero
+	if _, exists := decoded["relationship"]; exists {
+		t.Error("relationship nil debería omitirse con omitzero")
+	}
+}
+
+// =============================================================================
+// T-1.1: InsuranceInfo struct
+// =============================================================================
+
+func TestInsuranceInfo_Struct(t *testing.T) {
+	info := InsuranceInfo{
+		Company:        "ASSA Compañía de Seguros",
+		PolicyNumber:   "12345",
+		PlanType:       nil,
+		ExpirationDate: nil,
+	}
+
+	if info.Company != "ASSA Compañía de Seguros" {
+		t.Errorf("Company = %s, se esperaba ASSA", info.Company)
+	}
+	if info.PolicyNumber != "12345" {
+		t.Errorf("PolicyNumber = %s, se esperaba 12345", info.PolicyNumber)
+	}
+}
+
+func TestInsuranceInfo_JSON(t *testing.T) {
+	planType := "Premium"
+	info := InsuranceInfo{
+		Company:        "ASSA Compañía de Seguros",
+		PolicyNumber:   "12345",
+		PlanType:       &planType,
+		ExpirationDate: nil,
+	}
+
+	data, err := json.Marshal(info)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if decoded["company"] != "ASSA Compañía de Seguros" {
+		t.Errorf("company = %v, mismatch", decoded["company"])
+	}
+	if decoded["policy_number"] != "12345" {
+		t.Errorf("policy_number = %v, se esperaba 12345", decoded["policy_number"])
+	}
+	if decoded["plan_type"] != "Premium" {
+		t.Errorf("plan_type = %v, se esperaba Premium", decoded["plan_type"])
+	}
+	// nil expiration_date debe omitirse con omitzero
+	if _, exists := decoded["expiration_date"]; exists {
+		t.Error("expiration_date nil debería omitirse con omitzero")
+	}
+}
+
+// =============================================================================
+// T-1.1: MedicalFieldValue generic type
+// =============================================================================
+
+func TestMedicalField_Generic_String(t *testing.T) {
+	source := MedicalSourceDetail{Type: "manual"}
+	mfv := MedicalField[string]{
+		Value:     "A+",
+		Source:    source,
+		UpdatedAt: time.Now(),
+	}
+
+	if mfv.Value != "A+" {
+		t.Errorf("Value = %s, se esperaba A+", mfv.Value)
+	}
+	if mfv.Source.Type != "manual" {
+		t.Errorf("Source.Type = %s, se esperaba manual", mfv.Source.Type)
+	}
+}
+
+func TestMedicalField_Generic_StringArray(t *testing.T) {
+	source := MedicalSourceDetail{Type: "manual"}
+	mfv := MedicalField[[]string]{
+		Value:     []string{"Penicilina", "Polen"},
+		Source:    source,
+		UpdatedAt: time.Now(),
+	}
+
+	if len(mfv.Value) != 2 {
+		t.Errorf("len(Value) = %d, se esperaba 2", len(mfv.Value))
+	}
+	if mfv.Value[0] != "Penicilina" {
+		t.Errorf("Value[0] = %s, se esperaba Penicilina", mfv.Value[0])
+	}
+}
+
+func TestMedicalField_Generic_MedicationArray(t *testing.T) {
+	source := MedicalSourceDetail{Type: "manual"}
+	mfv := MedicalField[[]Medication]{
+		Value: []Medication{
+			{Name: "Ibuprofeno", Dosage: "600mg", Frequency: "Cada 8 horas", Duration: "5 días", Status: "active"},
+		},
+		Source:    source,
+		UpdatedAt: time.Now(),
+	}
+
+	if len(mfv.Value) != 1 {
+		t.Errorf("len(Value) = %d, se esperaba 1", len(mfv.Value))
+	}
+	if mfv.Value[0].Name != "Ibuprofeno" {
+		t.Errorf("Value[0].Name = %s, se esperaba Ibuprofeno", mfv.Value[0].Name)
+	}
+}
+
+func TestMedicalField_Generic_JSON_String(t *testing.T) {
+	source := MedicalSourceDetail{Type: "manual"}
+	mfv := MedicalField[string]{
+		Value:     "A+",
+		Source:    source,
+		UpdatedAt: time.Now(),
+	}
+
+	data, err := json.Marshal(mfv)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if decoded["value"] != "A+" {
+		t.Errorf("value = %v, se esperaba A+", decoded["value"])
+	}
+	src, ok := decoded["source"].(map[string]interface{})
+	if !ok {
+		t.Fatal("source debería ser un objeto")
+	}
+	if src["type"] != "manual" {
+		t.Errorf("source.type = %v, se esperaba manual", src["type"])
+	}
+	if _, exists := decoded["updated_at"]; !exists {
+		t.Error("updated_at debería estar presente")
+	}
+}

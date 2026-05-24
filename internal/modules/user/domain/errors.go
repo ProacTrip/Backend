@@ -46,6 +46,10 @@ var (
 	ErrInvalidMimeType = errors.New("INVALID_MIME_TYPE: tipo MIME no permitido")
 	ErrAvatarNotFound  = errors.New("AVATAR_NOT_FOUND: archivo de avatar no encontrado en R2")
 
+	// Teléfono y Layover
+	ErrInvalidPhone      = errors.New("INVALID_PHONE: formato de teléfono inválido — se requiere E.164 (ej: +5491123456789)")
+	ErrInvalidMaxLayover = errors.New("INVALID_MAX_LAYOVER: max_layover_duration debe ser ≥ 0")
+
 	// Admin
 	ErrPermissionDenied = errors.New("PERMISSION_DENIED: permiso denegado para esta acción administrativa")
 )

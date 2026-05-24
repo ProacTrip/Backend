@@ -42,11 +42,53 @@ func SourceToDetail(source MedicalSource) MedicalSourceDetail {
 // MedicalFieldValue — Valor de un campo médico con trazabilidad
 // =============================================================================
 
-// MedicalFieldValue representa un valor individual del perfil médico.
+// MedicalFieldValue representa un valor individual del perfil médico (storage).
 type MedicalFieldValue struct {
 	Value     string              `json:"value"`
 	Source    MedicalSourceDetail `json:"source"`
 	UpdatedAt time.Time           `json:"updated_at"`
+}
+
+// MedicalField[T any] es la versión genérica de MedicalFieldValue para respuestas tipadas.
+type MedicalField[T any] struct {
+	Value     T                   `json:"value"`
+	Source    MedicalSourceDetail `json:"source"`
+	UpdatedAt time.Time           `json:"updated_at"`
+}
+
+// =============================================================================
+// Medical value structs — usados en Command y Response DTOs
+// =============================================================================
+
+// Medication representa un medicamento activo del perfil médico.
+type Medication struct {
+	Name      string `json:"name"`
+	Dosage    string `json:"dosage"`
+	Frequency string `json:"frequency"`
+	Duration  string `json:"duration"`
+	Status    string `json:"status"`
+}
+
+// Vaccination representa una vacuna del historial médico.
+type Vaccination struct {
+	Name          string `json:"name"`
+	DosesReceived int    `json:"doses_received"`
+	Status        string `json:"status"`
+}
+
+// EmergencyContact representa el contacto de emergencia del usuario.
+type EmergencyContact struct {
+	Name         string  `json:"name"`
+	Phone        string  `json:"phone"`
+	Relationship *string `json:"relationship,omitzero"`
+}
+
+// InsuranceInfo representa la cobertura médica del usuario.
+type InsuranceInfo struct {
+	Company        string  `json:"company"`
+	PolicyNumber   string  `json:"policy_number"`
+	PlanType       *string `json:"plan_type,omitzero"`
+	ExpirationDate *string `json:"expiration_date,omitzero"`
 }
 
 // =============================================================================
