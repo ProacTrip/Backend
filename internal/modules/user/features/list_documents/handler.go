@@ -1,5 +1,6 @@
-// Handler HTTP para GET /v1/user/documents.
-// Thin handler: extrae claims y query params, delega al usecase.
+// Handler HTTP para GET /v1/user/profile/documents.
+// Thin handler: extrae claims y query params, delega al usecase,
+// mapea domain.UserDocument → DocumentListItemResponse DTO.
 package list_documents
 
 import (
@@ -14,7 +15,7 @@ import (
 	"github.com/ProacTrip/Backend/internal/modules/user/domain"
 )
 
-// Handler procesa GET /v1/user/documents.
+// Handler procesa GET /v1/user/profile/documents.
 type Handler struct {
 	usecase *UseCase
 }
@@ -44,13 +45,31 @@ func (h *Handler) Handle(c *echo.Context) error {
 		return httperr.MapError(c, err)
 	}
 
-	// Garantizar que nunca se serialice nil — el usecase ya lo garantiza,
-	// pero esta guarda previene regresiones si el usecase cambia.
-	if docs == nil {
-		docs = []*domain.UserDocument{}
+	// Mapear domain.UserDocument → DocumentListItemResponse DTO
+	// Garantizar que nunca se serialice nil
+	dtos := make([]DocumentListItemResponse, 0, len(docs))
+	for _, doc := range docs {
+		if doc == nil {
+			continue
+		}
+		dtos = append(dtos, domainDocToListItem(doc))
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"documents": docs,
+		"documents": dtos,
 	})
+}
+
+// domainDocToListItem convierte un domain.UserDocument al DTO de lista.
+// Solo expone los 7 campos documentados en USER_API.md.
+func domainDocToListItem(doc *domain.UserDocument) DocumentListItemResponse {
+	return DocumentListItemResponse{
+		ID:                 doc.ID.String(),
+		FileName:           doc.FileName,
+		DocumentType:       doc.DocumentType,
+		OCRStatus:          string(doc.OCRStatus),
+		OCRConfidence:      doc.OCRConfidence,
+		VerificationStatus: string(doc.VerificationStatus),
+		CreatedAt:          doc.CreatedAt.Format("2006-01-02T15:04:05Z"),
+	}
 }

@@ -1,5 +1,6 @@
-// Handler HTTP para GET /v1/user/documents/:document_id.
-// Thin handler: extrae claims y document_id, delega al usecase.
+// Handler HTTP para GET /v1/user/profile/documents/:document_id.
+// Thin handler: extrae claims y document_id, delega al usecase,
+// mapea domain.UserDocument → DocumentDetailResponse DTO.
 package get_document
 
 import (
@@ -9,9 +10,11 @@ import (
 
 	sharedauth "github.com/ProacTrip/Backend/internal/shared/auth"
 	httperr "github.com/ProacTrip/Backend/internal/shared/http"
+
+	"github.com/ProacTrip/Backend/internal/modules/user/domain"
 )
 
-// Handler procesa GET /v1/user/documents/:document_id.
+// Handler procesa GET /v1/user/profile/documents/:document_id.
 type Handler struct {
 	usecase *UseCase
 }
@@ -37,5 +40,20 @@ func (h *Handler) Handle(c *echo.Context) error {
 		return httperr.MapError(c, err)
 	}
 
-	return c.JSON(http.StatusOK, doc)
+	dto := domainDocToDetail(doc)
+	return c.JSON(http.StatusOK, dto)
+}
+
+// domainDocToDetail convierte un domain.UserDocument al DTO de detalle.
+// Incluye verified_at + verified_by (si están disponibles).
+func domainDocToDetail(doc *domain.UserDocument) DocumentDetailResponse {
+	return DocumentDetailResponse{
+		ID:                 doc.ID.String(),
+		FileName:           doc.FileName,
+		DocumentType:       doc.DocumentType,
+		OCRStatus:          string(doc.OCRStatus),
+		OCRConfidence:      doc.OCRConfidence,
+		VerificationStatus: string(doc.VerificationStatus),
+		CreatedAt:          doc.CreatedAt.Format("2006-01-02T15:04:05Z"),
+	}
 }
