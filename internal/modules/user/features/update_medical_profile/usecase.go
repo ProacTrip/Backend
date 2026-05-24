@@ -1,10 +1,13 @@
-// Caso de uso: Actualizar perfil médico del usuario (PUT /v1/user/profile/medical).
+// Caso de uso: Actualizar perfil médico del usuario (PATCH /v1/user/profile/medical).
 // Encripta transparentemente los campos sensibles antes de almacenarlos.
+// Los campos tipados ([]string, []Medication, etc.) son marshalizados a JSON
+// antes de encriptar.
 package update_medical_profile
 
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -112,36 +115,62 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*UpdateMedicalProf
 		appliedFields = append(appliedFields, "blood_type")
 	}
 
-	// Campos encriptados: allergies, medications, conditions, vaccinations, emergency_contact, insurance_info
-	encryptedFields := map[string]*string{
-		"allergies":        cmd.Allergies,
-		"medications":      cmd.Medications,
-		"conditions":       cmd.Conditions,
-		"vaccinations":     cmd.Vaccinations,
-		"emergency_contact": cmd.EmergencyContact,
-		"insurance_info":   cmd.InsuranceInfo,
-	}
-
-	for fieldName, fieldValue := range encryptedFields {
-		if fieldValue == nil {
-			continue
+	// Helper: marshaliza y encripta un valor tipado
+	encryptAndStore := func(fieldName string, value interface{}) ([]byte, error) {
+		jsonBytes, err := json.Marshal(value)
+		if err != nil {
+			return nil, fmt.Errorf("json marshal %s: %w", fieldName, err)
 		}
-
-		// Encriptar el valor
-		encrypted, err := uc.encryptionService.Encrypt(*fieldValue)
+		encrypted, err := uc.encryptionService.Encrypt(string(jsonBytes))
 		if err != nil {
 			return nil, fmt.Errorf("%w: encrypt %s: %w", domain.ErrEncryptionError, fieldName, err)
 		}
-
-		// Codificar en base64 para almacenar como string JSONB
 		encodedValue := base64.StdEncoding.EncodeToString(encrypted)
-
 		existing.Data[fieldName+"_enc"] = &domain.MedicalFieldValue{
 			Value:     encodedValue,
 			Source:    domain.SourceToDetail(domain.MedicalSourceProfile),
 			UpdatedAt: now,
 		}
-		appliedFields = append(appliedFields, fieldName)
+		return encrypted, nil
+	}
+
+	// Campos encriptados — cada uno se chequea explícitamente porque los nil typed pointers
+	// no son nil cuando se almacenan en interface{}.
+	if cmd.Allergies != nil {
+		if _, err := encryptAndStore("allergies", *cmd.Allergies); err != nil {
+			return nil, err
+		}
+		appliedFields = append(appliedFields, "allergies")
+	}
+	if cmd.Medications != nil {
+		if _, err := encryptAndStore("medications", *cmd.Medications); err != nil {
+			return nil, err
+		}
+		appliedFields = append(appliedFields, "medications")
+	}
+	if cmd.Conditions != nil {
+		if _, err := encryptAndStore("conditions", *cmd.Conditions); err != nil {
+			return nil, err
+		}
+		appliedFields = append(appliedFields, "conditions")
+	}
+	if cmd.Vaccinations != nil {
+		if _, err := encryptAndStore("vaccinations", *cmd.Vaccinations); err != nil {
+			return nil, err
+		}
+		appliedFields = append(appliedFields, "vaccinations")
+	}
+	if cmd.EmergencyContact != nil {
+		if _, err := encryptAndStore("emergency_contact", *cmd.EmergencyContact); err != nil {
+			return nil, err
+		}
+		appliedFields = append(appliedFields, "emergency_contact")
+	}
+	if cmd.InsuranceInfo != nil {
+		if _, err := encryptAndStore("insurance_info", *cmd.InsuranceInfo); err != nil {
+			return nil, err
+		}
+		appliedFields = append(appliedFields, "insurance_info")
 	}
 
 	// is_shared

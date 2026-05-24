@@ -1,12 +1,17 @@
-// Comando para PUT /v1/user/profile.
+// Comando para PATCH /v1/user/profile.
 // Todos los campos son punteros: nil = no tocar, valor = actualizar.
 package update_profile
 
 import (
+	"regexp"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// validPhoneRegex valida números en formato E.164: ^\+[1-9]\d{1,14}$
+// Requisito: + seguido de código de país (1-9, no 0), luego dígitos, máximo 15 dígitos total.
+var validPhoneRegex = regexp.MustCompile(`^\+[1-9]\d{1,14}$`)
 
 // Command contiene los campos actualizables del perfil.
 // Todos los campos son opcionales (*pointer = nil significa "no actualizar").
@@ -29,4 +34,13 @@ func (c *Command) Validate() error {
 		return err
 	}
 	return nil
+}
+
+// IsValidPhone retorna true si el teléfono está en formato E.164 o es nil/vacío.
+// nil = no tocar, "" = limpiar el campo, no-nil no-vacío = validar E.164.
+func IsValidPhone(phone *string) bool {
+	if phone == nil || *phone == "" {
+		return true
+	}
+	return validPhoneRegex.MatchString(*phone)
 }

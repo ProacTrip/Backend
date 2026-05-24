@@ -256,3 +256,93 @@ func TestUpdateProfile_DateOfBirthFormat(t *testing.T) {
 		t.Error("Update debería haber sido llamado")
 	}
 }
+
+// =============================================================================
+// T-2.3 / T-2.4: E.164 phone validation
+// =============================================================================
+
+func TestUpdateProfile_PhoneValidation_ValidE164(t *testing.T) {
+	userID := uuid.Must(uuid.NewV7())
+	validPhones := []string{"+5491123456789", "+12025550123", "+8613800138000", "+34123456789"}
+
+	for _, phone := range validPhones {
+		t.Run(phone, func(t *testing.T) {
+			cmd := Command{
+				UserID: userID.String(),
+				Phone:  &phone,
+			}
+			uc := NewUseCase(UseCaseDeps{
+				ProfileRepo: &mockProfileRepo{
+					getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.UserProfile, error) {
+						return domain.NewUserProfile(userID, ""), nil
+					},
+					updateFn: func(ctx context.Context, p *domain.UserProfile) error { return nil },
+				},
+			})
+			err := uc.Execute(t.Context(), cmd)
+			if err != nil {
+				t.Errorf("teléfono válido %s fue rechazado: %v", phone, err)
+			}
+		})
+	}
+}
+
+func TestUpdateProfile_PhoneValidation_InvalidE164(t *testing.T) {
+	userID := uuid.Must(uuid.NewV7())
+	invalidPhones := []string{
+		"1123456789",       // sin +
+		"++5491123456789",   // doble +
+		"+0",               // empieza con 0 después del +
+		"+",                // solo +
+		"+54 911 23456789", // espacios
+		"+54-911-23456789", // guiones
+		"12345",            // sin + ni código de país
+	}
+
+	for _, phone := range invalidPhones {
+		t.Run(phone, func(t *testing.T) {
+			ph := phone // local copy
+			cmd := Command{
+				UserID: userID.String(),
+				Phone:  &ph,
+			}
+			uc := NewUseCase(UseCaseDeps{
+				ProfileRepo: &mockProfileRepo{
+					getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.UserProfile, error) {
+						return domain.NewUserProfile(userID, ""), nil
+					},
+				},
+			})
+			err := uc.Execute(t.Context(), cmd)
+			if err == nil {
+				t.Errorf("teléfono inválido %q debería haber sido rechazado", phone)
+			}
+			if !errors.Is(err, domain.ErrInvalidPhone) {
+				t.Errorf("error = %v, se esperaba ErrInvalidPhone para %q", err, phone)
+			}
+		})
+	}
+}
+
+func TestUpdateProfile_PhoneValidation_NilPhone(t *testing.T) {
+	userID := uuid.Must(uuid.NewV7())
+	firstName := "Juan"
+
+	cmd := Command{
+		UserID:    userID.String(),
+		FirstName: &firstName,
+		Phone:     nil,
+	}
+	uc := NewUseCase(UseCaseDeps{
+		ProfileRepo: &mockProfileRepo{
+			getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.UserProfile, error) {
+				return domain.NewUserProfile(userID, ""), nil
+			},
+			updateFn: func(ctx context.Context, p *domain.UserProfile) error { return nil },
+		},
+	})
+	err := uc.Execute(t.Context(), cmd)
+	if err != nil {
+		t.Errorf("phone nil debería ser aceptado (no phone = skip validation): %v", err)
+	}
+}

@@ -98,7 +98,12 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) error {
 		}
 	}
 
-	// 6. Merge command fields into existing profile
+	// 6. Validar teléfono E.164 si se envió
+	if cmd.Phone != nil && !IsValidPhone(cmd.Phone) {
+		return domain.ErrInvalidPhone
+	}
+
+	// 7. Merge command fields into existing profile
 	if cmd.FirstName != nil { existing.FirstName = cmd.FirstName }
 	if cmd.LastName != nil { existing.LastName = cmd.LastName }
 	if cmd.Gender != nil {
@@ -112,7 +117,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) error {
 	if cmd.Language != nil { existing.LanguageCode = *cmd.Language }
 	if cmd.Currency != nil { existing.CurrencyCode = *cmd.Currency }
 
-	// 7. Update en DB
+	// 8. Update en DB
 	if err := uc.profileRepo.Update(ctx, existing); err != nil {
 		return fmt.Errorf("update profile: %w", err)
 	}
