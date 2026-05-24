@@ -110,7 +110,10 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) error {
 		g := domain.Gender(*cmd.Gender)
 		existing.Gender = &g
 	}
-	if cmd.DateOfBirth != nil { existing.DateOfBirth = cmd.DateOfBirth }
+	if cmd.DateOfBirth != nil {
+		t := cmd.DateOfBirth.Time()
+		existing.DateOfBirth = &t
+	}
 	if cmd.Nationality != nil { existing.Nationality = cmd.Nationality }
 	if cmd.Phone != nil { existing.Phone = cmd.Phone }
 	if cmd.Bio != nil { existing.Bio = cmd.Bio }

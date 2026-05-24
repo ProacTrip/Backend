@@ -31,7 +31,7 @@ func (m *mockTravelPrefsRepo) GetByUserID(ctx context.Context, userID uuid.UUID)
 	if m.getByUserIDFn != nil {
 		return m.getByUserIDFn(ctx, userID)
 	}
-	return nil, domain.ErrProfileNotFound
+	return nil, domain.ErrTravelPrefsNotFound
 }
 func (m *mockTravelPrefsRepo) Update(ctx context.Context, p *domain.TravelPreferences) error {
 	if m.updateFn != nil {
@@ -88,7 +88,7 @@ func TestUpdateTravelPrefs_CreatesIfNotExists(t *testing.T) {
 	uc := NewUseCase(UseCaseDeps{
 		TravelPrefsRepo: &mockTravelPrefsRepo{
 			getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.TravelPreferences, error) {
-				return nil, domain.ErrProfileNotFound
+				return nil, domain.ErrTravelPrefsNotFound
 			},
 			createFn: func(ctx context.Context, p *domain.TravelPreferences) error {
 				created = true

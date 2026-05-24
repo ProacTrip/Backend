@@ -196,18 +196,21 @@ func (r *UserRepository) Create(ctx context.Context, profile *domain.UserProfile
 	return r.UpsertProfile(ctx, profile)
 }
 
-// Update realiza un update parcial del perfil usando COALESCE.
-// Solo los campos no-nil en el struct se actualizan en la DB.
+// Update realiza un update parcial del perfil usando NULLIF + COALESCE.
+// Los campos no-nil se actualizan; los nil preservan el valor existente.
+// Para strings, NULLIF('', ...) evita que strings vacías sobreescriban — se tratan como "no tocar".
 func (r *UserRepository) Update(ctx context.Context, profile *domain.UserProfile) error {
 	query := `
 		UPDATE user_profiles SET
-			first_name     = COALESCE($2, first_name),
-			last_name      = COALESCE($3, last_name),
+			first_name     = COALESCE(NULLIF($2, ''), first_name),
+			last_name      = COALESCE(NULLIF($3, ''), last_name),
 			date_of_birth  = COALESCE($4, date_of_birth),
 			gender         = COALESCE($5, gender),
 			nationality    = COALESCE($6, nationality),
 			phone          = COALESCE($7, phone),
 			bio            = COALESCE($8, bio),
+			language_code  = COALESCE(NULLIF($9, ''), language_code),
+			currency_code  = COALESCE(NULLIF($10, ''), currency_code),
 			updated_at     = NOW()
 		WHERE user_id = $1
 	`
@@ -221,6 +224,8 @@ func (r *UserRepository) Update(ctx context.Context, profile *domain.UserProfile
 		profile.Nationality,
 		profile.Phone,
 		profile.Bio,
+		profile.LanguageCode,
+		profile.CurrencyCode,
 	)
 	if err != nil {
 		return fmt.Errorf("update profile: %w", err)

@@ -74,7 +74,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) error {
 
 	// Intentar obtener prefs existentes
 	existing, err := uc.travelPrefsRepo.GetByUserID(ctx, userID)
-	if err != nil && !errors.Is(err, domain.ErrProfileNotFound) {
+	if err != nil && !errors.Is(err, domain.ErrTravelPrefsNotFound) {
 		return fmt.Errorf("get travel preferences: %w", err)
 	}
 

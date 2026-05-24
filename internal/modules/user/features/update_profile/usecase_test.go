@@ -224,8 +224,7 @@ func TestUpdateProfile_NationalityValidation(t *testing.T) {
 
 func TestUpdateProfile_DateOfBirthFormat(t *testing.T) {
 	userID := uuid.Must(uuid.NewV7())
-	dobStr := "1990-05-15"
-	dob, _ := time.Parse("2006-01-02", dobStr)
+	dob := DateOnly(time.Date(1990, 5, 15, 0, 0, 0, 0, time.UTC))
 
 	cmd := Command{
 		UserID:      userID.String(),
