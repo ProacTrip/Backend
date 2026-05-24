@@ -644,8 +644,109 @@ func TestUpdateMedicalProfile_TypedConditionsCommand(t *testing.T) {
 }
 
 // =============================================================================
-// T-2.2: Marshal round-trip — typed value → json.Marshal → encrypt → base64
+// T-4.2: Medical type full round-trip — encrypt → decrypt → unmarshal → verify
 // =============================================================================
+
+func TestUpdateMedicalProfile_FullRoundTrip_DecryptUnmarshal(t *testing.T) {
+	userID := uuid.Must(uuid.NewV7())
+
+	// Datos de entrada — estructuras tipadas
+	medications := []domain.Medication{
+		{Name: "Ibuprofeno", Dosage: "600mg", Frequency: "Cada 8 horas", Duration: "5 días", Status: "active"},
+		{Name: "Omeprazol", Dosage: "20mg", Frequency: "Cada 24 horas", Duration: "crónico", Status: "active"},
+	}
+	ec := domain.EmergencyContact{Name: "María García", Phone: "+5491123456790"}
+	insurance := domain.InsuranceInfo{Company: "ASSA", PolicyNumber: "12345"}
+
+	var updatedProfile *domain.MedicalProfile
+	uc := NewUseCase(UseCaseDeps{
+		MedicalProfileRepo: &mockMedicalProfileRepo{
+			getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.MedicalProfile, error) {
+				return makeBaseMedicalProfile(userID), nil
+			},
+			updateFn: func(ctx context.Context, p *domain.MedicalProfile) error {
+				updatedProfile = p
+				return nil
+			},
+		},
+		EncryptionService: &mockEncryptionService{},
+	})
+
+	cmd := Command{
+		UserID:           userID.String(),
+		Medications:      &medications,
+		EmergencyContact: &ec,
+		InsuranceInfo:    &insurance,
+	}
+
+	_, err := uc.Execute(t.Context(), cmd)
+	if err != nil {
+		t.Fatalf("error inesperado: %v", err)
+	}
+
+	// Round-trip: medications (typed struct → marshal → encrypt → base64 → decrypt → unmarshal)
+	t.Run("medications_enc_roundtrip", func(t *testing.T) {
+		field, ok := updatedProfile.Data["medications_enc"]
+		if !ok {
+			t.Fatal("medications_enc no encontrado")
+		}
+
+		decoded, err := base64.StdEncoding.DecodeString(field.Value)
+		if err != nil {
+			t.Fatalf("base64 decode error: %v", err)
+		}
+
+		plaintext, err := uc.encryptionService.(*mockEncryptionService).Decrypt(decoded)
+		if err != nil {
+			t.Fatalf("decrypt error: %v", err)
+		}
+
+		var result []domain.Medication
+		if err := json.Unmarshal([]byte(plaintext), &result); err != nil {
+			t.Fatalf("unmarshal error: %v — content: %q", err, plaintext)
+		}
+
+		if len(result) != 2 {
+			t.Errorf("len(medications) = %d, esperado 2", len(result))
+		}
+		if result[0].Name != "Ibuprofeno" || result[0].Dosage != "600mg" {
+			t.Errorf("medications[0] = %+v, mismatch", result[0])
+		}
+		if result[1].Name != "Omeprazol" || result[1].Status != "active" {
+			t.Errorf("medications[1] = %+v, mismatch", result[1])
+		}
+	})
+
+	// Round-trip: emergency_contact
+	t.Run("emergency_contact_enc_roundtrip", func(t *testing.T) {
+		field := updatedProfile.Data["emergency_contact_enc"]
+		decoded, _ := base64.StdEncoding.DecodeString(field.Value)
+		plaintext, _ := uc.encryptionService.(*mockEncryptionService).Decrypt(decoded)
+
+		var result domain.EmergencyContact
+		if err := json.Unmarshal([]byte(plaintext), &result); err != nil {
+			t.Fatalf("unmarshal error: %v", err)
+		}
+		if result.Name != "María García" || result.Phone != "+5491123456790" {
+			t.Errorf("emergency_contact = %+v, mismatch", result)
+		}
+	})
+
+	// Round-trip: insurance_info
+	t.Run("insurance_info_enc_roundtrip", func(t *testing.T) {
+		field := updatedProfile.Data["insurance_info_enc"]
+		decoded, _ := base64.StdEncoding.DecodeString(field.Value)
+		plaintext, _ := uc.encryptionService.(*mockEncryptionService).Decrypt(decoded)
+
+		var result domain.InsuranceInfo
+		if err := json.Unmarshal([]byte(plaintext), &result); err != nil {
+			t.Fatalf("unmarshal error: %v", err)
+		}
+		if result.Company != "ASSA" || result.PolicyNumber != "12345" {
+			t.Errorf("insurance_info = %+v, mismatch", result)
+		}
+	})
+}
 
 func TestUpdateMedicalProfile_MarshalRoundTrip_AllTypes(t *testing.T) {
 	userID := uuid.Must(uuid.NewV7())

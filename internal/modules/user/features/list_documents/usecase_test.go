@@ -130,3 +130,145 @@ func TestListDocumentsUseCase_EmptyList(t *testing.T) {
 		t.Errorf("len(docs) = %d, se esperaba 0", len(docs))
 	}
 }
+
+// =============================================================================
+// T-4.4: Filter validation — status/document_type enum
+// =============================================================================
+
+func TestListDocumentsUseCase_StatusFilterValidation(t *testing.T) {
+	userID := uuid.Must(uuid.NewV7())
+
+	tests := []struct {
+		name       string
+		status     string
+		expectErr  bool
+	}{
+		{"completed válido", "completed", false},
+		{"queued válido", "queued", false},
+		{"processing válido", "processing", false},
+		{"rejected válido", "rejected", false},
+		{"failed válido", "failed", false},
+		{"invalid inválido", "invalid", true},
+		{"pending inválido", "pending", true},
+		{"uploaded inválido (OCR anterior)", "uploaded", true},
+		{"vacío sin filtro", "", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repoCalled := false
+			uc := NewUseCase(UseCaseDeps{
+				DocRepo: &testDocRepo{
+					getByUserIDFn: func(ctx context.Context, uid uuid.UUID) ([]*domain.UserDocument, error) {
+						if tc.status == "" {
+							repoCalled = true
+						}
+						return []*domain.UserDocument{}, nil
+					},
+					getByUserIDFilteredFn: func(ctx context.Context, uid uuid.UUID, s domain.OCRStatus, dt string) ([]*domain.UserDocument, error) {
+						repoCalled = true
+						return []*domain.UserDocument{}, nil
+					},
+				},
+			})
+			_, err := uc.Execute(t.Context(), userID.String(), tc.status, "")
+			if tc.expectErr {
+				if err == nil {
+					t.Errorf("status=%q debería haber fallado", tc.status)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("status=%q no debería fallar: %v", tc.status, err)
+			}
+			if !repoCalled {
+				t.Error("repo debería haber sido llamado con filtro válido")
+			}
+		})
+	}
+}
+
+func TestListDocumentsUseCase_DocTypeFilterValidation(t *testing.T) {
+	userID := uuid.Must(uuid.NewV7())
+
+	tests := []struct {
+		name      string
+		docType   string
+		expectErr bool
+	}{
+		{"passport válido", "passport", false},
+		{"national_id válido", "national_id", false},
+		{"drivers_license válido", "drivers_license", false},
+		{"visa válido", "visa", false},
+		{"travel_insurance válido", "travel_insurance", false},
+		{"vaccination_cert válido", "vaccination_cert", false},
+		{"boarding_pass válido", "boarding_pass", false},
+		{"receipt válido", "receipt", false},
+		{"invalid inválido", "invalid_type", true},
+		{"pasaporte (español) inválido", "pasaporte", true},
+		{"vacío sin filtro", "", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			uc := NewUseCase(UseCaseDeps{
+				DocRepo: &testDocRepo{
+					getByUserIDFn: func(ctx context.Context, uid uuid.UUID) ([]*domain.UserDocument, error) {
+						return []*domain.UserDocument{}, nil
+					},
+					getByUserIDFilteredFn: func(ctx context.Context, uid uuid.UUID, s domain.OCRStatus, dt string) ([]*domain.UserDocument, error) {
+						return []*domain.UserDocument{}, nil
+					},
+				},
+			})
+			_, err := uc.Execute(t.Context(), userID.String(), "", tc.docType)
+			if tc.expectErr {
+				if err == nil {
+					t.Errorf("document_type=%q debería haber fallado", tc.docType)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("document_type=%q no debería fallar: %v", tc.docType, err)
+			}
+		})
+	}
+}
+
+func TestListDocumentsUseCase_CombinedFilterValidation(t *testing.T) {
+	userID := uuid.Must(uuid.NewV7())
+
+	tests := []struct {
+		name      string
+		status    string
+		docType   string
+		expectErr bool
+	}{
+		{"ambos válidos", "completed", "passport", false},
+		{"status inválido + docType válido", "invalid", "passport", true},
+		{"status válido + docType inválido", "completed", "invalid", true},
+		{"ambos inválidos", "invalid", "invalid", true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			uc := NewUseCase(UseCaseDeps{
+				DocRepo: &testDocRepo{
+					getByUserIDFilteredFn: func(ctx context.Context, uid uuid.UUID, s domain.OCRStatus, dt string) ([]*domain.UserDocument, error) {
+						return []*domain.UserDocument{}, nil
+					},
+				},
+			})
+			_, err := uc.Execute(t.Context(), userID.String(), tc.status, tc.docType)
+			if tc.expectErr {
+				if err == nil {
+					t.Errorf("status=%q docType=%q debería haber fallado", tc.status, tc.docType)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("status=%q docType=%q no debería fallar: %v", tc.status, tc.docType, err)
+			}
+		})
+	}
+}

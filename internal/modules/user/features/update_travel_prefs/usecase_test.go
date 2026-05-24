@@ -195,3 +195,53 @@ func TestUpdateTravelPrefs_ValidEnumValues(t *testing.T) {
 		})
 	}
 }
+
+// =============================================================================
+// T-4.1: Max layover duration validation
+// =============================================================================
+
+func TestUpdateTravelPrefs_MaxLayoverValid(t *testing.T) {
+	userID := uuid.Must(uuid.NewV7())
+
+	tests := []struct {
+		name     string
+		layover  int
+		wantErr  bool
+	}{
+		{"zero válido", 0, false},
+		{"positivo válido", 90, false},
+		{"límite alto", 1440, false},
+		{"negativo inválido", -1, true},
+		{"muy negativo", -100, true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			val := tc.layover
+			cmd := Command{
+				UserID:             userID.String(),
+				MaxLayoverDuration: &val,
+			}
+			uc := NewUseCase(UseCaseDeps{
+				TravelPrefsRepo: &mockTravelPrefsRepo{
+					getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.TravelPreferences, error) {
+						return domain.NewTravelPreferences(userID), nil
+					},
+					updateFn: func(ctx context.Context, p *domain.TravelPreferences) error {
+						return nil
+					},
+				},
+			})
+			err := uc.Execute(t.Context(), cmd)
+			if tc.wantErr && err == nil {
+				t.Errorf("max_layover=%d debería haber fallado", tc.layover)
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("max_layover=%d no debería fallar: %v", tc.layover, err)
+			}
+			if tc.wantErr && !errors.Is(err, domain.ErrInvalidMaxLayover) {
+				t.Errorf("error = %v, se esperaba ErrInvalidMaxLayover", err)
+			}
+		})
+	}
+}
