@@ -196,6 +196,9 @@ func TestGetUserInfo_Exito(t *testing.T) {
 		"email":          "usuario@gmail.com",
 		"email_verified": true,
 		"name":           "Usuario Test",
+		"given_name":     "Usuario",
+		"family_name":    "Test",
+		"locale":         "es-419",
 		"picture":        "https://lh3.googleusercontent.com/photo.jpg",
 	}
 
@@ -219,6 +222,15 @@ func TestGetUserInfo_Exito(t *testing.T) {
 	if userInfo.Name != "Usuario Test" {
 		t.Errorf("Name: esperaba %q, obtuve %q", "Usuario Test", userInfo.Name)
 	}
+	if userInfo.GivenName != "Usuario" {
+		t.Errorf("GivenName: esperaba %q, obtuve %q", "Usuario", userInfo.GivenName)
+	}
+	if userInfo.FamilyName != "Test" {
+		t.Errorf("FamilyName: esperaba %q, obtuve %q", "Test", userInfo.FamilyName)
+	}
+	if userInfo.Locale != "es-419" {
+		t.Errorf("Locale: esperaba %q, obtuve %q", "es-419", userInfo.Locale)
+	}
 	if userInfo.Picture != "https://lh3.googleusercontent.com/photo.jpg" {
 		t.Errorf("Picture: esperaba %q, obtuve %q", "https://lh3.googleusercontent.com/photo.jpg", userInfo.Picture)
 	}
@@ -227,6 +239,40 @@ func TestGetUserInfo_Exito(t *testing.T) {
 	if rt.lastAuthHeader != "Bearer ya29.test-access-token" {
 		t.Errorf("Authorization header: esperaba %q, obtuve %q",
 			"Bearer ya29.test-access-token", rt.lastAuthHeader)
+	}
+}
+
+// =============================================================================
+// GetUserInfo — éxito: perfil parcial (sin family_name ni locale)
+// =============================================================================
+
+func TestGetUserInfo_PerfilParcial_SinFamilyNameNiLocale(t *testing.T) {
+	ctx := t.Context()
+
+	mockUser := map[string]any{
+		"sub":            "9876543210",
+		"email":          "minimal@gmail.com",
+		"email_verified": true,
+		"name":           "Minimal User",
+		"picture":        "",
+	}
+
+	rt := newGoogleRoundTripper(t, oauth.GoogleUserInfoURL, http.StatusOK, mockUser)
+	provider := oauth.NewGoogleOAuthWithClient("test-client-id", "test-secret", &http.Client{Transport: rt})
+
+	userInfo, err := provider.GetUserInfo(ctx, "ya29.minimal-token")
+	if err != nil {
+		t.Fatalf("GetUserInfo retornó error inesperado: %v", err)
+	}
+
+	if userInfo.FamilyName != "" {
+		t.Errorf("FamilyName: esperaba cadena vacía, obtuve %q", userInfo.FamilyName)
+	}
+	if userInfo.Locale != "" {
+		t.Errorf("Locale: esperaba cadena vacía, obtuve %q", userInfo.Locale)
+	}
+	if userInfo.GivenName != "" {
+		t.Errorf("GivenName: esperaba cadena vacía, obtuve %q", userInfo.GivenName)
 	}
 }
 

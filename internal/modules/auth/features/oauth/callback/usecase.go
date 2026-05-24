@@ -245,6 +245,14 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		if userInfo.Picture != "" {
 			flatPayload["avatar_url"] = userInfo.Picture
 		}
+		// Apellido (family_name) — Google OAuth, vacío para otros proveedores
+		if userInfo.FamilyName != "" {
+			flatPayload["last_name"] = userInfo.FamilyName
+		}
+		// Locale — Google OAuth locale, vacío para otros proveedores
+		if userInfo.Locale != "" {
+			flatPayload["locale"] = userInfo.Locale
+		}
 		if _, err := uc.eventPublisher.Publish(ctx, streamName, flatPayload); err != nil {
 			slog.ErrorContext(ctx, "failed to publish auth user event",
 				slog.String("event", "auth.user.registered"),

@@ -28,9 +28,6 @@ func (c *Command) Validate() error {
 	if c.Password == "" {
 		return fmt.Errorf("%w: password is required", domain.ErrInvalidInput)
 	}
-	if len(c.Password) < 8 {
-		return fmt.Errorf("%w: password must be at least 8 characters", domain.ErrPasswordTooShort)
-	}
 	return nil
 }
 

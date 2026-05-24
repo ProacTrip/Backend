@@ -50,7 +50,7 @@ func (h *Handler) Handle(c *echo.Context) error {
 		httperr.ClearAuthCookiesDev(c)
 	}
 
-	return c.JSON(http.StatusOK, map[string]string{"message": "Logged out successfully."})
+	return c.JSON(http.StatusOK, map[string]string{"message": "Sesión cerrada exitosamente."})
 }
 
 func (h *Handler) extractToken(c *echo.Context) string {

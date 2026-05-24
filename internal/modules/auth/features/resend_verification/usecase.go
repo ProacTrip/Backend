@@ -58,7 +58,7 @@ func NewUseCase(deps UseCaseDeps) *UseCase {
 }
 
 // DefaultResponse es el mensaje genérico anti-enumeración que siempre se retorna.
-const DefaultResponse = "If the email exists and is unverified, a new verification email will be sent."
+const DefaultResponse = "Si el email existe y no está verificado, se enviará un nuevo email de verificación."
 
 // Execute procesa el reenvío de verificación de email.
 // Siempre retorna 200 OK con el mismo mensaje para prevenir enumeración de usuarios.

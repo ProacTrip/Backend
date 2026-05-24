@@ -27,19 +27,28 @@ type PermissionResolver interface {
 	ResolveEffectivePermissions(ctx context.Context, userID, roleID uuid.UUID) ([]string, error)
 }
 
+// DocumentLister is the local port for listing a user's documents.
+// Implemented by the postgres adapter (queries user_documents table directly).
+// UD-REQ-1: provides document summaries for the User Detail response.
+type DocumentLister interface {
+	GetUserDocuments(ctx context.Context, userID uuid.UUID) ([]domain.DocumentSummary, error)
+}
+
 // =============================================================================
 // UseCase
 // =============================================================================
 
 // UseCase orchestrates user detail retrieval with permission resolution.
 type UseCase struct {
-	repo     UserDetailRepo
-	resolver PermissionResolver
+	repo       UserDetailRepo
+	resolver   PermissionResolver
+	docLister  DocumentLister
 }
 
 // NewUseCase creates a new user detail use case.
-func NewUseCase(repo UserDetailRepo, resolver PermissionResolver) *UseCase {
-	return &UseCase{repo: repo, resolver: resolver}
+// docLister may be nil if document listing is not available.
+func NewUseCase(repo UserDetailRepo, resolver PermissionResolver, docLister DocumentLister) *UseCase {
+	return &UseCase{repo: repo, resolver: resolver, docLister: docLister}
 }
 
 // =============================================================================
@@ -69,6 +78,15 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		return nil, fmt.Errorf("resolve permissions: %w", err)
 	}
 
+	// 3b. Resolve documents via DocumentLister (UD-REQ-1)
+	var docs []domain.DocumentSummary
+	if uc.docLister != nil {
+		docs, err = uc.docLister.GetUserDocuments(ctx, cmd.UserID)
+		if err != nil {
+			return nil, fmt.Errorf("get user documents: %w", err)
+		}
+	}
+
 	// 4. Build safe response — DU-SPEC-004: exclude password_hash, locked_until, failed_attempts
 	return &Response{
 		User: UserDetailResponse{
@@ -84,5 +102,6 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 			UpdatedAt:     user.UpdatedAt,
 		},
 		EffectivePermissions: permissions,
+		Documents:            docs,
 	}, nil
 }

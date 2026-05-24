@@ -68,11 +68,13 @@ func TestCommand_Validate_EmptyPassword(t *testing.T) {
 	}
 }
 
-func TestCommand_Validate_PasswordTooShort(t *testing.T) {
+func TestCommand_Validate_PasswordTooShort_NoLongerRejected(t *testing.T) {
+	// Regression: short passwords are no longer rejected at validation level.
+	// They pass Validate() and fail at credential verification (usecase).
 	cmd := login.Command{Email: "user@example.com", Password: "1234567"}
 	err := cmd.Validate()
-	if !errors.Is(err, domain.ErrPasswordTooShort) {
-		t.Errorf("expected ErrPasswordTooShort, got %v", err)
+	if err != nil {
+		t.Errorf("expected no error for short password (caught at credential level), got %v", err)
 	}
 }
 

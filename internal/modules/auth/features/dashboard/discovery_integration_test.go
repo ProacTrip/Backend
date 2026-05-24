@@ -156,7 +156,7 @@ func TestDashboardIntegration_ListThenDisableThenUnauthorized(t *testing.T) {
 	accountStatusUC := accountstatus.NewUseCase(repo, nil, nil) // nil rdb + nil eventPublisher en test
 	accountStatusHandler := accountstatus.NewHandler(accountStatusUC)
 
-	userDetailUC := userdetail.NewUseCase(repo, resolver)
+	userDetailUC := userdetail.NewUseCase(repo, resolver, nil)
 	userDetailHandler := userdetail.NewHandler(userDetailUC)
 
 	// ========== SETUP: Registrar rutas del dashboard ==========
@@ -289,7 +289,7 @@ func TestDashboardErrorMappers(t *testing.T) {
 	accountStatusUC := accountstatus.NewUseCase(repo, nil, nil)
 	accountStatusHandler := accountstatus.NewHandler(accountStatusUC)
 
-	userDetailUC := userdetail.NewUseCase(repo, resolver)
+	userDetailUC := userdetail.NewUseCase(repo, resolver, nil)
 	userDetailHandler := userdetail.NewHandler(userDetailUC)
 
 	adminClaims := &mockPermissionClaims{

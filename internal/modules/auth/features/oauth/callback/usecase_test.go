@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
@@ -238,6 +239,9 @@ func newTestUseCase(t *testing.T) (*UseCase, *miniredis.Miniredis, *mockUserRepo
 			Email:          "test@proactrip.com",
 			EmailVerified:  true,
 			Name:           "Test User",
+			GivenName:      "Test",
+			FamilyName:     "User",
+			Locale:         "es-419",
 			Picture:        "https://example.com/avatar.png",
 		},
 	}
@@ -293,6 +297,40 @@ func seedExistingUser(repo *mockUserRepo, email string) *domain.User {
 	}
 	repo.users[email] = user
 	return user
+}
+
+// =============================================================================
+// Triangulación: OAuth sin FamilyName ni Locale → NO aparecen en el evento.
+// =============================================================================
+
+func TestExecute_NuevoUsuario_SinFamilyNameNiLocale_NoAparecenEnPayload(t *testing.T) {
+	uc, mr, _, _, _, eventPub := newTestUseCase(t)
+	ctx := t.Context()
+
+	// Pre-poblar Dragonfly con el estado OAuth
+	populateOAuthState(mr, "state-abc-123", "code-verifier-xyz")
+
+	// Sobrescribir el userInfo del mock para que no tenga FamilyName ni Locale
+	uc.providerSel.(*mockProviderSel).provider.(*mockOAuthProvider).userInfo.FamilyName = ""
+	uc.providerSel.(*mockProviderSel).provider.(*mockOAuthProvider).userInfo.Locale = ""
+
+	cmd := validCommand()
+	_, err := uc.Execute(ctx, cmd)
+	if err != nil {
+		t.Fatalf("Execute: error inesperado: %v", err)
+	}
+
+	if len(eventPub.published) != 1 {
+		t.Fatalf("eventPublisher.Publish fue llamado %d veces, want 1", len(eventPub.published))
+	}
+	payload := eventPub.published[0].payload
+
+	if _, ok := payload["last_name"]; ok {
+		t.Error("event payload NO debe incluir last_name cuando FamilyName está vacío")
+	}
+	if _, ok := payload["locale"]; ok {
+		t.Error("event payload NO debe incluir locale cuando Locale está vacío")
+	}
 }
 
 // =============================================================================
@@ -460,6 +498,18 @@ func TestExecute_UsuarioNuevo_CreaUsuarioYPublicaEvento(t *testing.T) {
 		t.Errorf("event provider = %v, want %q", evt.payload["provider"], "google")
 	}
 
+	// Verificar que los nuevos campos OAuth están presentes
+	if v, ok := evt.payload["last_name"]; !ok {
+		t.Error("event payload missing last_name")
+	} else if v != "User" {
+		t.Errorf("last_name = %v, want %q", v, "User")
+	}
+	if v, ok := evt.payload["locale"]; !ok {
+		t.Error("event payload missing locale")
+	} else if v != "es-419" {
+		t.Errorf("locale = %v, want %q", v, "es-419")
+	}
+
 	// Verificar que la respuesta contiene el nuevo usuario
 	if resp.User == nil {
 		t.Fatal("User response es nil")
@@ -618,5 +668,54 @@ func TestExecute_StateTokenInvalido_DevuelveErrOAuthStateInvalid_SinConsultarDra
 	keys := mr.Keys()
 	if len(keys) > 0 {
 		t.Errorf("Dragonfly tiene %d keys, se esperaba 0 (el flujo falló antes de tocar Dragonfly)", len(keys))
+	}
+}
+
+// =============================================================================
+// Task 1.1: errorCodeFrom — extrae código de dominio de errores wrapped/unwrapped.
+// =============================================================================
+
+func TestErrorCodeFrom_DomainErrorDirecto_RetornaCodigo(t *testing.T) {
+	h := &Handler{}
+	code := h.errorCodeFrom(domain.ErrOAuthCodeMissing)
+	if code != "OAUTH_CODE_MISSING" {
+		t.Errorf("errorCodeFrom(ErrOAuthCodeMissing) = %q, want %q", code, "OAUTH_CODE_MISSING")
+	}
+}
+
+func TestErrorCodeFrom_DomainErrorWrapped_RetornaCodigoDelDominio(t *testing.T) {
+	h := &Handler{}
+	wrapped := fmt.Errorf("crear usuario OAuth: %w", domain.ErrOAuthCodeMissing)
+	code := h.errorCodeFrom(wrapped)
+	if code != "OAUTH_CODE_MISSING" {
+		t.Errorf("errorCodeFrom(wrapped) = %q, want %q (debe usar Unwrap, no prefix string)", code, "OAUTH_CODE_MISSING")
+	}
+}
+
+func TestErrorCodeFrom_DomainErrorDobleWrap_RetornaCodigoInnermost(t *testing.T) {
+	h := &Handler{}
+	inner := fmt.Errorf("oauth user creation: %w", domain.ErrOAuthCodeMissing)
+	outer := fmt.Errorf("callback failed: %w", inner)
+	code := h.errorCodeFrom(outer)
+	if code != "OAUTH_CODE_MISSING" {
+		t.Errorf("errorCodeFrom(double-wrapped) = %q, want %q", code, "OAUTH_CODE_MISSING")
+	}
+}
+
+func TestErrorCodeFrom_ErrorGenerico_RetornaFallback(t *testing.T) {
+	h := &Handler{}
+	code := h.errorCodeFrom(errors.New("unknown error"))
+	if code != "OAUTH_EXCHANGE_FAILED" {
+		t.Errorf("errorCodeFrom(generic) = %q, want %q", code, "OAUTH_EXCHANGE_FAILED")
+	}
+}
+
+func TestErrorCodeFrom_ErrorSinCodigoDominio_WrapperSinUnwrap_RetornaFallback(t *testing.T) {
+	h := &Handler{}
+	// Error with colon but not a domain error (no domain sentinel in chain)
+	wrapped := fmt.Errorf("some prefix: %w", errors.New("plain error"))
+	code := h.errorCodeFrom(wrapped)
+	if code != "OAUTH_EXCHANGE_FAILED" {
+		t.Errorf("errorCodeFrom(wrapped plain error) = %q, want %q", code, "OAUTH_EXCHANGE_FAILED")
 	}
 }

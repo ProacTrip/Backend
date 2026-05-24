@@ -41,6 +41,7 @@ type Command struct {
 	Email             string
 	VerificationToken string
 	FirstName         string // Opcional — puede estar vacío
+	ForceResend       bool   // Si es true, ignora idempotencia y reenvía siempre
 }
 
 // Validate valida que los campos obligatorios del comando no estén vacíos.
@@ -107,11 +108,20 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) error {
 	if existingID != uuid.Nil {
 		existing, getErr := uc.repo.GetByID(ctx, existingID)
 		if getErr == nil && existing != nil && existing.SentAt != nil {
-			slog.Info("verification email already sent",
+			if !cmd.ForceResend {
+				// Envío inicial (event-driven): idempotente, no reenviar.
+				slog.Info("verification email already sent",
+					"user_id", cmd.UserID,
+					"notification_id", existingID,
+				)
+				return nil
+			}
+			// Reenvío explícito: reusar registro existente, enviar con nuevo token.
+			slog.Info("resending verification email",
 				"user_id", cmd.UserID,
 				"notification_id", existingID,
 			)
-			return nil // Idempotencia: ya fue enviado
+			notification.ID = existingID
 		}
 	}
 

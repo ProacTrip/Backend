@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/ProacTrip/Backend/internal/modules/auth/domain"
 )
 
 // =============================================================================
@@ -15,10 +17,13 @@ import (
 // Response is the user detail API response.
 // DU-SPEC-003: MUST include effective_permissions array.
 // DU-SPEC-004: MUST NEVER include password_hash, oauth internals, locked_until, failed_attempts.
+// UD-REQ-1: documents array added (empty slice when no documents, never nil).
 type Response struct {
-	User                 UserDetailResponse `json:"user"`
-	EffectivePermissions []string           `json:"effective_permissions"`
+	User                 UserDetailResponse   `json:"user"`
+	EffectivePermissions []string             `json:"effective_permissions"`
+	Documents            []domain.DocumentSummary `json:"documents"`
 }
+
 
 // =============================================================================
 // UserDetailResponse — detalle del usuario sin campos sensibles

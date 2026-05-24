@@ -149,6 +149,6 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 
 	// Retorna solo message — sin tokens ni cookies.
 	return &Response{
-		Message: "Registration successful. Please verify your email.",
+		Message: "Registro exitoso. Por favor verificá tu email.",
 	}, nil
 }

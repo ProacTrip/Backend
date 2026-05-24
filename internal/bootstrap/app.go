@@ -63,6 +63,7 @@ func (a *resendNotificationAdapter) SendVerificationEmail(ctx context.Context, u
 		Email:             email,
 		VerificationToken: token,
 		FirstName:         "", // El adapter de resend no tiene acceso al first_name
+		ForceResend:       true, // El auth module solo llama esto para reenvíos explícitos
 	}
 	err := a.uc.Execute(ctx, cmd)
 	return err
@@ -152,14 +153,7 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		AllowOrigins:     []string{cfg.Frontend.GetURL()},
 		AllowCredentials: true,
 		AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions},
-		AllowHeaders: []string{
-			echo.HeaderContentType,
-			echo.HeaderAccept,
-			echo.HeaderAuthorization,
-			"X-Request-Id",
-			"Idempotency-Key",
-			"X-Trace-Id",
-		},
+		AllowHeaders: corsAllowHeaders(),
 		MaxAge: 86400,
 	}))
 
@@ -274,6 +268,7 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	// Auth Module (incluye DragonflyClient para idempotency)
 	authMod, err := authModule.NewModule(authModule.Config{
 		PostgresPool:         authPool,
+		UserPool:             userPool,
 		DragonflyClient:      rdb,
 		PasetoKey:            cfg.PasetoKeyBytes, // Bytes decodificados de hex
 		AccessTokenTTL:       15 * time.Minute,
@@ -575,6 +570,19 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		sharedmiddleware.RequirePermission(sharedauth.PermFeatureLimitsWrite),
 	)
 
+	// Document Verification — GET requiere users:read (grupo base), PATCH requiere users:write adicional.
+	dashboard.GET("/documents/:id/verification", authMod.DocumentVerificationHandler.HandleGet)
+	dashboard.PATCH("/documents/:id/verification",
+		authMod.DocumentVerificationHandler.HandlePatch,
+		sharedmiddleware.RequirePermission(sharedauth.PermUsersWrite),
+	)
+
+	// Document Reprocess — POST requiere users:read + users:write.
+	dashboard.POST("/documents/:id/reprocess",
+		authMod.DocumentReprocessHandler.Handle,
+		sharedmiddleware.RequirePermission(sharedauth.PermUsersWrite),
+	)
+
 	// === App Structure ===
 	app := &App{
 		Echo:               e,
@@ -741,6 +749,24 @@ func (app *App) Shutdown(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// corsAllowHeaders returns the CORS AllowHeaders slice. When SERVER_ENV=dev,
+// it includes X-Real-IP for local development proxy debugging.
+// In all other environments (production, staging, unset) it is omitted.
+func corsAllowHeaders() []string {
+	headers := []string{
+		echo.HeaderContentType,
+		echo.HeaderAccept,
+		echo.HeaderAuthorization,
+		"X-Request-Id",
+		"Idempotency-Key",
+		"X-Trace-Id",
+	}
+	if os.Getenv("SERVER_ENV") == "dev" {
+		headers = append(headers, "X-Real-IP")
+	}
+	return headers
 }
 
 // discoveryInterpreterFrom type-asserts an AIInterpreter to DiscoveryInterpreter.

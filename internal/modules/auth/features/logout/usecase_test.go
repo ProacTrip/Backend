@@ -81,8 +81,8 @@ func TestExecute_BlacklistJTI_JTIRegistradoEnDragonfly(t *testing.T) {
 	if resp == nil {
 		t.Fatal("Execute() devolvió respuesta nil")
 	}
-	if resp.Message != "Logged out successfully." {
-		t.Errorf("mensaje = %q, se esperaba %q", resp.Message, "Logged out successfully.")
+	if resp.Message != "Sesión cerrada exitosamente." {
+		t.Errorf("mensaje = %q, se esperaba %q", resp.Message, "Sesión cerrada exitosamente.")
 	}
 
 	// Verificar que el JTI está presente en Dragonfly
@@ -139,7 +139,7 @@ func TestExecute_DragonflyNoDisponible_FailOpenSinError(t *testing.T) {
 	if resp == nil {
 		t.Fatal("Execute() devolvió respuesta nil")
 	}
-	if resp.Message != "Logged out successfully." {
-		t.Errorf("mensaje = %q, se esperaba %q", resp.Message, "Logged out successfully.")
+	if resp.Message != "Sesión cerrada exitosamente." {
+		t.Errorf("mensaje = %q, se esperaba %q", resp.Message, "Sesión cerrada exitosamente.")
 	}
 }

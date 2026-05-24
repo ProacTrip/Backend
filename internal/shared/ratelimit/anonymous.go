@@ -40,7 +40,12 @@ func AnonymousCookieMiddleware(skipper func(c *echo.Context) bool, isProduction 
 }
 
 func extractOrGenerateAnonID(c *echo.Context, isProduction bool) string {
-	cookie, err := c.Cookie(AnonCookieName)
+	cookieName := AnonCookieName
+	if !isProduction {
+		cookieName = "anon_token"
+	}
+
+	cookie, err := c.Cookie(cookieName)
 	if err == nil && cookie.Value != "" {
 		return cookie.Value
 	}
@@ -48,7 +53,7 @@ func extractOrGenerateAnonID(c *echo.Context, isProduction bool) string {
 	anonID := uuid.Must(uuid.NewV7()).String()
 
 	cookie = &http.Cookie{
-		Name:     AnonCookieName,
+		Name:     cookieName,
 		Value:    anonID,
 		Path:     "/",
 		MaxAge:   AnonCookieMaxAgeSec,

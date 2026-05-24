@@ -1,7 +1,7 @@
 # Dashboard Module API Documentation (Cookie-Based)
 
 > **Arquitectura:** Endpoints administrativos protegidos con PASETO HttpOnly cookies + RBAC granular (5 permisos). **Uso exclusivo del rol admin.** Separado del User module para mantener aislamiento de responsabilidades.
-> **Alcance:** Gestión de usuarios, feature limits y verificación de documentos. 6 endpoints implementados + 3 endpoints de verificación de documentos diseñados para implementación.
+> **Alcance:** Gestión de usuarios, feature limits y verificación de documentos. 9 endpoints implementados.
 
 ---
 
@@ -18,7 +18,7 @@
 | [User Detail](#user-detail) | ✅ Implementado |
 | [Account Status](#account-status) | ✅ Implementado |
 | [Feature Limits (User)](#feature-limits-user) | ✅ Implementado |
-| [Document Verification](#document-verification) | ✅ Documentado |
+| [Document Verification](#document-verification) | ✅ Implementado |
 | [Configuración CORS](#configuración-cors) | ✅ |
 | [Rate Limiting](#rate-limiting) | ✅ |
 | [Cache](#cache) | ✅ |
@@ -294,7 +294,7 @@ curl -X GET "http://localhost:8080/v1/dashboard/users?limit=20&status=active&rol
 
 ## User Detail ✅
 
-Obtiene el detalle de un usuario específico, incluyendo sus permisos efectivos.
+Obtiene el detalle de un usuario específico, incluyendo sus permisos efectivos y el listado de sus documentos. Este endpoint funciona como fuente de datos para la verificación administrativa de documentos — el admin consulta el detalle del usuario, revisa sus documentos y procede a verificarlos individualmente.
 
 ### Request
 
@@ -334,9 +334,21 @@ curl -X GET "http://localhost:8080/v1/dashboard/users/0193c8c6-1234-7abc-8def-01
     "login_count": 42,
     "last_login_at": "2026-05-20T08:15:00Z",
     "created_at": "2026-01-15T10:30:00Z",
-    "updated_at": "2026-05-18T14:22:00Z"
-  },
-  "effective_permissions": [
+      "updated_at": "2026-05-18T14:22:00Z"
+    },
+    "documents": [
+      {
+        "id": "019d5439-cb43-716d-90b5-51dcbe980908",
+        "file_name": "pasaporte.pdf",
+        "document_type": "passport",
+        "ocr_status": "completed",
+        "ocr_confidence": 0.97,
+        "verification_status": "unverified",
+        "file_size": 245760,
+        "created_at": "2026-05-01T10:30:00Z"
+      }
+    ],
+    "effective_permissions": [
     "users:read",
     "users:write",
     "feature_limits:write"
@@ -365,6 +377,21 @@ curl -X GET "http://localhost:8080/v1/dashboard/users/0193c8c6-1234-7abc-8def-01
 |-------|------|----------|-------------|
 | `User` | object | `user` | Datos del usuario |
 | `EffectivePermissions` | []string | `effective_permissions` | Permisos efectivos del usuario (incluye role + overrides) |
+
+**Campos de `documents[]` (presente cuando el usuario tiene documentos):**
+
+| Campo | Tipo | JSON key | Descripción |
+|-------|------|----------|-------------|
+| `ID` | UUID | `id` | Identificador único del documento |
+| `FileName` | string | `file_name` | Nombre original del archivo |
+| `DocumentType` | *string | `document_type` | Tipo detectado (`passport`, `visa`, `national_id`, etc.). `null` si aún no se ha clasificado |
+| `OCRStatus` | string | `ocr_status` | Estado del pipeline OCR: `queued`, `processing`, `completed`, `rejected`, `failed` |
+| `OCRConfidence` | *float64 | `ocr_confidence` | Confianza del OCR (0.0–1.0). `null` si el OCR no ha comenzado o falló |
+| `VerificationStatus` | string | `verification_status` | Estado de verificación administrativa: `unverified`, `verified`, `rejected` |
+| `FileSize` | int64 | `file_size` | Tamaño del archivo en bytes |
+| `CreatedAt` | datetime | `created_at` | Fecha de subida del documento (ISO 8601) |
+
+> **Nota:** Este listado de documentos en el User Detail permite al admin identificar qué documentos tiene un usuario antes de proceder a verificarlos individualmente mediante los endpoints de [Document Verification](#document-verification).
 
 #### Posibles Errores
 

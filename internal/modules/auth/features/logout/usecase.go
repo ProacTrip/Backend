@@ -42,7 +42,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		slog.DebugContext(ctx, "logout: token validation failed, clearing cookies anyway",
 			slog.String("error", err.Error()),
 		)
-		return &Response{Message: "Logged out successfully."}, nil
+		return &Response{Message: "Sesión cerrada exitosamente."}, nil
 	}
 
 	blacklistKey := fmt.Sprintf("{auth}:blacklist:jti:%s", claims.JTI.String())
@@ -56,7 +56,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 		return nil, domain.ErrSessionNotFound
 	}
 
-	return &Response{Message: "Logged out successfully."}, nil
+	return &Response{Message: "Sesión cerrada exitosamente."}, nil
 }
 
 

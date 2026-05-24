@@ -44,7 +44,7 @@ func newHandler(
 ) *userdetail.Handler {
 	repo := &stubUserRepo{getByID: getByID}
 	resolver := &stubPermissionResolver{resolveFn: resolveFn}
-	uc := userdetail.NewUseCase(repo, resolver)
+	uc := userdetail.NewUseCase(repo, resolver, nil)
 	return userdetail.NewHandler(uc)
 }
 

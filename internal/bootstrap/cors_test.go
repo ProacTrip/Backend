@@ -154,3 +154,62 @@ func contains(s, substr string) bool {
 	}
 	return false
 }
+
+// =============================================================================
+// Test: CORS AllowHeaders includes X-Real-IP only in dev
+// Spec: CORS-1
+// =============================================================================
+
+func TestCORS_AllowHeaders_XRealIP(t *testing.T) {
+	t.Run("dev includes X-Real-IP", func(t *testing.T) {
+		t.Setenv("SERVER_ENV", "dev")
+
+		headers := corsAllowHeaders()
+
+		found := false
+		for _, h := range headers {
+			if h == "X-Real-IP" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("X-Real-IP missing from AllowHeaders when SERVER_ENV=dev. Got: %v", headers)
+		}
+	})
+
+	t.Run("production excludes X-Real-IP", func(t *testing.T) {
+		t.Setenv("SERVER_ENV", "production")
+
+		headers := corsAllowHeaders()
+
+		for _, h := range headers {
+			if h == "X-Real-IP" {
+				t.Errorf("X-Real-IP present in AllowHeaders when SERVER_ENV=production. Got: %v", headers)
+			}
+		}
+	})
+
+	t.Run("staging excludes X-Real-IP", func(t *testing.T) {
+		t.Setenv("SERVER_ENV", "staging")
+
+		headers := corsAllowHeaders()
+
+		for _, h := range headers {
+			if h == "X-Real-IP" {
+				t.Errorf("X-Real-IP present in AllowHeaders when SERVER_ENV=staging. Got: %v", headers)
+			}
+		}
+	})
+
+	t.Run("default (unset) excludes X-Real-IP", func(t *testing.T) {
+		// SERVER_ENV intentionally unset — default behavior should be prod-safe
+		headers := corsAllowHeaders()
+
+		for _, h := range headers {
+			if h == "X-Real-IP" {
+				t.Errorf("X-Real-IP present in AllowHeaders when SERVER_ENV is unset. Got: %v", headers)
+			}
+		}
+	})
+}

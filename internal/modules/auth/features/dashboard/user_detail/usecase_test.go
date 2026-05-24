@@ -35,6 +35,14 @@ func (s *stubPermissionResolver) ResolveEffectivePermissions(ctx context.Context
 	return s.resolveFn(ctx, userID, roleID)
 }
 
+type stubDocumentLister struct {
+	getDocsFn func(ctx context.Context, userID uuid.UUID) ([]domain.DocumentSummary, error)
+}
+
+func (s *stubDocumentLister) GetUserDocuments(ctx context.Context, userID uuid.UUID) ([]domain.DocumentSummary, error) {
+	return s.getDocsFn(ctx, userID)
+}
+
 // =============================================================================
 // Fixtures
 // =============================================================================
@@ -59,7 +67,12 @@ func newUseCase(
 ) *userdetail.UseCase {
 	repo := &stubUserRepo{getByID: getByID}
 	resolver := &stubPermissionResolver{resolveFn: resolveFn}
-	return userdetail.NewUseCase(repo, resolver)
+	lister := &stubDocumentLister{
+		getDocsFn: func(ctx context.Context, userID uuid.UUID) ([]domain.DocumentSummary, error) {
+			return nil, nil
+		},
+	}
+	return userdetail.NewUseCase(repo, resolver, lister)
 }
 
 // =============================================================================
@@ -215,6 +228,92 @@ func TestExecute_SensitiveFieldsExcluded(t *testing.T) {
 	}
 	// DU-SPEC-004: response fields must exclude password_hash, locked_until, failed_attempts
 	// Verified by the UserDetailResponse type NOT having these fields (compile-time guarantee).
+}
+
+// TestExecute_UserWithDocuments — UD-1.1: user detail incluye documents array.
+func TestExecute_UserWithDocuments(t *testing.T) {
+	ctx := t.Context()
+
+	userID := uuid.Must(uuid.NewV7())
+	roleID := uuid.Must(uuid.NewV7())
+	docID1 := uuid.Must(uuid.NewV7())
+	docID2 := uuid.Must(uuid.NewV7())
+
+	repo := &stubUserRepo{
+		getByID: func(ctx context.Context, id uuid.UUID) (*domain.User, error) {
+			return usuarioActivo(userID, "docs@test.com", roleID), nil
+		},
+	}
+	resolver := &stubPermissionResolver{
+		resolveFn: func(ctx context.Context, userID, roleID uuid.UUID) ([]string, error) {
+			return []string{"users:read"}, nil
+		},
+	}
+	lister := &stubDocumentLister{
+		getDocsFn: func(ctx context.Context, uid uuid.UUID) ([]domain.DocumentSummary, error) {
+			return []domain.DocumentSummary{
+				{ID: docID1, FileName: "passport.pdf", DocumentType: "passport", VerificationStatus: "verified"},
+				{ID: docID2, FileName: "visa.pdf", DocumentType: "visa", VerificationStatus: "unverified"},
+			}, nil
+		},
+	}
+
+	uc := userdetail.NewUseCase(repo, resolver, lister)
+
+	cmd := userdetail.Command{UserID: userID}
+	resp, err := uc.Execute(ctx, cmd)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(resp.Documents) != 2 {
+		t.Errorf("documents len = %d, expected 2", len(resp.Documents))
+	}
+	if resp.Documents[0].DocumentType != "passport" {
+		t.Errorf("doc[0].type = %s, expected passport", resp.Documents[0].DocumentType)
+	}
+	if resp.Documents[1].DocumentType != "visa" {
+		t.Errorf("doc[1].type = %s, expected visa", resp.Documents[1].DocumentType)
+	}
+}
+
+// TestExecute_NoDocuments — UD-1.2: sin documentos → empty array (not nil).
+func TestExecute_NoDocuments(t *testing.T) {
+	ctx := t.Context()
+
+	userID := uuid.Must(uuid.NewV7())
+	roleID := uuid.Must(uuid.NewV7())
+
+	repo := &stubUserRepo{
+		getByID: func(ctx context.Context, id uuid.UUID) (*domain.User, error) {
+			return usuarioActivo(userID, "nodocs@test.com", roleID), nil
+		},
+	}
+	resolver := &stubPermissionResolver{
+		resolveFn: func(ctx context.Context, userID, roleID uuid.UUID) ([]string, error) {
+			return []string{}, nil
+		},
+	}
+	lister := &stubDocumentLister{
+		getDocsFn: func(ctx context.Context, uid uuid.UUID) ([]domain.DocumentSummary, error) {
+			return []domain.DocumentSummary{}, nil
+		},
+	}
+
+	uc := userdetail.NewUseCase(repo, resolver, lister)
+
+	cmd := userdetail.Command{UserID: userID}
+	resp, err := uc.Execute(ctx, cmd)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if resp.Documents == nil {
+		t.Error("documents should be empty slice, not nil")
+	}
+	if len(resp.Documents) != 0 {
+		t.Errorf("documents len = %d, expected 0", len(resp.Documents))
+	}
 }
 
 // TestValidate_EmptyUserID rejects zero UUID.

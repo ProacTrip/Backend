@@ -66,4 +66,7 @@ var (
 	// Dashboard — feature limits
 	ErrFeatureLimitAlreadyExists = errors.New("FEATURE_LIMIT_ALREADY_EXISTS: ya existe un límite para este feature")
 	ErrNotImplemented            = errors.New("NOT_IMPLEMENTED: funcionalidad aún no implementada")
+
+	// Dashboard — document verification
+	ErrDocumentNotFound = errors.New("DOCUMENT_NOT_FOUND: documento no encontrado")
 )

@@ -1,8 +1,10 @@
 package callback
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	httperr "github.com/ProacTrip/Backend/internal/shared/http"
 	"github.com/labstack/echo/v5"
@@ -91,15 +93,26 @@ func (h *Handler) redirectError(c *echo.Context, errorCode string) error {
 	return c.Redirect(http.StatusFound, redirectURL)
 }
 
-// errorCodeFrom extrae el código de error del domain error para el redirect.
+// errorCodeFrom extrae el código de dominio del error unwrapeando la cadena.
+// Busca el código OAUTH_* en el error más interno de la cadena (formato "CODE: mensaje").
+// Si no encuentra un código de dominio, retorna el fallback OAUTH_EXCHANGE_FAILED.
 func (h *Handler) errorCodeFrom(err error) string {
-	errStr := err.Error()
-	// Extraer el código antes de los dos puntos (formato: "CODE: mensaje")
-	for i, ch := range errStr {
-		if ch == ':' {
-			return errStr[:i]
+	current := err
+	for current != nil {
+		errStr := current.Error()
+		// Extraer el código antes de los dos puntos (formato: "CODE: mensaje")
+		for i, ch := range errStr {
+			if ch == ':' {
+				code := errStr[:i]
+				if strings.HasPrefix(code, "OAUTH_") {
+					return code
+				}
+				// Tiene formato "algo: mensaje" pero no es OAUTH_* → seguir unwrapeando
+				break
+			}
 		}
+		current = errors.Unwrap(current)
 	}
-	// Si no tiene formato CODE: mensaje → usar el error genérico
+	// No se encontró ningún código OAUTH_* en la cadena de errores → fallback
 	return "OAUTH_EXCHANGE_FAILED"
 }

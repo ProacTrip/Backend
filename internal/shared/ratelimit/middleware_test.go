@@ -122,8 +122,11 @@ func TestAnonymousRateLimitMiddleware(t *testing.T) {
 	e.ServeHTTP(rec, req)
 
 	cookies := rec.Result().Cookies()
-	if len(cookies) != 1 || cookies[0].Name != "__Secure-anon_token" {
-		t.Errorf("expected anon_id cookie, got %d cookies", len(cookies))
+	if len(cookies) != 1 {
+		t.Fatalf("expected 1 cookie, got %d", len(cookies))
+	}
+	if cookies[0].Name != "anon_token" {
+		t.Errorf("cookie name = %q, want %q", cookies[0].Name, "anon_token")
 	}
 
 	if rec.Code != http.StatusOK {
@@ -150,6 +153,9 @@ func TestAnonymousCookieMiddlewareSetsCookieAttributes(t *testing.T) {
 		}
 
 		cookie := cookies[0]
+		if cookie.Name != "anon_token" {
+			t.Errorf("cookie name = %q, want %q", cookie.Name, "anon_token")
+		}
 		if !cookie.HttpOnly {
 			t.Error("cookie should be HttpOnly")
 		}
@@ -185,6 +191,9 @@ func TestAnonymousCookieMiddlewareSetsCookieAttributes(t *testing.T) {
 		}
 
 		cookie := cookies[0]
+		if cookie.Name != "__Secure-anon_token" {
+			t.Errorf("cookie name = %q, want %q", cookie.Name, "__Secure-anon_token")
+		}
 		if !cookie.HttpOnly {
 			t.Error("cookie should be HttpOnly")
 		}
@@ -216,7 +225,7 @@ func TestAnonymousCookieMiddlewareReusesExistingCookie(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	req.AddCookie(&http.Cookie{
-		Name:  "__Secure-anon_token",
+		Name:  "anon_token",
 		Value: "existing-anon-id-123",
 	})
 	rec := httptest.NewRecorder()
@@ -355,7 +364,7 @@ func TestAnonymousRateLimitMiddlewareReturns429Exceeded(t *testing.T) {
 	}, anonMW, anonRLMW)
 
 	req1 := httptest.NewRequest(http.MethodGet, "/test", nil)
-	req1.AddCookie(&http.Cookie{Name: "__Secure-anon_token", Value: "overlimit-anon"})
+	req1.AddCookie(&http.Cookie{Name: "anon_token", Value: "overlimit-anon"})
 	rec1 := httptest.NewRecorder()
 	e.ServeHTTP(rec1, req1)
 	if rec1.Code != http.StatusOK {
@@ -363,7 +372,7 @@ func TestAnonymousRateLimitMiddlewareReturns429Exceeded(t *testing.T) {
 	}
 
 	req2 := httptest.NewRequest(http.MethodGet, "/test", nil)
-	req2.AddCookie(&http.Cookie{Name: "__Secure-anon_token", Value: "overlimit-anon"})
+	req2.AddCookie(&http.Cookie{Name: "anon_token", Value: "overlimit-anon"})
 	rec2 := httptest.NewRecorder()
 	e.ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusTooManyRequests {
@@ -506,7 +515,7 @@ func TestRateLimit429_UsesFullRFC9457URI(t *testing.T) {
 	}, anonMW, anonRLMW)
 
 	req1 := httptest.NewRequest(http.MethodGet, "/test-rfc9457", nil)
-	req1.AddCookie(&http.Cookie{Name: "__Secure-anon_token", Value: "rfc-verify"})
+	req1.AddCookie(&http.Cookie{Name: "anon_token", Value: "rfc-verify"})
 	rec1 := httptest.NewRecorder()
 	e.ServeHTTP(rec1, req1)
 	if rec1.Code != http.StatusOK {
@@ -514,7 +523,7 @@ func TestRateLimit429_UsesFullRFC9457URI(t *testing.T) {
 	}
 
 	req2 := httptest.NewRequest(http.MethodGet, "/test-rfc9457", nil)
-	req2.AddCookie(&http.Cookie{Name: "__Secure-anon_token", Value: "rfc-verify"})
+	req2.AddCookie(&http.Cookie{Name: "anon_token", Value: "rfc-verify"})
 	rec2 := httptest.NewRecorder()
 	e.ServeHTTP(rec2, req2)
 

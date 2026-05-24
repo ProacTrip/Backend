@@ -18,6 +18,8 @@ import (
 	"github.com/ProacTrip/Backend/internal/modules/auth/domain"
 	"github.com/ProacTrip/Backend/internal/modules/auth/domain/services"
 	accountstatus "github.com/ProacTrip/Backend/internal/modules/auth/features/dashboard/account_status"
+	docreprocess "github.com/ProacTrip/Backend/internal/modules/auth/features/dashboard/document_reprocess"
+	docverification "github.com/ProacTrip/Backend/internal/modules/auth/features/dashboard/document_verification"
 	featurelimits "github.com/ProacTrip/Backend/internal/modules/auth/features/dashboard/feature_limits"
 	listusers "github.com/ProacTrip/Backend/internal/modules/auth/features/dashboard/list_users"
 	userdetail "github.com/ProacTrip/Backend/internal/modules/auth/features/dashboard/user_detail"
@@ -82,6 +84,8 @@ type Module struct {
 	UserDetailHandler          *userdetail.Handler
 	AccountStatusHandler       *accountstatus.Handler
 	FeatureLimitsHandler       *featurelimits.Handler
+	DocumentVerificationHandler *docverification.Handler
+	DocumentReprocessHandler   *docreprocess.Handler
 
 	// Repositorios de dashboard (necesita DragonflyClient para invalidación de sesiones)
 	dragonflyClient *redis.Client
@@ -90,7 +94,11 @@ type Module struct {
 // Config contiene la configuración del módulo Auth
 type Config struct {
 	// Database - usa interfaz para permitir mocking
-	PostgresPool postgres.PgxPool
+	PostgresPool postgres.PgxPool // proactrip_auth — para users, roles, tokens, etc.
+
+	// UserPool apunta a proactrip_user — necesario para queries cross-DB
+	// del dashboard (document_verification_history, user_documents).
+	UserPool postgres.PgxPool
 
 	// Dragonfly - para cache e idempotencia
 	DragonflyClient *redis.Client
@@ -227,6 +235,7 @@ func NewModule(cfg Config) (*Module, error) {
 
 	// Repositorios de dashboard
 	featureLimitRepo := postgres.NewFeatureLimitRepository(cfg.PostgresPool)
+	docRepo := postgres.NewDocumentRepository(cfg.UserPool)
 
 	// PermissionResolver (servicio de dominio) — solo rol, sin overrides
 	m.PermissionResolver = services.NewPermissionResolver(
@@ -244,10 +253,11 @@ func NewModule(cfg Config) (*Module, error) {
 	}))
 	m.ListUsersHandler = listusers.NewHandler(listUsersUC)
 
-	// User Detail — DU-SPEC-003, DU-SPEC-004
+	// User Detail — DU-SPEC-003, DU-SPEC-004, UD-REQ-1 (documents)
 	userDetailUC := userdetail.NewUseCase(
 		m.Repository.(interface{ GetByID(context.Context, uuid.UUID) (*domain.User, error) }),
 		m.PermissionResolver.(interface{ ResolveEffectivePermissions(context.Context, uuid.UUID, uuid.UUID) ([]string, error) }),
+		docRepo,
 	)
 	m.UserDetailHandler = userdetail.NewHandler(userDetailUC)
 
@@ -267,6 +277,14 @@ func NewModule(cfg Config) (*Module, error) {
 	featureLimitsUC := featurelimits.NewUseCase(featureLimitRepo)
 	m.FeatureLimitsHandler = featurelimits.NewHandler(featureLimitsUC)
 
+	// Document Verification — DV-REQ-1, DV-REQ-2, DV-REQ-3
+	docVerificationUC := docverification.NewUseCase(docRepo)
+	m.DocumentVerificationHandler = docverification.NewHandler(docVerificationUC)
+
+	// Document Reprocess — DR-REQ-1
+	docReprocessUC := docreprocess.NewUseCase(docRepo, cfg.DragonflyClient, cfg.EventPublisher)
+	m.DocumentReprocessHandler = docreprocess.NewHandler(docReprocessUC)
+
 	// Register domain error mappings (incluye nuevos mapeos de dashboard)
 	registerAuthErrorMappings()
 
@@ -275,7 +293,7 @@ func NewModule(cfg Config) (*Module, error) {
 			"register", "verify_email", "login", "logout",
 			"resend_verification", "oauth_authorize", "oauth_callback",
 			"dashboard:list_users", "dashboard:user_detail", "dashboard:account_status",
-			"dashboard:feature_limits",
+			"dashboard:feature_limits", "dashboard:document_verification", "dashboard:document_reprocess",
 		})
 
 	return m, nil
@@ -418,6 +436,10 @@ func registerAuthErrorMappings() {
 			return serrors.ErrConflict("Ya existe un límite para este feature", err)
 		case errors.Is(err, domain.ErrNotImplemented):
 			return serrors.ErrInternalError("Funcionalidad aún no implementada", err)
+
+		// Dashboard — Document Verification
+		case errors.Is(err, domain.ErrDocumentNotFound):
+			return serrors.ErrNotFound("Documento no encontrado", err)
 
 		default:
 			return nil

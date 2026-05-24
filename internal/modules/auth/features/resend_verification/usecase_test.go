@@ -113,8 +113,8 @@ func TestExecute_EmailNoExiste_Retorna200Generico(t *testing.T) {
 	if resp == nil {
 		t.Fatal("Execute() devolvió respuesta nil")
 	}
-	if resp.Message != DefaultResponse {
-		t.Errorf("mensaje = %q, se esperaba %q", resp.Message, DefaultResponse)
+	if resp.Message != "Si el email existe y no está verificado, se enviará un nuevo email de verificación." {
+		t.Errorf("mensaje = %q, se esperaba %q", resp.Message, "Si el email existe y no está verificado, se enviará un nuevo email de verificación.")
 	}
 
 	// No debe intentar generar token ni enviar email
@@ -146,8 +146,8 @@ func TestExecute_EmailYaVerificado_Retorna200SinEnvio(t *testing.T) {
 	if resp == nil {
 		t.Fatal("Execute() devolvió respuesta nil")
 	}
-	if resp.Message != DefaultResponse {
-		t.Errorf("mensaje = %q, se esperaba %q", resp.Message, DefaultResponse)
+	if resp.Message != "Si el email existe y no está verificado, se enviará un nuevo email de verificación." {
+		t.Errorf("mensaje = %q, se esperaba %q", resp.Message, "Si el email existe y no está verificado, se enviará un nuevo email de verificación.")
 	}
 
 	// No debe generar token ni enviar email porque ya está verificado
@@ -179,8 +179,8 @@ func TestExecute_EmailNoVerificado_GeneraTokenYEnviaEmail(t *testing.T) {
 	if resp == nil {
 		t.Fatal("Execute() devolvió respuesta nil")
 	}
-	if resp.Message != DefaultResponse {
-		t.Errorf("mensaje = %q, se esperaba %q", resp.Message, DefaultResponse)
+	if resp.Message != "Si el email existe y no está verificado, se enviará un nuevo email de verificación." {
+		t.Errorf("mensaje = %q, se esperaba %q", resp.Message, "Si el email existe y no está verificado, se enviará un nuevo email de verificación.")
 	}
 
 	// Debe haber generado token
@@ -219,8 +219,8 @@ func TestExecute_ErrorInfraestructura_Retorna200Generico(t *testing.T) {
 	if resp == nil {
 		t.Fatal("Execute() devolvió respuesta nil")
 	}
-	if resp.Message != DefaultResponse {
-		t.Errorf("mensaje = %q, se esperaba %q", resp.Message, DefaultResponse)
+	if resp.Message != "Si el email existe y no está verificado, se enviará un nuevo email de verificación." {
+		t.Errorf("mensaje = %q, se esperaba %q", resp.Message, "Si el email existe y no está verificado, se enviará un nuevo email de verificación.")
 	}
 
 	// No debe intentar generar token ni enviar email tras error de infra
@@ -253,8 +253,8 @@ func TestExecute_ErrorNotificacion_Retorna200Generico(t *testing.T) {
 	if resp == nil {
 		t.Fatal("Execute() devolvió respuesta nil")
 	}
-	if resp.Message != DefaultResponse {
-		t.Errorf("mensaje = %q, se esperaba %q", resp.Message, DefaultResponse)
+	if resp.Message != "Si el email existe y no está verificado, se enviará un nuevo email de verificación." {
+		t.Errorf("mensaje = %q, se esperaba %q", resp.Message, "Si el email existe y no está verificado, se enviará un nuevo email de verificación.")
 	}
 
 	// El token sí se generó (el error es posterior, en la notificación)

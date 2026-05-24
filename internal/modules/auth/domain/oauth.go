@@ -45,6 +45,8 @@ type OAuthUserInfo struct {
 	EmailVerified  bool
 	Name           string // nombre completo (campo "name" de Google)
 	GivenName      string // nombre de pila (campo "given_name" de Google), puede estar vacío
+	FamilyName     string // apellido (campo "family_name" de Google), puede estar vacío
+	Locale         string // locale del usuario (campo "locale" de Google), puede estar vacío
 	Picture        string
 }
 

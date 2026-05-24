@@ -149,7 +149,7 @@ func TestUseCase_Execute_Success(t *testing.T) {
 	}
 
 	// Response contiene solo el mensaje (sin tokens ni cookies).
-	if resp.Message != "Registration successful. Please verify your email." {
+	if resp.Message != "Registro exitoso. Por favor verificá tu email." {
 		t.Errorf("Message = %q", resp.Message)
 	}
 }

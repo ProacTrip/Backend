@@ -610,16 +610,16 @@ Todos los errores se devuelven como `302 Found` con `status=error&code=XXX`. El 
 
 | Código | HTTP | Problem Type (interno) | Cuándo |
 |--------|------|------------------------|--------|
-| `ErrOAuthCodeMissing` | 302 | `bad-request` | Falta el parámetro `code` en el callback |
-| `ErrOAuthStateMissing` | 302 | `bad-request` | Falta el parámetro `state` en el callback |
-| `ErrOAuthStateInvalid` | 302 | `bad-request` | State inválido, expirado o reutilizado (posible CSRF) |
-| `ErrOAuthAccessDenied` | 302 | `bad-request` | Usuario denegó el acceso en Google |
-| `ErrOAuthExchangeFailed` | 302 | `unauthorized` | Error al intercambiar código con Google |
-| `ErrOAuthProviderNotFound` | 302 | `bad-request` | Proveedor no soportado |
-| `ErrEmailNotVerified` | 302 | `unauthorized` | Email de Google no verificado |
-| `ErrAccountLocked` | 302 | `rate-limit-exceeded` | Cuenta bloqueada |
-| `ErrAccountSuspended` | 302 | `forbidden` | Cuenta suspendida |
-| `ErrAccountDisabled` | 302 | `forbidden` | Cuenta deshabilitada |
+| `OAUTH_CODE_MISSING` | 302 | `bad-request` | Falta el parámetro `code` en el callback |
+| `OAUTH_STATE_MISSING` | 302 | `bad-request` | Falta el parámetro `state` en el callback |
+| `OAUTH_STATE_INVALID` | 302 | `bad-request` | State inválido, expirado o reutilizado (posible CSRF) |
+| `OAUTH_ACCESS_DENIED` | 302 | `bad-request` | Usuario denegó el acceso en Google |
+| `OAUTH_EXCHANGE_FAILED` | 302 | `unauthorized` | Error al intercambiar código con Google |
+| `OAUTH_PROVIDER_NOT_FOUND` | 302 | `bad-request` | Proveedor no soportado |
+| `OAUTH_EXCHANGE_FAILED` | 302 | `unauthorized` | Email de Google no verificado |
+| `OAUTH_EXCHANGE_FAILED` | 302 | `rate-limit-exceeded` | Cuenta bloqueada |
+| `OAUTH_EXCHANGE_FAILED` | 302 | `forbidden` | Cuenta suspendida |
+| `OAUTH_EXCHANGE_FAILED` | 302 | `forbidden` | Cuenta deshabilitada |
 
 > La columna HTTP muestra `302` porque todos los errores son redirects. La columna Problem Type indica el tipo RFC 9457 que se usaría si el error fuera devuelto como JSON (valor interno de referencia).
 
