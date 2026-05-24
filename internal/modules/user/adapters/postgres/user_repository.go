@@ -61,8 +61,8 @@ func (r *UserRepository) UpsertProfile(ctx context.Context, profile *domain.User
 			bio = COALESCE(EXCLUDED.bio, user_profiles.bio),
 			language_code = COALESCE(EXCLUDED.language_code, user_profiles.language_code),
 			currency_code = COALESCE(EXCLUDED.currency_code, user_profiles.currency_code),
-			role = EXCLUDED.role,
-			status = EXCLUDED.status,
+			role = COALESCE(EXCLUDED.role, user_profiles.role),
+			status = COALESCE(EXCLUDED.status, user_profiles.status),
 			updated_at = EXCLUDED.updated_at
 	`
 

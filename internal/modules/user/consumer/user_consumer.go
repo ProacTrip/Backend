@@ -93,6 +93,12 @@ func (c *UserEventConsumer) Name() string { return "user-consumer" }
 // =============================================================================
 
 func (c *UserEventConsumer) consume(ctx context.Context) {
+	const (
+		initialBackoff = 1 * time.Second
+		maxBackoff     = 30 * time.Second
+	)
+	backoff := initialBackoff
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -116,9 +122,31 @@ func (c *UserEventConsumer) consume(ctx context.Context) {
 			continue
 		}
 
+		// Reset backoff when XReadGroup succeeds — stream is healthy.
+		backoff = initialBackoff
+
+		hadFailure := false
 		for _, stream := range messages {
 			for _, msg := range stream.Messages {
-				c.processMessage(ctx, msg)
+				if err := c.processMessage(ctx, msg); err != nil {
+					hadFailure = true
+					// Continue processing remaining messages in the batch.
+				}
+			}
+		}
+
+		if hadFailure {
+			slog.Warn("some messages failed, backing off before retry",
+				slog.Duration("backoff", backoff),
+			)
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return
+			}
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
 			}
 		}
 	}
@@ -128,44 +156,47 @@ func (c *UserEventConsumer) consume(ctx context.Context) {
 // Procesamiento de mensajes
 // =============================================================================
 
-func (c *UserEventConsumer) processMessage(ctx context.Context, msg redis.XMessage) {
+func (c *UserEventConsumer) processMessage(ctx context.Context, msg redis.XMessage) error {
 	// Parse event from message values
 	event, err := eventbus.EventFromMap(msg.Values)
 	if err != nil {
 		slog.Error("parse event error", "error", err, "msg_id", msg.ID)
 		// Ack malformed messages to avoid stuck in PEL
 		_ = c.rdb.XAck(ctx, c.streamName, c.group, msg.ID)
-		return
+		return nil
 	}
 
-	// Handle event based on type - using Go 1.26+ errors.AsType pattern
+	// Handle event based on type
 	switch event.EventType {
 	case eventbus.UserRegistered:
-		c.handleUserRegistered(ctx, event)
+		if err := c.handleUserRegistered(ctx, event); err != nil {
+			return err // Don't ACK — leave in PEL for retry
+		}
 	default:
 		slog.Warn("unknown event type", "type", event.EventType)
 	}
 
-	// Always ack after processing
+	// ACK only after successful processing
 	if err := c.rdb.XAck(ctx, c.streamName, c.group, msg.ID); err != nil {
 		slog.Error("xack error", "error", err, "msg_id", msg.ID)
 	}
+	return nil
 }
 
-func (c *UserEventConsumer) handleUserRegistered(ctx context.Context, event *eventbus.Event) {
+func (c *UserEventConsumer) handleUserRegistered(ctx context.Context, event *eventbus.Event) error {
 	// Extract user data from payload
 	payload := event.Payload
 
 	userIDStr, ok := payload["user_id"].(string)
 	if !ok {
 		slog.Error("missing user_id in payload")
-		return
+		return fmt.Errorf("missing user_id")
 	}
 
 	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
 		slog.Error("invalid user_id format", "user_id", userIDStr)
-		return
+		return fmt.Errorf("invalid user_id: %w", err)
 	}
 
 	// Extract email from the registration event (denormalized into user_profiles)
@@ -191,11 +222,11 @@ func (c *UserEventConsumer) handleUserRegistered(ctx context.Context, event *eve
 	// Create profile using Upsert use case (inyectado en constructor, no crear en cada mensaje)
 	if err := c.uc.Execute(ctx, userID, email, firstName, avatarURL, envPrefs); err != nil {
 		slog.Error("upsert profile failed", "error", err, "user_id", userID)
-		// Don't ack - leave in PEL for retry
-		return
+		return fmt.Errorf("upsert profile: %w", err)
 	}
 
 	slog.Info("user profile created/updated", "user_id", userID, "email", email)
+	return nil
 }
 
 // extractEnvPrefs extracts optional environment preference fields from the event payload.
@@ -276,7 +307,9 @@ func (c *UserEventConsumer) rescueOrphans(ctx context.Context) {
 
 		for _, msg := range messages {
 			slog.Info("reclaiming orphan message", "msg_id", msg.ID)
-			c.processMessage(ctx, msg)
+			if err := c.processMessage(ctx, msg); err != nil {
+				slog.Error("orphan message processing failed", "error", err, "msg_id", msg.ID)
+			}
 		}
 	}
 }
