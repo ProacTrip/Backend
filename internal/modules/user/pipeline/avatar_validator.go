@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/ProacTrip/Backend/internal/modules/user/adapters/storage"
 	"github.com/ProacTrip/Backend/internal/modules/user/domain"
 	"github.com/ProacTrip/Backend/internal/shared/eventbus"
 )
@@ -56,22 +57,23 @@ type AvatarValidator struct {
 	group        string
 	consumer     string
 	dlqStream    string
-	avatarBaseURL string // URL base para avatares (CDN en prod, vacío en dev)
+	storage      *storage.R2Storage // R2 client para generar presigned URLs
+	bucket       string             // bucket de assets (proactrip-assets)
 	running      atomic.Bool
 	orphanDone   chan struct{} // cerrado cuando rescueOrphans termina
 }
 
 // NewAvatarValidator crea un nuevo validador de avatares.
-// avatarBaseURL: prefijo para la URL del avatar (ej. "https://cdn.proactrip.com").
-// Si está vacío, no se actualiza el avatar_url (el frontend usará el default).
-func NewAvatarValidator(rdb *redis.Client, repo domain.ProfileRepository, avatarBaseURL string) *AvatarValidator {
+// Genera URLs prefirmadas de R2 con TTL de 24 horas.
+func NewAvatarValidator(rdb *redis.Client, repo domain.ProfileRepository, r2Storage *storage.R2Storage, bucket string) *AvatarValidator {
 	return &AvatarValidator{
-		rdb:          rdb,
-		repo:         repo,
-		group:        avatarGroup,
-		consumer:     fmt.Sprintf("avatar-validator-%d", time.Now().UnixMilli()),
-		dlqStream:    AvatarDLQStream,
-		avatarBaseURL: avatarBaseURL,
+		rdb:       rdb,
+		repo:      repo,
+		group:     avatarGroup,
+		consumer:  fmt.Sprintf("avatar-validator-%d", time.Now().UnixMilli()),
+		dlqStream: AvatarDLQStream,
+		storage:   r2Storage,
+		bucket:    bucket,
 	}
 }
 
@@ -174,19 +176,15 @@ func (v *AvatarValidator) processMessage(ctx context.Context, msg redis.XMessage
 		return
 	}
 
-	// Validar que el archivo existe en R2 (no tenemos acceso directo a R2,
-	// el consumer asume que el archivo fue verificado en el paso de confirmación).
-	// La validación de MIME y tamaño se delega al caller vía la confirmación inicial.
-
-	// Construir URL del avatar si hay base URL configurada.
-	// Si no (dev), el frontend usará el avatar por defecto.
-	if v.avatarBaseURL == "" {
-		slog.Info("avatar validator: skipping avatar URL update (no CDN configured)",
-			"user_id", userID, "storage_key", storageKey)
-		_ = v.rdb.XAck(ctx, avatarStream, v.group, msg.ID)
+	// Generar URL prefirmada de R2 para el avatar (TTL: 24 horas).
+	// Reemplaza el modelo CDN estático — la URL se regenera en cada actualización.
+	avatarURL, err := v.storage.GenerateDownloadURL(ctx, v.bucket, storageKey, 24*time.Hour)
+	if err != nil {
+		slog.Error("avatar validator: failed to generate presigned URL",
+			"user_id", userID, "storage_key", storageKey, "error", err)
+		// NO XACK — reintentar en siguiente ciclo
 		return
 	}
-	avatarURL := fmt.Sprintf("%s/%s", v.avatarBaseURL, storageKey)
 
 	// Actualizar el perfil del usuario con la URL del avatar
 	if err := v.repo.UpdateAvatar(ctx, userID, avatarURL); err != nil {
