@@ -265,4 +265,19 @@ func TestUploadDocumentUseCase_EmptyFile(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// Nil Dragonfly Guard
+// =============================================================================
+
+func TestCheckRateLimit_NilDragonfly(t *testing.T) {
+	uc := &UseCase{
+		dragonfly: nil,
+	}
+
+	err := uc.CheckRateLimit(t.Context(), "0195af15-4aa7-77ea-a50c-1234567890ab")
+	if err != nil {
+		t.Errorf("CheckRateLimit with nil dragonfly should return nil, got error: %v", err)
+	}
+}
+
 

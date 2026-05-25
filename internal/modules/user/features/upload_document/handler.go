@@ -63,7 +63,7 @@ func (h *Handler) Handle(c *echo.Context) error {
 
 	file, err := fileHeader.Open()
 	if err != nil {
-		return httperr.MapError(c, fmt.Errorf("abrir archivo subido: %w", err))
+		return httperr.MapError(c, fmt.Errorf("abrir archivo subido: %w: %w", err, domain.ErrInvalidFileType))
 	}
 	defer file.Close()
 
@@ -72,7 +72,7 @@ func (h *Handler) Handle(c *echo.Context) error {
 	lr := io.LimitReader(file, MaxFormSizeBytes()+1)
 	fileBytes, readErr := io.ReadAll(lr)
 	if readErr != nil {
-		return httperr.MapError(c, fmt.Errorf("leer archivo: %w", readErr))
+		return httperr.MapError(c, fmt.Errorf("leer archivo: %w: %w", readErr, domain.ErrInvalidFileType))
 	}
 
 	// 5. Obtener file_name del form

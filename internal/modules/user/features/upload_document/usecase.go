@@ -134,6 +134,9 @@ type dedupGlobalData struct {
 // Debe llamarse en el handler ANTES de Content-Length check.
 // Rate limit is the cheapest check — protects against spam before CPU/IO.
 func (uc *UseCase) CheckRateLimit(ctx context.Context, userIDStr string) error {
+	if uc.dragonfly == nil {
+		return nil // graceful degradation — rate limiting disabled
+	}
 	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
 		return fmt.Errorf("invalid user_id for rate limit: %w", err)
