@@ -26,15 +26,17 @@ type OCRClient struct {
 	cfAccountID    string
 	cfAPIToken     string
 	deepseekAPIKey string
+	docTypes       []domain.DocumentType
 	client         *http.Client
 }
 
 // NewOCRClient crea un nuevo cliente OCR.
-func NewOCRClient(cfAccountID, cfAPIToken, deepseekAPIKey string) *OCRClient {
+func NewOCRClient(cfAccountID, cfAPIToken, deepseekAPIKey string, docTypes []domain.DocumentType) *OCRClient {
 	return &OCRClient{
 		cfAccountID:    cfAccountID,
 		cfAPIToken:     cfAPIToken,
 		deepseekAPIKey: deepseekAPIKey,
+		docTypes:       docTypes,
 		client:         &http.Client{Timeout: 60 * time.Second},
 	}
 }
@@ -141,7 +143,7 @@ func (c *OCRClient) classifyWithDeepSeek(ctx context.Context, rawText string) (*
 	body := deepseekRequest{
 		Model: "deepseek-chat",
 		Messages: []deepseekMsg{
-			{Role: "system", Content: systemPrompt},
+			{Role: "system", Content: c.buildSystemPrompt()},
 			{Role: "user", Content: prompt},
 		},
 		Stream: false,
@@ -181,10 +183,19 @@ func (c *OCRClient) classifyWithDeepSeek(ctx context.Context, rawText string) (*
 // Prompts
 // =============================================================================
 
-const systemPrompt = `You are a travel document OCR classifier. Extract structured fields from the provided text.
+func (c *OCRClient) buildSystemPrompt() string {
+	var types []string
+	for _, t := range c.docTypes {
+		types = append(types, fmt.Sprintf("%s: %s", t.Code, t.Name))
+	}
+	typeList := strings.Join(types, ", ")
+
+	return fmt.Sprintf(`You are a travel document OCR classifier. Extract structured fields from the provided text.
+Valid document types: %s
+
 Return ONLY valid JSON with this exact schema:
 {
-  "document_type": "passport|national_id|drivers_license|visa|travel_insurance|vaccination_cert|boarding_pass|receipt|unknown",
+  "document_type": "one of the valid types above or 'unknown'",
   "document_number": "string or null",
   "full_name": "string or null",
   "date_of_birth": "YYYY-MM-DD or null",
@@ -192,7 +203,8 @@ Return ONLY valid JSON with this exact schema:
   "issuing_country": "ISO 3166-1 alpha-2 code or null",
   "nationality": "ISO 3166-1 alpha-2 code or null"
 }
-Do NOT include any text outside the JSON. Do NOT use markdown code blocks.`
+Do NOT include any text outside the JSON. Do NOT use markdown code blocks.`, typeList)
+}
 
 func buildClassificationPrompt(rawText string) string {
 	// Truncar a ~3000 caracteres para no exceder el contexto

@@ -275,7 +275,12 @@ func NewModule(cfg Config) (*Module, error) {
 
 	// 12. Inicializar OCR service (Cloudflare toMarkdown + DeepSeek V4 Flash)
 	if cfg.OCRConfig.AccountID != "" && cfg.OCRConfig.APIToken != "" {
-		m.ocrService = cfocr.NewOCRClient(cfg.OCRConfig.AccountID, cfg.OCRConfig.APIToken, cfg.OCRConfig.DeepSeekAPIKey)
+		docTypes, err := docRepo.GetTypes(context.Background())
+		if err != nil {
+			slog.Warn("no se pudieron cargar los tipos de documento para OCR", "error", err)
+			docTypes = nil
+		}
+		m.ocrService = cfocr.NewOCRClient(cfg.OCRConfig.AccountID, cfg.OCRConfig.APIToken, cfg.OCRConfig.DeepSeekAPIKey, docTypes)
 	}
 
 	// 13. Inicializar Features de Documentos (Phase 5)
