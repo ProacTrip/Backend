@@ -202,13 +202,19 @@ func (uc *UseCase) Execute(ctx context.Context, cmd UploadDocumentCommand) (*Upl
 		return nil, fmt.Errorf("dragonfly client is required for dedup")
 	}
 
-	// 6. Dedup — per-user reject
+	// 6. Dedup — per-user reject (verifica que el doc referenciado aún exista)
 	dedupUserKey := fmt.Sprintf("{dedup}:user:%s:%s", userID.String(), contentHash)
-	exists, err := uc.dragonfly.Exists(ctx, dedupUserKey).Result()
-	if err != nil {
-		slog.Error("dedup user check failed", "user_id", userID, "error", err)
-	} else if exists > 0 {
-		return nil, domain.ErrDuplicateDocument
+	if dedupDocID, getErr := uc.dragonfly.Get(ctx, dedupUserKey).Result(); getErr == nil && dedupDocID != "" {
+		// La key existe — verificar si el documento todavía está en DB
+		dedupUUID, parseErr := uuid.Parse(dedupDocID)
+		if parseErr == nil {
+			if _, repoErr := uc.docRepo.GetByID(ctx, dedupUUID); repoErr == nil {
+				// Documento existe → duplicado real
+				return nil, domain.ErrDuplicateDocument
+			}
+			// Documento no encontrado → key huérfana (ya fue borrado). Limpiar y continuar.
+			uc.dragonfly.Del(ctx, dedupUserKey)
+		}
 	}
 
 	// 7. Dedup — global reuse with SETNX lock to prevent race condition
