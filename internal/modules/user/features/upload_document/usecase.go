@@ -65,6 +65,7 @@ type DocR2Storage interface {
 	Upload(ctx context.Context, bucket, key string, reader io.Reader, size int64, contentType string) error
 	Download(ctx context.Context, bucket, key string) (io.ReadCloser, error)
 	Delete(ctx context.Context, bucket, key string) error
+	StatObject(ctx context.Context, bucket, key string) (*storage.ObjectMeta, error)
 }
 
 // DocEventPublisher define el puerto para publicar eventos en Dragonfly Streams.
@@ -394,6 +395,13 @@ func (uc *UseCase) reuseGlobalDedup(
 
 	docID := uuid.Must(uuid.NewV7())
 	realSize := int64(len(cmd.FileBytes))
+
+	// Verify the cached storage key still exists in R2.
+	// If the original uploader deleted their document, the key is orphaned.
+	if _, statErr := uc.storage.StatObject(ctx, storage.SecureBucket(), cached.StorageKey); statErr != nil {
+		slog.Warn("global dedup storage key orphaned, falling through to normal upload", "key", cached.StorageKey, "error", statErr)
+		return nil, false
+	}
 
 	now := time.Now()
 	doc := &domain.UserDocument{
