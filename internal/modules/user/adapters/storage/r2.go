@@ -66,10 +66,9 @@ func NewR2Storage(endpoint, accessKey, secretKey string, useSSL bool) (*R2Storag
 	endpoint = strings.TrimPrefix(endpoint, "http://")
 
 	client, err := minio.New(endpoint, &minio.Options{
-		Creds:        credentials.NewStaticV4(accessKey, secretKey, ""),
-		Secure:       useSSL,
-		Region:       "weur",
-		BucketLookup: minio.BucketLookupPath,
+		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
+		Secure: useSSL,
+		Region: "auto",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("crear cliente R2: %w", err)
