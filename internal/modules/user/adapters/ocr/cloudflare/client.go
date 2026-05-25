@@ -78,34 +78,18 @@ type deepseekResponse struct {
 }
 
 // ExtractFromDocument implementa el pipeline OCR de dos pasos.
+// Paso 1: Cloudflare Workers AI vision model extrae texto de la imagen vía URL prefirmada.
+// Paso 2: DeepSeek V4 Flash clasifica el tipo de documento.
 func (c *OCRClient) ExtractFromDocument(ctx context.Context, fileURL string) (*domain.ExtractedData, error) {
-	// 1. Descargar archivo de R2
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fileURL, nil)
+	// 1. Paso 1: Workers AI vision model — extraer texto de la imagen
+	slog.Info("ocr: calling Workers AI vision model")
+	rawText, err := c.extractTextWithVision(ctx, fileURL)
 	if err != nil {
-		return nil, fmt.Errorf("crear request descarga: %w", err)
+		return nil, fmt.Errorf("vision extraction: %w", err)
 	}
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("descargar archivo: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("descarga R2 falló status %d", resp.StatusCode)
-	}
-	fileBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("leer archivo: %w", err)
-	}
+	slog.Info("ocr: vision extraction completed", "text_len", len(rawText), "text_preview", rawText[:min(len(rawText), 300)])
 
-	// 2. Paso 1: toMarkdown — extraer texto raw
-	slog.Info("ocr: calling toMarkdown", "size", len(fileBytes))
-	rawText, err := c.sendToMarkdown(ctx, fileBytes, "document.pdf")
-	if err != nil {
-		return nil, fmt.Errorf("toMarkdown: %w", err)
-	}
-	slog.Info("ocr: toMarkdown completed", "text_len", len(rawText), "text_preview", rawText[:min(len(rawText), 300)])
-
-	// 3. Paso 2: DeepSeek V4 Flash — clasificar y estructurar
+	// 2. Paso 2: DeepSeek V4 Flash — clasificar y estructurar
 	slog.Info("ocr: calling DeepSeek for classification")
 	result, err := c.classifyWithDeepSeek(ctx, rawText)
 	if err != nil {
@@ -113,6 +97,52 @@ func (c *OCRClient) ExtractFromDocument(ctx context.Context, fileURL string) (*d
 	}
 	slog.Info("ocr: DeepSeek classification result", "doc_type", result.DocumentType, "is_travel", result.IsTravelDocument())
 	return result, nil
+}
+
+// extractTextWithVision envía la URL de la imagen al modelo de visión de Workers AI.
+func (c *OCRClient) extractTextWithVision(ctx context.Context, imageURL string) (string, error) {
+	body := map[string]interface{}{
+		"messages": []map[string]string{
+			{"role": "system", "content": "Extract all text from this document image exactly as it appears. Return only the extracted text, no additional commentary."},
+			{"role": "user", "content": "Extract all text from this document."},
+		},
+		"image":      imageURL,
+		"max_tokens": 1024,
+	}
+	jsonBody, _ := json.Marshal(body)
+
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/ai/run/@cf/meta/llama-4-scout-17b-16e-instruct", c.cfAccountID)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonBody))
+	req.Header.Set("Authorization", "Bearer "+c.cfAPIToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("vision request: %w", err)
+	}
+	defer resp.Body.Close()
+	respBytes, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("vision API error (HTTP %d): %s", resp.StatusCode, string(respBytes))
+	}
+
+	var result struct {
+		Success bool `json:"success"`
+		Result  struct {
+			Response string `json:"response"`
+		} `json:"result"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(respBytes, &result); err != nil {
+		return "", fmt.Errorf("parse vision response: %w", err)
+	}
+	if !result.Success {
+		return "", fmt.Errorf("vision failed: %s", string(respBytes))
+	}
+	return result.Result.Response, nil
 }
 
 // sendToMarkdown envía el archivo a Cloudflare toMarkdown.
