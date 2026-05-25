@@ -166,7 +166,7 @@ const documentListQuery = `
 		ocr_status, ocr_data, ocr_confidence, extracted_data,
 		has_newer_medical_data, medical_update_summary,
 		valid_from, valid_until, document_number, issuing_country,
-		metadata, created_at, updated_at
+		metadata, created_at, updated_at, content_hash
 	FROM user_documents
 `
 
