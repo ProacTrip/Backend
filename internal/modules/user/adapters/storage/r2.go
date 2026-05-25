@@ -68,7 +68,7 @@ func NewR2Storage(endpoint, accessKey, secretKey string, useSSL bool) (*R2Storag
 	client, err := minio.New(endpoint, &minio.Options{
 		Creds:        credentials.NewStaticV4(accessKey, secretKey, ""),
 		Secure:       useSSL,
-		Region:       "auto",
+		Region:       "",
 		BucketLookup: minio.BucketLookupPath,
 	})
 	if err != nil {
