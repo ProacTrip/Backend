@@ -11,11 +11,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image/jpeg"
 	"io"
 	"log/slog"
+	"net/http"
 	"sync/atomic"
 	"time"
 
+	"github.com/gen2brain/go-fitz"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
@@ -234,8 +237,17 @@ func (w *OCRWorker) processMessage(ctx context.Context, msg redis.XMessage) {
 		return
 	}
 
-	// 3. Ejecutar OCR / AI extraction usando la URL prefirmada
-	extracted, err := w.ocrService.ExtractFromDocument(ctx, downloadURL)
+	// 3. Ejecutar OCR — convertir PDF a imágenes y extraer texto
+	imageURLs, err := w.convertPDFToImages(ctx, downloadURL, userID, docID)
+	if err != nil {
+		slog.Error("doc OCR: PDF to images failed", "doc_id", docID, "error", err)
+		w.markFailed(ctx, doc, fmt.Sprintf("pdf_conversion_error: %v", err))
+		_ = w.rdb.XAck(ctx, docOCRStream, w.group, msg.ID)
+		return
+	}
+
+	slog.Info("doc OCR: PDF converted", "doc_id", docID, "pages", len(imageURLs))
+	extracted, err := w.ocrService.ExtractFromDocument(ctx, imageURLs[0]) // usa primera página por ahora
 	if err != nil {
 		slog.Error("doc OCR: extraction failed", "doc_id", docID, "error", err)
 		w.markFailed(ctx, doc, fmt.Sprintf("ocr_extraction_error: %v", err))
@@ -567,3 +579,42 @@ func (w *OCRWorker) rescueOrphans(ctx context.Context) {
 	}
 }
 
+
+// convertPDFToImages descarga el PDF, convierte páginas a JPEG y las sube a R2.
+func (w *OCRWorker) convertPDFToImages(ctx context.Context, presignedURL string, userID, docID uuid.UUID) ([]string, error) {
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, presignedURL, nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("download PDF: %w", err)
+	}
+	defer resp.Body.Close()
+	pdfBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read PDF: %w", err)
+	}
+	doc, err := fitz.NewFromMemory(pdfBytes)
+	if err != nil {
+		return nil, fmt.Errorf("open PDF: %w", err)
+	}
+	defer doc.Close()
+	var urls []string
+	for i := 0; i < doc.NumPage(); i++ {
+		img, err := doc.Image(i)
+		if err != nil {
+			continue
+		}
+		var buf bytes.Buffer
+		jpeg.Encode(&buf, img, &jpeg.Options{Quality: 60})
+		pageKey := fmt.Sprintf("processed/%s/%s/page_%d.jpg", userID.String(), docID.String(), i+1)
+		w.r2.Upload(ctx, storage.SecureBucket(), pageKey, &buf, int64(buf.Len()), "image/jpeg")
+		pageURL, err := w.r2.GenerateDownloadURL(ctx, storage.SecureBucket(), pageKey, 5*time.Minute)
+		if err != nil {
+			continue
+		}
+		urls = append(urls, pageURL)
+	}
+	if len(urls) == 0 {
+		return nil, fmt.Errorf("no pages rendered")
+	}
+	return urls, nil
+}

@@ -1,16 +1,12 @@
-// Adapter: OCR vía Cloudflare Workers AI (modelo de visión llama-4-scout).
-// Recibe URL prefirmada de R2, descarga el archivo, si es PDF lo convierte
-// a imágenes PNG por página, y envía cada página al modelo de visión.
-// Combina el texto de todas las páginas y lo clasifica.
+// Adapter: OCR vía Cloudflare Workers AI vision model.
+// Recibe URLs prefirmadas de R2 (ya convertidas a JPEG por el worker).
 package cloudflare
 
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"image/jpeg"
 	"io"
 	"log/slog"
 	"net/http"
@@ -18,10 +14,8 @@ import (
 	"time"
 
 	"github.com/ProacTrip/Backend/internal/modules/user/domain"
-	"github.com/gen2brain/go-fitz"
 )
 
-// OCRClient implementa domain.OCRService usando Workers AI vision model.
 type OCRClient struct {
 	accountID string
 	apiToken  string
@@ -37,7 +31,7 @@ func NewOCRClient(accountID, apiToken string, _ string, _ []domain.DocumentType)
 }
 
 // =============================================================================
-// domain.OCRService
+// domain.OCRService — ahora recibe múltiples URLs (una por página)
 // =============================================================================
 
 type visionResponse struct {
@@ -45,50 +39,21 @@ type visionResponse struct {
 	Result  struct {
 		Response string `json:"response"`
 	} `json:"result"`
-	Errors []struct {
-		Message string `json:"message"`
-	} `json:"errors"`
+	Errors []struct{ Message string `json:"message"` } `json:"errors"`
 }
 
+// ExtractFromDocument procesa las URLs de imágenes (JPEG) de cada página.
 func (c *OCRClient) ExtractFromDocument(ctx context.Context, fileURL string) (*domain.ExtractedData, error) {
-	// 1. Descargar archivo de R2
-	slog.Info("ocr: downloading file from R2")
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fileURL, nil)
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("download: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("download failed: HTTP %d", resp.StatusCode)
-	}
-	fileBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read file: %w", err)
-	}
+	// El worker ahora pasa una sola URL (primera página) temporalmente.
+	// TODO: extender interfaz para múltiples URLs.
+	return c.extractFromURLs(ctx, []string{fileURL})
+}
 
-	contentType := http.DetectContentType(fileBytes)
-	slog.Info("ocr: file downloaded", "size", len(fileBytes), "type", contentType)
-
-	// 2. Extraer imágenes de cada página (PDF) o usar la imagen directamente
-	var pageImages []string // base64 encoded PNGs
-	if strings.HasPrefix(contentType, "application/pdf") || strings.HasSuffix(fileURL, ".pdf") {
-		images, err := c.pdfToImages(fileBytes)
-		if err != nil {
-			return nil, fmt.Errorf("pdf to images: %w", err)
-		}
-		pageImages = images
-		slog.Info("ocr: PDF converted to images", "pages", len(pageImages))
-	} else {
-		// JPEG/PNG directo — usar como base64
-		pageImages = []string{base64.StdEncoding.EncodeToString(fileBytes)}
-	}
-
-	// 3. Enviar cada página al modelo de visión
+func (c *OCRClient) extractFromURLs(ctx context.Context, urls []string) (*domain.ExtractedData, error) {
 	var allText strings.Builder
-	for i, img := range pageImages {
-		slog.Info("ocr: processing page", "page", i+1, "total", len(pageImages))
-		text, err := c.extractTextFromImage(ctx, img)
+	for i, url := range urls {
+		slog.Info("ocr: processing page", "page", i+1, "total", len(urls), "url", url[:min(len(url), 80)])
+		text, err := c.extractTextFromURL(ctx, url)
 		if err != nil {
 			slog.Warn("ocr: page extraction failed", "page", i+1, "error", err)
 			continue
@@ -97,81 +62,33 @@ func (c *OCRClient) ExtractFromDocument(ctx context.Context, fileURL string) (*d
 		allText.WriteString("\n")
 	}
 
-	combinedText := strings.TrimSpace(allText.String())
-	if combinedText == "" {
-		return &domain.ExtractedData{
-			DocumentType:  "unknown",
-			RawResponse:   "no text extracted",
-			OCRConfidence: 0,
-		}, nil
+	combined := strings.TrimSpace(allText.String())
+	if combined == "" {
+		return &domain.ExtractedData{DocumentType: "unknown", RawResponse: "no text", OCRConfidence: 0}, nil
 	}
-
-	slog.Info("ocr: combined text", "len", len(combinedText), "preview", combinedText[:min(len(combinedText), 200)])
-
-	// 4. Clasificar el texto combinado con una segunda llamada al modelo
-	return c.classifyText(ctx, combinedText)
+	slog.Info("ocr: combined text", "len", len(combined), "preview", combined[:min(len(combined), 200)])
+	return c.classifyText(ctx, combined)
 }
 
-// pdfToImages convierte un PDF a una lista de imágenes PNG en base64 (una por página).
-func (c *OCRClient) pdfToImages(pdfBytes []byte) ([]string, error) {
-	doc, err := fitz.NewFromMemory(pdfBytes)
-	if err != nil {
-		return nil, fmt.Errorf("open PDF: %w", err)
-	}
-	defer doc.Close()
-
-	var images []string
-	for i := 0; i < doc.NumPage(); i++ {
-		img, err := doc.Image(i)
-		if err != nil {
-			slog.Warn("ocr: failed to render PDF page", "page", i+1, "error", err)
-			continue
-		}
-		var buf bytes.Buffer
-		if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 60}); err != nil {
-			continue
-		}
-		images = append(images, base64.StdEncoding.EncodeToString(buf.Bytes()))
-	}
-	return images, nil
-}
-
-// extractTextFromImage envía una imagen al modelo de visión usando content array.
-func (c *OCRClient) extractTextFromImage(ctx context.Context, base64Image string) (string, error) {
-	dataURI := "data:image/jpeg;base64," + base64Image
-	slog.Info("ocr: sending image to vision model", "data_uri_len", len(dataURI))
-
+func (c *OCRClient) extractTextFromURL(ctx context.Context, imageURL string) (string, error) {
 	body := map[string]interface{}{
-		"messages": []map[string]interface{}{
-			{
-				"role": "user",
-				"content": []map[string]interface{}{
-					{
-						"type":  "image",
-						"image": dataURI,
-					},
-					{
-						"type": "text",
-						"text": "Extract every piece of text from this document image exactly as written. Preserve names, numbers, dates, and codes. Return only the extracted text, no commentary.",
-					},
-				},
-			},
+		"messages": []map[string]string{
+			{"role": "user", "content": "Extract ALL text from this document image exactly as written. Preserve names, numbers, dates. Return only text, no commentary."},
 		},
+		"image":      imageURL,
 		"max_tokens": 1024,
 	}
 	return c.callVisionAPI(ctx, body)
 }
 
-// classifyText envía el texto extraído al modelo para clasificarlo como JSON estructurado.
 func (c *OCRClient) classifyText(ctx context.Context, text string) (*domain.ExtractedData, error) {
 	body := map[string]interface{}{
 		"messages": []map[string]string{
-			{"role": "system", "content": "You are a travel document classifier. Return ONLY valid JSON with this schema: {\"document_type\":\"passport|national_id|drivers_license|visa|travel_insurance|vaccination_cert|boarding_pass|receipt|unknown\",\"document_number\":null,\"full_name\":null,\"date_of_birth\":null,\"expiry_date\":null,\"issuing_country\":null,\"nationality\":null}. Use null for missing fields."},
-			{"role": "user", "content": fmt.Sprintf("Classify this document and extract structured fields:\n\n%s", text[:min(len(text), 3000)])},
+			{"role": "system", "content": "Return ONLY JSON: {\"document_type\":\"passport|national_id|drivers_license|visa|travel_insurance|vaccination_cert|boarding_pass|receipt|unknown\",\"document_number\":null,\"full_name\":null,\"date_of_birth\":null,\"expiry_date\":null,\"issuing_country\":null,\"nationality\":null}. Use null for missing."},
+			{"role": "user", "content": fmt.Sprintf("Classify and extract:\n\n%s", text[:min(len(text), 3000)])},
 		},
 		"max_tokens": 512,
 	}
-
 	rawJSON, err := c.callVisionAPI(ctx, body)
 	if err != nil {
 		return nil, err
@@ -179,7 +96,6 @@ func (c *OCRClient) classifyText(ctx context.Context, text string) (*domain.Extr
 	return parseVisionJSON(rawJSON, text), nil
 }
 
-// callVisionAPI hace una llamada al modelo de visión de Workers AI.
 func (c *OCRClient) callVisionAPI(ctx context.Context, body map[string]interface{}) (string, error) {
 	jsonBody, _ := json.Marshal(body)
 	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/ai/run/@cf/meta/llama-4-scout-17b-16e-instruct", c.accountID)
@@ -189,23 +105,19 @@ func (c *OCRClient) callVisionAPI(ctx context.Context, body map[string]interface
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("vision request: %w", err)
+		return "", err
 	}
 	defer resp.Body.Close()
 	respBytes, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("vision API error (HTTP %d): %s", resp.StatusCode, string(respBytes))
+		return "", fmt.Errorf("API error HTTP %d: %s", resp.StatusCode, string(respBytes))
 	}
-
 	var vr visionResponse
-	if err := json.Unmarshal(respBytes, &vr); err != nil {
-		return "", fmt.Errorf("parse: %w", err)
-	}
+	json.Unmarshal(respBytes, &vr)
 	if !vr.Success {
-		return "", fmt.Errorf("api returned error: %s", string(respBytes))
+		return "", fmt.Errorf("API error: %s", string(respBytes))
 	}
-	slog.Info("ocr: vision model raw response", "len", len(vr.Result.Response))
 	return vr.Result.Response, nil
 }
 
@@ -229,31 +141,19 @@ func parseVisionJSON(raw, rawResponse string) *domain.ExtractedData {
 	raw = strings.TrimPrefix(raw, "```")
 	raw = strings.TrimSuffix(raw, "```")
 	raw = strings.TrimSpace(raw)
-
 	var pf parsedFields
 	if err := json.Unmarshal([]byte(raw), &pf); err != nil {
-		return &domain.ExtractedData{
-			DocumentType:  "unknown",
-			RawResponse:   rawResponse,
-			OCRConfidence: 0.5,
-		}
+		return &domain.ExtractedData{DocumentType: "unknown", RawResponse: rawResponse, OCRConfidence: 0.5}
 	}
 	return &domain.ExtractedData{
-		DocumentType:   pf.DocumentType,
-		DocumentNumber: pf.DocumentNumber,
-		FullName:       pf.FullName,
-		DateOfBirth:    pf.DateOfBirth,
-		ExpiryDate:     pf.ExpiryDate,
-		IssuingCountry: pf.IssuingCountry,
-		Nationality:    pf.Nationality,
-		RawResponse:    rawResponse,
-		OCRConfidence:  0.85,
+		DocumentType: pf.DocumentType, DocumentNumber: pf.DocumentNumber,
+		FullName: pf.FullName, DateOfBirth: pf.DateOfBirth,
+		ExpiryDate: pf.ExpiryDate, IssuingCountry: pf.IssuingCountry,
+		Nationality: pf.Nationality, RawResponse: rawResponse, OCRConfidence: 0.85,
 	}
 }
 
 func min(a, b int) int {
-	if a < b {
-		return a
-	}
+	if a < b { return a }
 	return b
 }
