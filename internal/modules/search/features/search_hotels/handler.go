@@ -76,6 +76,16 @@ func (h *Handler) Handle(c *echo.Context) error {
 		cmd.Currency = new(currency)
 	}
 
+	// Inject user's preferred hotel brands if not explicitly set
+	if len(cmd.Brands) == 0 {
+		cmd.Brands = shared.InjectHotelPrefs(
+			c.Request().Context(),
+			h.rdb,
+			shared.UserIDFromContext(c),
+			cmd.Brands,
+		)
+	}
+
 	slog.Debug("validation passed, calling usecase")
 
 	resp, err := h.usecase.Execute(c.Request().Context(), cmd)

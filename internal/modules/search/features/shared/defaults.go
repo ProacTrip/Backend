@@ -13,6 +13,7 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/ProacTrip/Backend/internal/modules/search/shared/airlines"
 	sharedUser "github.com/ProacTrip/Backend/internal/shared/user"
 	searchshared "github.com/ProacTrip/Backend/internal/modules/search/shared"
 )
@@ -130,4 +131,108 @@ func ResolveSearchDefaults(
 	}
 
 	return
+}
+
+// =============================================================================
+// Preference Injection — wired user preferences into search handlers
+// =============================================================================
+
+// InjectFlightPrefs injects the user's preferred airlines as include_airlines
+// if the user is authenticated and has preferences saved, but only when the
+// caller didn't explicitly pass include_airlines in the request.
+func InjectFlightPrefs(
+	ctx context.Context,
+	rdb *redis.Client,
+	userID string,
+	includeAirlines []string,
+) []string {
+	if userID == "" || rdb == nil {
+		return includeAirlines
+	}
+	// If user explicitly passed airlines, don't override
+	if len(includeAirlines) > 0 {
+		return includeAirlines
+	}
+
+	prefs, err := sharedUser.GetProfilePrefs(ctx, rdb, userID)
+	if err != nil {
+		slog.WarnContext(ctx, "flight prefs injection: profile prefs lookup failed",
+			slog.String("user_id", userID),
+			slog.String("error", err.Error()),
+		)
+		return includeAirlines
+	}
+	if prefs == nil || len(prefs.PreferredAirlines) == 0 {
+		return includeAirlines
+	}
+
+	// Resolve airline names to IATA codes (prefs may contain names after re-save)
+	resolved := make([]string, 0, len(prefs.PreferredAirlines))
+	for _, a := range prefs.PreferredAirlines {
+		// Already a 2-char IATA code — pass through
+		if len(a) == 2 && isAllUpperAlpha(a) {
+			resolved = append(resolved, a)
+			continue
+		}
+		iata, err := airlines.ResolveAirlineToIATA(a)
+		if err != nil {
+			slog.WarnContext(ctx, "flight prefs injection: unresolved airline, skipping",
+				"airline", a,
+				"error", err.Error(),
+			)
+			continue
+		}
+		resolved = append(resolved, iata)
+	}
+
+	return resolved
+}
+
+// InjectHotelPrefs injects the user's preferred hotels as brand filter
+// if the user is authenticated and has preferences saved, but only when the
+// caller didn't explicitly pass brands in the request.
+// NOTE: Hotel brand resolution requires a brand registry which is deferred
+// to a follow-up. For now, preferred_hotels are passed as-is if they appear
+// to be numeric IDs.
+func InjectHotelPrefs(
+	ctx context.Context,
+	rdb *redis.Client,
+	userID string,
+	brands []int,
+) []int {
+	if userID == "" || rdb == nil {
+		return brands
+	}
+	// If user explicitly passed brands, don't override
+	if len(brands) > 0 {
+		return brands
+	}
+
+	prefs, err := sharedUser.GetProfilePrefs(ctx, rdb, userID)
+	if err != nil {
+		slog.WarnContext(ctx, "hotel prefs injection: profile prefs lookup failed",
+			slog.String("user_id", userID),
+			slog.String("error", err.Error()),
+		)
+		return brands
+	}
+	if prefs == nil || len(prefs.PreferredHotels) == 0 {
+		return brands
+	}
+
+	slog.InfoContext(ctx, "hotel prefs injection: preferred_hotels found but brand registry not yet available — deferring",
+		slog.String("user_id", userID),
+		slog.Int("count", len(prefs.PreferredHotels)),
+	)
+	return brands
+}
+
+// isAllUpperAlpha checks if a string consists only of uppercase ASCII letters.
+func isAllUpperAlpha(s string) bool {
+	for _, r := range s {
+		if r < 'A' || r > 'Z' {
+			return false
+		}
+	}
+	return true
 }

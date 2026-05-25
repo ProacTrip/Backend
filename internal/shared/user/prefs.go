@@ -8,6 +8,7 @@ package user
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -23,8 +24,10 @@ import (
 // CountryCode y Timezone fueron removidos en Phase 2 de ai-discovery-rewrite —
 // esos datos se resuelven exclusivamente desde la caché env:{ip} o DEFAULT_COUNTRY_CODE.
 type Prefs struct {
-	Currency string `json:"currency"`
-	Language string `json:"language"`
+	Currency          string   `json:"currency"`
+	Language          string   `json:"language"`
+	PreferredAirlines []string `json:"preferred_airlines"`
+	PreferredHotels   []string `json:"preferred_hotels"`
 }
 
 // =============================================================================
@@ -49,8 +52,10 @@ func GetProfilePrefs(ctx context.Context, rdb *redis.Client, userID string) (*Pr
 	}
 
 	return &Prefs{
-		Currency: fields["currency"],
-		Language: fields["language"],
+		Currency:          fields["currency"],
+		Language:          fields["language"],
+		PreferredAirlines: deserializeStringSlice(fields["preferred_airlines"]),
+		PreferredHotels:   deserializeStringSlice(fields["preferred_hotels"]),
 	}, nil
 }
 
@@ -66,12 +71,18 @@ func SetProfilePrefs(ctx context.Context, rdb *redis.Client, userID string, pref
 		return nil
 	}
 
-	fields := make(map[string]interface{}, 2)
+	fields := make(map[string]interface{}, 4)
 	if prefs.Currency != "" {
 		fields["currency"] = prefs.Currency
 	}
 	if prefs.Language != "" {
 		fields["language"] = prefs.Language
+	}
+	if len(prefs.PreferredAirlines) > 0 {
+		fields["preferred_airlines"] = serializeStringSlice(prefs.PreferredAirlines)
+	}
+	if len(prefs.PreferredHotels) > 0 {
+		fields["preferred_hotels"] = serializeStringSlice(prefs.PreferredHotels)
 	}
 
 	if len(fields) == 0 {
@@ -105,4 +116,30 @@ func DeleteProfilePrefs(ctx context.Context, rdb *redis.Client, userID string) e
 		return fmt.Errorf("delete profile prefs: %w", err)
 	}
 	return nil
+}
+
+// =============================================================================
+// Helpers for string slice serialization in Dragonfly hash fields
+// =============================================================================
+
+// serializeStringSlice marshals a []string to JSON for hash field storage.
+func serializeStringSlice(s []string) string {
+	if len(s) == 0 {
+		return "[]"
+	}
+	data, _ := json.Marshal(s)
+	return string(data)
+}
+
+// deserializeStringSlice unmarshals a JSON string to []string from a hash field.
+// Returns nil for empty or invalid JSON.
+func deserializeStringSlice(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	var s []string
+	if err := json.Unmarshal([]byte(raw), &s); err != nil {
+		return nil
+	}
+	return s
 }

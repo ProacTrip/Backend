@@ -64,6 +64,16 @@ func (h *Handler) Handle(c *echo.Context) error {
 		cmd.Currency = new(currency)
 	}
 
+	// Inject user's preferred airlines if not explicitly set
+	if len(cmd.IncludeAirlines) == 0 {
+		cmd.IncludeAirlines = shared.InjectFlightPrefs(
+			c.Request().Context(),
+			h.rdb,
+			shared.UserIDFromContext(c),
+			cmd.IncludeAirlines,
+		)
+	}
+
 	resp, err := h.usecase.Execute(c.Request().Context(), cmd)
 	if err != nil {
 		slog.ErrorContext(c.Request().Context(), "search_flights failed",
