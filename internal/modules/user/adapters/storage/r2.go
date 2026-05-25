@@ -4,8 +4,11 @@ package storage
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -47,6 +50,33 @@ func SSEBaseURL() string {
 }
 
 // =============================================================================
+// R2Transport — Corrige firmas de MinIO para Cloudflare R2
+// =============================================================================
+// MinIO v7 inyecta "UNSIGNED-PAYLOAD" en X-Amz-Content-Sha256 para GET/HEAD,
+// lo cual R2 rechaza cuando se combina con Path-Style. Este transport reemplaza
+// ese valor por el SHA256 real de un cuerpo vacío (e3b0c442...), idéntico a
+// como lo haría curl con --aws-sigv4.
+
+var emptyBodySHA256 = hex.EncodeToString(func() []byte {
+	h := sha256.Sum256([]byte(""))
+	return h[:]
+}())
+
+// r2Transport wraps the base transport and fixes MinIO's signature headers for R2.
+type r2Transport struct {
+	base http.RoundTripper
+}
+
+func (t *r2Transport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Method == http.MethodGet || req.Method == http.MethodHead {
+		if req.Header.Get("X-Amz-Content-Sha256") == "UNSIGNED-PAYLOAD" {
+			req.Header.Set("X-Amz-Content-Sha256", emptyBodySHA256)
+		}
+	}
+	return t.base.RoundTrip(req)
+}
+
+// =============================================================================
 // R2Storage — Adaptador de almacenamiento R2 (S3-compatible)
 // =============================================================================
 
@@ -68,8 +98,16 @@ func NewR2Storage(endpoint, accessKey, secretKey string, useSSL bool) (*R2Storag
 	client, err := minio.New(endpoint, &minio.Options{
 		Creds:        credentials.NewStaticV4(accessKey, secretKey, ""),
 		Secure:       useSSL,
-		Region:       "",
+		Region:       "us-east-1",
 		BucketLookup: minio.BucketLookupPath,
+		Transport: &r2Transport{
+			base: &http.Transport{
+				MaxIdleConns:          100,
+				IdleConnTimeout:       90 * time.Second,
+				TLSHandshakeTimeout:   10 * time.Second,
+				ExpectContinueTimeout: 1 * time.Second,
+			},
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("crear cliente R2: %w", err)
