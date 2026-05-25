@@ -16,7 +16,7 @@ import (
 	"github.com/ProacTrip/Backend/internal/config"
 
 	"github.com/ProacTrip/Backend/internal/modules/user/adapters/encryption"
-	deepseekocr "github.com/ProacTrip/Backend/internal/modules/user/adapters/ocr/deepseek"
+	cfocr "github.com/ProacTrip/Backend/internal/modules/user/adapters/ocr/cloudflare"
 	"github.com/ProacTrip/Backend/internal/modules/user/adapters/postgres"
 	"github.com/ProacTrip/Backend/internal/modules/user/adapters/storage"
 	"github.com/ProacTrip/Backend/internal/modules/user/consumer"
@@ -273,13 +273,9 @@ func NewModule(cfg Config) (*Module, error) {
 	docRepo := postgres.NewDocumentRepository(cfg.PostgresPool)
 	m.documentRepo = docRepo
 
-	// 12. Inicializar OCR service (Phase 5)
-	if cfg.OCRConfig.APIKey != "" {
-		m.ocrService = deepseekocr.NewOCRClient(
-			cfg.OCRConfig.APIKey,
-			deepseekocr.WithBaseURL(cfg.OCRConfig.BaseURL),
-			deepseekocr.WithModel(cfg.OCRConfig.Model),
-		)
+	// 12. Inicializar OCR service (Cloudflare Workers AI toMarkdown)
+	if cfg.OCRConfig.AccountID != "" && cfg.OCRConfig.APIToken != "" {
+		m.ocrService = cfocr.NewOCRClient(cfg.OCRConfig.AccountID, cfg.OCRConfig.APIToken)
 	}
 
 	// 13. Inicializar Features de Documentos (Phase 5)
