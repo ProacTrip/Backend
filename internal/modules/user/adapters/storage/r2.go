@@ -198,6 +198,10 @@ func (s *R2Storage) Upload(ctx context.Context, bucket, key string, reader io.Re
 	if err != nil {
 		return fmt.Errorf("subir objeto: %w", err)
 	}
+	// Verify immediately after upload
+	if _, statErr := s.client.StatObject(ctx, bucket, key, minio.StatObjectOptions{}); statErr != nil {
+		return fmt.Errorf("stat after put (bucket=%s key=%s): %w", bucket, key, statErr)
+	}
 	return nil
 }
 
