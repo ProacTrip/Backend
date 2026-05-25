@@ -606,11 +606,9 @@ func (w *OCRWorker) convertPDFToImages(ctx context.Context, presignedURL string,
 		var buf bytes.Buffer
 		jpeg.Encode(&buf, img, &jpeg.Options{Quality: 60})
 		pageKey := fmt.Sprintf("processed/%s/%s/page_%d.jpg", userID.String(), docID.String(), i+1)
-		w.r2.Upload(ctx, storage.SecureBucket(), pageKey, &buf, int64(buf.Len()), "image/jpeg")
-		pageURL, err := w.r2.GenerateDownloadURL(ctx, storage.SecureBucket(), pageKey, 5*time.Minute)
-		if err != nil {
-			continue
-		}
+		w.r2.Upload(ctx, storage.AssetsBucket(), pageKey, &buf, int64(buf.Len()), "image/jpeg")
+		// Usar URL pública de assets.proactrip.com en vez de prefirmada
+		pageURL := fmt.Sprintf("https://assets.proactrip.com/%s", pageKey)
 		urls = append(urls, pageURL)
 	}
 	if len(urls) == 0 {
