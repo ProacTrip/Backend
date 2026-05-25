@@ -244,6 +244,7 @@ func scanDocuments(rows pgx.Rows) ([]*domain.UserDocument, error) {
 			&doc.VerificationStatus,
 			&doc.OCRStatus,
 			&doc.OCRData,
+			&doc.OCRConfidence,
 			&doc.ExtractedData,
 			&doc.HasNewerMedicalData,
 			&doc.MedicalUpdateSummary,
