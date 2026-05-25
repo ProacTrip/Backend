@@ -103,7 +103,7 @@ func (c *OCRClient) ExtractFromDocument(ctx context.Context, fileURL string) (*d
 	if err != nil {
 		return nil, fmt.Errorf("toMarkdown: %w", err)
 	}
-	slog.Info("ocr: toMarkdown completed", "text_len", len(rawText))
+	slog.Info("ocr: toMarkdown completed", "text_len", len(rawText), "text_preview", rawText[:min(len(rawText), 300)])
 
 	// 3. Paso 2: DeepSeek V4 Flash — clasificar y estructurar
 	slog.Info("ocr: calling DeepSeek for classification")
@@ -279,3 +279,4 @@ func parseDeepSeekJSON(jsonStr, rawText string) *domain.ExtractedData {
 	}
 	return data
 }
+func min(a, b int) int { if a < b { return a }; return b }
