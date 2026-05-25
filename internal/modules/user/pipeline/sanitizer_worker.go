@@ -208,8 +208,16 @@ func (s *SanitizerWorker) processMessage(ctx context.Context, msg redis.XMessage
 	cleanBytes, err := s.sanitize(rawBytes, mimeType)
 	if err != nil {
 		slog.Error("doc sanitizer: sanitize failed", "doc_id", docID, "mime", mimeType, "error", err)
-		doc.FailureReason = new(fmt.Sprintf("sanitization failed: %v", err))
+		reason := fmt.Sprintf("sanitization failed: %v", err)
+		doc.FailureReason = &reason
+		doc.OCRStatus = domain.OCRStatusFailed
 		_ = s.docRepo.Update(ctx, doc)
+		s.publishSSE(ctx, docID, "doc.failed", map[string]interface{}{
+			"document_id":  docID,
+			"file_name":    doc.FileName,
+			"ocr_status":   domain.OCRStatusFailed,
+			"failure_reason": reason,
+		})
 		_ = s.rdb.XAck(ctx, docSanitizeStream, s.group, msg.ID)
 		return
 	}
