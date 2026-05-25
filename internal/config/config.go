@@ -137,13 +137,12 @@ type AIConfig struct {
 }
 
 // AIOCRConfig contiene la configuración del servicio OCR para documentos.
-// Usa DeepSeek V4 Flash multimodal para extracción de datos de documentos.
+// Usa Cloudflare Workers AI toMarkdown + DeepSeek V4 Flash.
 type AIOCRConfig struct {
-	Provider string        // "deepseek" | "openai"
-	BaseURL  string        // API endpoint base
-	APIKey   string        // API key
-	Model    string        // e.g. "deepseek-chat" (multimodal required)
-	Timeout  time.Duration // timeout for OCR requests (longer than search)
+	AccountID      string        // Cloudflare account ID
+	APIToken       string        // Cloudflare API token
+	DeepSeekAPIKey string        // DeepSeek API key for classification
+	Timeout        time.Duration // timeout for OCR requests
 }
 
 // MedicalConfig contiene la configuración del módulo médico.
@@ -355,11 +354,10 @@ func Load() *Config {
 			Timeout:        getEnvDuration("AI_SEARCH_TIMEOUT", 30*time.Second),
 		},
 		OCR: AIOCRConfig{
-			Provider: getEnv("AI_OCR_PROVIDER", ""),
-			BaseURL:  getEnv("AI_OCR_BASE_URL", ""),
-			APIKey:   getEnv("AI_OCR_API_KEY", ""),
-			Model:    getEnv("AI_OCR_MODEL", "deepseek-v4-flash"),
-			Timeout:  getEnvDuration("AI_OCR_TIMEOUT", 60*time.Second),
+			AccountID:      getEnv("CF_ACCOUNT_ID", ""),
+			APIToken:       getEnv("CF_API_TOKEN", ""),
+			DeepSeekAPIKey: getEnv("AI_SEARCH_API_KEY", ""),
+			Timeout:        getEnvDuration("AI_OCR_TIMEOUT", 60*time.Second),
 		},
 		Medical: MedicalConfig{
 			EncryptionKey: getEnv("MEDICAL_ENCRYPTION_KEY", ""),

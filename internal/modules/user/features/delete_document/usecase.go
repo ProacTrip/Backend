@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/ProacTrip/Backend/internal/modules/user/adapters/storage"
 	"github.com/ProacTrip/Backend/internal/modules/user/domain"
@@ -34,19 +35,21 @@ type R2Client interface {
 
 // UseCaseDeps contiene las dependencias del caso de uso.
 type UseCaseDeps struct {
-	DocRepo DocRepo
-	R2      R2Client
+	DocRepo   DocRepo
+	R2        R2Client
+	Dragonfly *redis.Client
 }
 
 // UseCase implementa la eliminación de documentos.
 type UseCase struct {
-	docRepo DocRepo
-	r2      R2Client
+	docRepo   DocRepo
+	r2        R2Client
+	dragonfly *redis.Client
 }
 
 // NewUseCase crea una nueva instancia del caso de uso.
 func NewUseCase(deps UseCaseDeps) *UseCase {
-	return &UseCase{docRepo: deps.DocRepo, r2: deps.R2}
+	return &UseCase{docRepo: deps.DocRepo, r2: deps.R2, dragonfly: deps.Dragonfly}
 }
 
 // Execute elimina el documento previa verificación de ownership.
@@ -92,6 +95,14 @@ func (uc *UseCase) Execute(ctx context.Context, documentID, userIDStr string) er
 	// Eliminar de PostgreSQL
 	if err := uc.docRepo.Delete(ctx, docID); err != nil {
 		return fmt.Errorf("eliminar documento de DB: %w", err)
+	}
+
+	// Limpiar keys de dedup en Dragonfly para permitir re-subida
+	if uc.dragonfly != nil && doc.ContentHash != "" {
+		userDedupKey := fmt.Sprintf("{dedup}:user:%s:%s", doc.UserID, doc.ContentHash)
+		globalDedupKey := fmt.Sprintf("{dedup}:global:%s", doc.ContentHash)
+		uc.dragonfly.Del(ctx, userDedupKey)
+		uc.dragonfly.Del(ctx, globalDedupKey)
 	}
 
 	return nil

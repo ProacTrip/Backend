@@ -62,12 +62,19 @@ func (h *Handler) Handle(c *echo.Context) error {
 
 // domainDocToListItem convierte un domain.UserDocument al DTO de lista.
 // Solo expone los 7 campos documentados en USER_API.md.
+// Normaliza los estados granulares del pipeline (sanitizing, ocr_processing)
+// al umbrella "processing" que espera el frontend.
 func domainDocToListItem(doc *domain.UserDocument) DocumentListItemResponse {
+	status := string(doc.OCRStatus)
+	switch doc.OCRStatus {
+	case domain.OCRStatusValidating, domain.OCRStatusSanitizing, domain.OCRStatusOCRProcessing:
+		status = string(domain.OCRStatusProcessing)
+	}
 	return DocumentListItemResponse{
 		ID:                 doc.ID.String(),
 		FileName:           doc.FileName,
 		DocumentType:       doc.DocumentType,
-		OCRStatus:          string(doc.OCRStatus),
+		OCRStatus:          status,
 		OCRConfidence:      doc.OCRConfidence,
 		VerificationStatus: string(doc.VerificationStatus),
 		CreatedAt:          doc.CreatedAt.Format("2006-01-02T15:04:05Z"),

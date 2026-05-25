@@ -214,7 +214,7 @@ func TestOCRWorker_ProcesaPasaporte(t *testing.T) {
 
 	userID := uuid.Must(uuid.NewV7())
 	docTypeID := uuid.Must(uuid.NewV7())
-	doc := domain.NewUserDocument(userID, docTypeID, "passport.pdf", "processed/u/p/clean.pdf", "application/pdf")
+	doc := domain.NewUserDocument(userID, &docTypeID, "passport.pdf", "processed/u/p/clean.pdf", "application/pdf")
 	doc.OCRStatus = domain.OCRStatusOCRProcessing
 
 	docRepo := newOCRMockDocRepo()
@@ -301,7 +301,7 @@ func TestOCRWorker_DocumentoNoViaje_Rechazado(t *testing.T) {
 
 	userID := uuid.Must(uuid.NewV7())
 	docTypeID := uuid.Must(uuid.NewV7())
-	doc := domain.NewUserDocument(userID, docTypeID, "recipe.pdf", "processed/clean.pdf", "application/pdf")
+	doc := domain.NewUserDocument(userID, &docTypeID, "recipe.pdf", "processed/clean.pdf", "application/pdf")
 	doc.OCRStatus = domain.OCRStatusOCRProcessing
 
 	docRepo := newOCRMockDocRepo()
@@ -373,7 +373,7 @@ func TestOCRWorker_AplicaDatosMedicos_EmergencyContactInsurance(t *testing.T) {
 
 	userID := uuid.Must(uuid.NewV7())
 	docTypeID := uuid.Must(uuid.NewV7())
-	doc := domain.NewUserDocument(userID, docTypeID, "medical.pdf", "processed/clean.pdf", "application/pdf")
+	doc := domain.NewUserDocument(userID, &docTypeID, "medical.pdf", "processed/clean.pdf", "application/pdf")
 	doc.OCRStatus = domain.OCRStatusOCRProcessing
 
 	docRepo := newOCRMockDocRepo()
@@ -482,7 +482,7 @@ func TestOCRWorker_ConflictoMedico_CreaPendingUpdate(t *testing.T) {
 
 	userID := uuid.Must(uuid.NewV7())
 	docTypeID := uuid.Must(uuid.NewV7())
-	doc := domain.NewUserDocument(userID, docTypeID, "medical.pdf", "processed/clean.pdf", "application/pdf")
+	doc := domain.NewUserDocument(userID, &docTypeID, "medical.pdf", "processed/clean.pdf", "application/pdf")
 	doc.OCRStatus = domain.OCRStatusOCRProcessing
 
 	docRepo := newOCRMockDocRepo()
@@ -627,7 +627,7 @@ func TestOCRWorker_FalloExtraccion_DocumentoFailed(t *testing.T) {
 
 	userID := uuid.Must(uuid.NewV7())
 	docTypeID := uuid.Must(uuid.NewV7())
-	doc := domain.NewUserDocument(userID, docTypeID, "bad.pdf", "processed/bad.pdf", "application/pdf")
+	doc := domain.NewUserDocument(userID, &docTypeID, "bad.pdf", "processed/bad.pdf", "application/pdf")
 	doc.OCRStatus = domain.OCRStatusOCRProcessing
 
 	docRepo := newOCRMockDocRepo()

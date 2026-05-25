@@ -65,6 +65,7 @@ type DocR2Storage interface {
 	Upload(ctx context.Context, bucket, key string, reader io.Reader, size int64, contentType string) error
 	Download(ctx context.Context, bucket, key string) (io.ReadCloser, error)
 	Delete(ctx context.Context, bucket, key string) error
+	StatObject(ctx context.Context, bucket, key string) (*storage.ObjectMeta, error)
 }
 
 // DocEventPublisher define el puerto para publicar eventos en Dragonfly Streams.
@@ -156,6 +157,7 @@ func (uc *UseCase) CheckRateLimit(ctx context.Context, userIDStr string) error {
 // Execute procesa la subida del documento.
 // Order: Magic bytes → MIME detection → Size validation → Max docs → blake3 → Dedup → Upload
 func (uc *UseCase) Execute(ctx context.Context, cmd UploadDocumentCommand) (*UploadDocumentResponse, error) {
+	slog.Info("DEBUG Execute called", "file_name", cmd.FileName, "size", len(cmd.FileBytes))
 	// 1. Parsear userID (auth verified by handler)
 	userID, err := uuid.Parse(cmd.UserID)
 	if err != nil {
@@ -202,13 +204,19 @@ func (uc *UseCase) Execute(ctx context.Context, cmd UploadDocumentCommand) (*Upl
 		return nil, fmt.Errorf("dragonfly client is required for dedup")
 	}
 
-	// 6. Dedup — per-user reject
+	// 6. Dedup — per-user reject (verifica que el doc referenciado aún exista)
 	dedupUserKey := fmt.Sprintf("{dedup}:user:%s:%s", userID.String(), contentHash)
-	exists, err := uc.dragonfly.Exists(ctx, dedupUserKey).Result()
-	if err != nil {
-		slog.Error("dedup user check failed", "user_id", userID, "error", err)
-	} else if exists > 0 {
-		return nil, domain.ErrDuplicateDocument
+	if dedupDocID, getErr := uc.dragonfly.Get(ctx, dedupUserKey).Result(); getErr == nil && dedupDocID != "" {
+		// La key existe — verificar si el documento todavía está en DB
+		dedupUUID, parseErr := uuid.Parse(dedupDocID)
+		if parseErr == nil {
+			if _, repoErr := uc.docRepo.GetByID(ctx, dedupUUID); repoErr == nil {
+				// Documento existe → duplicado real
+				return nil, domain.ErrDuplicateDocument
+			}
+			// Documento no encontrado → key huérfana (ya fue borrado). Limpiar y continuar.
+			uc.dragonfly.Del(ctx, dedupUserKey)
+		}
 	}
 
 	// 7. Dedup — global reuse with SETNX lock to prevent race condition
@@ -281,7 +289,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd UploadDocumentCommand) (*Upl
 	doc := &domain.UserDocument{
 		ID:                docID,
 		UserID:            userID,
-		DocumentTypeID:    uuid.Nil, // será refinado por el pipeline
+		DocumentTypeID:    nil, // será refinado por el pipeline OCR
 		FileName:          cmd.FileName,
 		StorageKey:        storageKey,
 		MimeType:          &detectedMime,
@@ -291,6 +299,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd UploadDocumentCommand) (*Upl
 		VerificationStatus: domain.VerificationStatusUnverified,
 		CreatedAt:          now,
 		UpdatedAt:          now,
+		ContentHash:        contentHash,
 	}
 	fs := int(realSize)
 	doc.FileSize = &fs
@@ -300,6 +309,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd UploadDocumentCommand) (*Upl
 	}
 
 	// 9. Subir archivo a R2 raw/
+	slog.Info("doc upload: uploading to R2", "bucket", storage.SecureBucket(), "key", storageKey, "size", realSize, "mime", detectedMime)
 	if err := uc.storage.Upload(ctx, storage.SecureBucket(), storageKey,
 		bytes.NewReader(cmd.FileBytes), realSize, detectedMime); err != nil {
 		slog.Error("fallo al subir archivo a R2", "doc_id", docID, "error", err)
@@ -310,6 +320,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd UploadDocumentCommand) (*Upl
 		}
 		return nil, fmt.Errorf("subir archivo a R2: %w", err)
 	}
+	slog.Info("doc upload: R2 upload successful", "doc_id", docID, "bucket", storage.SecureBucket(), "key", storageKey)
 
 	// 10. Set dedup keys after successful upload
 	// user dedup: permanente (sin TTL)
@@ -385,11 +396,18 @@ func (uc *UseCase) reuseGlobalDedup(
 	docID := uuid.Must(uuid.NewV7())
 	realSize := int64(len(cmd.FileBytes))
 
+	// Verify the cached storage key still exists in R2.
+	// If the original uploader deleted their document, the key is orphaned.
+	if _, statErr := uc.storage.StatObject(ctx, storage.SecureBucket(), cached.StorageKey); statErr != nil {
+		slog.Warn("global dedup storage key orphaned, falling through to normal upload", "key", cached.StorageKey, "error", statErr)
+		return nil, false
+	}
+
 	now := time.Now()
 	doc := &domain.UserDocument{
 		ID:                docID,
 		UserID:            userID,
-		DocumentTypeID:    uuid.Nil,
+		DocumentTypeID:    nil, // será refinado por el pipeline OCR (dedup)
 		FileName:          cmd.FileName,
 		StorageKey:        cached.StorageKey, // reuse same storage key
 		MimeType:          &cmd.MimeType,

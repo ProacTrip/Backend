@@ -50,6 +50,7 @@ func (m *testDocRepo) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 type testStorage struct {
+	StatObjectFn func(ctx context.Context, bucket, key string) (*storage.ObjectMeta, error)
 	uploadFn   func(ctx context.Context, bucket, key string, reader io.Reader, size int64, ct string) error
 	downloadFn func(ctx context.Context, bucket, key string) (io.ReadCloser, error)
 	deleteFn   func(ctx context.Context, bucket, key string) error

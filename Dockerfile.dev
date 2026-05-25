@@ -1,27 +1,17 @@
 # Dockerfile.dev - Desarrollo
 # =============================================================================
-# Mount del código fuente desde docker-compose para rebuild manual
-# Usage: docker compose up -d --build && docker compose exec api go build ./cmd/api
-# =============================================================================
+FROM golang:1.26.1-bookworm
 
-FROM golang:1.26.1-alpine3.23
-
-# Install build dependencies (necesarios para CGO si los usas)
-RUN apk add --no-cache \
-    gcc \
-    musl-dev
+# MuPDF para PDF-to-image conversion
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libmupdf-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copiar go.mod y go.sum primero (caching)
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copiar código fuente
 COPY . .
 
-# Exponer puertos
-EXPOSE 8080 6060
-
-# Run directo del binary (se rebuild manual)
-CMD ["go", "run", "-buildvcs=false", "./cmd/api"]
+CMD ["go", "run", "-a", "-buildvcs=false", "./cmd/api"]

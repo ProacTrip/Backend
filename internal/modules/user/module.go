@@ -16,7 +16,7 @@ import (
 	"github.com/ProacTrip/Backend/internal/config"
 
 	"github.com/ProacTrip/Backend/internal/modules/user/adapters/encryption"
-	deepseekocr "github.com/ProacTrip/Backend/internal/modules/user/adapters/ocr/deepseek"
+	cfocr "github.com/ProacTrip/Backend/internal/modules/user/adapters/ocr/cloudflare"
 	"github.com/ProacTrip/Backend/internal/modules/user/adapters/postgres"
 	"github.com/ProacTrip/Backend/internal/modules/user/adapters/storage"
 	"github.com/ProacTrip/Backend/internal/modules/user/consumer"
@@ -273,13 +273,14 @@ func NewModule(cfg Config) (*Module, error) {
 	docRepo := postgres.NewDocumentRepository(cfg.PostgresPool)
 	m.documentRepo = docRepo
 
-	// 12. Inicializar OCR service (Phase 5)
-	if cfg.OCRConfig.APIKey != "" {
-		m.ocrService = deepseekocr.NewOCRClient(
-			cfg.OCRConfig.APIKey,
-			deepseekocr.WithBaseURL(cfg.OCRConfig.BaseURL),
-			deepseekocr.WithModel(cfg.OCRConfig.Model),
-		)
+	// 12. Inicializar OCR service (Cloudflare toMarkdown + DeepSeek V4 Flash)
+	if cfg.OCRConfig.AccountID != "" && cfg.OCRConfig.APIToken != "" {
+		docTypes, err := docRepo.GetTypes(context.Background())
+		if err != nil {
+			slog.Warn("no se pudieron cargar los tipos de documento para OCR", "error", err)
+			docTypes = nil
+		}
+		m.ocrService = cfocr.NewOCRClient(cfg.OCRConfig.AccountID, cfg.OCRConfig.APIToken, cfg.OCRConfig.DeepSeekAPIKey, docTypes)
 	}
 
 	// 13. Inicializar Features de Documentos (Phase 5)
@@ -327,8 +328,9 @@ func NewModule(cfg Config) (*Module, error) {
 	// Delete Document
 	if m.r2Storage != nil {
 		deleteDocUC := delete_document.NewUseCase(delete_document.UseCaseDeps{
-			DocRepo: docRepo,
-			R2:      m.r2Storage,
+			DocRepo:   docRepo,
+			R2:        m.r2Storage,
+			Dragonfly: cfg.RedisClient,
 		})
 		m.deleteDocumentHandler = delete_document.NewHandler(deleteDocUC)
 	}

@@ -44,7 +44,7 @@ func (r *DocumentRepository) Create(ctx context.Context, doc *domain.UserDocumen
 			ocr_status, ocr_data, ocr_confidence, extracted_data,
 			has_newer_medical_data, medical_update_summary,
 			valid_from, valid_until, document_number, issuing_country,
-			metadata, created_at, updated_at
+			metadata, created_at, updated_at, content_hash
 		) VALUES (
 			$1, $2, $3, $4, $5,
 			$6, $7, $8, $9,
@@ -53,7 +53,7 @@ func (r *DocumentRepository) Create(ctx context.Context, doc *domain.UserDocumen
 			$13, $14, $15, $16,
 			$17, $18,
 			$19, $20, $21, $22,
-			$23, $24, $25
+			$23, $24, $25, $26
 		)
 	`
 
@@ -83,6 +83,7 @@ func (r *DocumentRepository) Create(ctx context.Context, doc *domain.UserDocumen
 		doc.Metadata,
 		doc.CreatedAt,
 		doc.UpdatedAt,
+		doc.ContentHash,
 	)
 	if err != nil {
 		return fmt.Errorf("create document: %w", err)
@@ -107,7 +108,7 @@ func (r *DocumentRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain
 			ocr_status, ocr_data, ocr_confidence, extracted_data,
 			has_newer_medical_data, medical_update_summary,
 			valid_from, valid_until, document_number, issuing_country,
-			metadata, created_at, updated_at
+			metadata, created_at, updated_at, content_hash
 		FROM user_documents
 		WHERE id = $1
 	`
@@ -140,6 +141,7 @@ func (r *DocumentRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain
 		&doc.Metadata,
 		&doc.CreatedAt,
 		&doc.UpdatedAt,
+		&doc.ContentHash,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, domain.ErrDocumentNotFound
@@ -165,7 +167,7 @@ const documentListQuery = `
 		ocr_status, ocr_data, ocr_confidence, extracted_data,
 		has_newer_medical_data, medical_update_summary,
 		valid_from, valid_until, document_number, issuing_country,
-		metadata, created_at, updated_at
+		metadata, created_at, updated_at, content_hash
 	FROM user_documents
 `
 
@@ -201,9 +203,16 @@ func (r *DocumentRepository) GetByUserIDFiltered(ctx context.Context, userID uui
 	argIdx := 2
 
 	if status != "" {
-		query += fmt.Sprintf(` AND ocr_status = $%d`, argIdx)
-		args = append(args, string(status))
-		argIdx++
+		// "processing" es umbrella para todos los estados en-flight del pipeline
+		if status == domain.OCRStatusProcessing {
+			query += fmt.Sprintf(` AND ocr_status IN ($%d, $%d, $%d, $%d)`, argIdx, argIdx+1, argIdx+2, argIdx+3)
+			args = append(args, string(domain.OCRStatusProcessing), string(domain.OCRStatusValidating), string(domain.OCRStatusSanitizing), string(domain.OCRStatusOCRProcessing))
+			argIdx += 4
+		} else {
+			query += fmt.Sprintf(` AND ocr_status = $%d`, argIdx)
+			args = append(args, string(status))
+			argIdx++
+		}
 	}
 	if docTypeCode != "" {
 		query += fmt.Sprintf(` AND document_type = $%d`, argIdx)
@@ -244,6 +253,7 @@ func scanDocuments(rows pgx.Rows) ([]*domain.UserDocument, error) {
 			&doc.VerificationStatus,
 			&doc.OCRStatus,
 			&doc.OCRData,
+			&doc.OCRConfidence,
 			&doc.ExtractedData,
 			&doc.HasNewerMedicalData,
 			&doc.MedicalUpdateSummary,
@@ -254,6 +264,7 @@ func scanDocuments(rows pgx.Rows) ([]*domain.UserDocument, error) {
 			&doc.Metadata,
 			&doc.CreatedAt,
 			&doc.UpdatedAt,
+			&doc.ContentHash,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan document row: %w", err)
