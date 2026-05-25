@@ -101,6 +101,7 @@ func (c *OCRClient) ExtractFromDocument(ctx context.Context, fileURL string) (*d
 
 // extractTextWithVision envía la URL de la imagen al modelo de visión de Workers AI.
 func (c *OCRClient) extractTextWithVision(ctx context.Context, imageURL string) (string, error) {
+	slog.Info("ocr: vision image URL", "url", imageURL[:min(len(imageURL), 100)])
 	body := map[string]interface{}{
 		"messages": []map[string]string{
 			{"role": "system", "content": "Extract all text from this document image exactly as it appears. Return only the extracted text, no additional commentary."},
