@@ -273,9 +273,9 @@ func NewModule(cfg Config) (*Module, error) {
 	docRepo := postgres.NewDocumentRepository(cfg.PostgresPool)
 	m.documentRepo = docRepo
 
-	// 12. Inicializar OCR service (Cloudflare Workers AI toMarkdown)
+	// 12. Inicializar OCR service (Cloudflare toMarkdown + DeepSeek V4 Flash)
 	if cfg.OCRConfig.AccountID != "" && cfg.OCRConfig.APIToken != "" {
-		m.ocrService = cfocr.NewOCRClient(cfg.OCRConfig.AccountID, cfg.OCRConfig.APIToken)
+		m.ocrService = cfocr.NewOCRClient(cfg.OCRConfig.AccountID, cfg.OCRConfig.APIToken, cfg.OCRConfig.DeepSeekAPIKey)
 	}
 
 	// 13. Inicializar Features de Documentos (Phase 5)

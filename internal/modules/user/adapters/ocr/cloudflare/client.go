@@ -1,5 +1,6 @@
-// Adapter: OCR vía Cloudflare Workers AI toMarkdown.
-// Convierte documentos (PDF, imágenes) a texto markdown estructurado.
+// Adapter: OCR vía Cloudflare Workers AI toMarkdown + DeepSeek V4 Flash.
+// toMarkdown extrae texto raw de PDFs/imágenes.
+// DeepSeek V4 Flash clasifica el tipo de documento y extrae campos estructurados.
 package cloudflare
 
 import (
@@ -20,21 +21,21 @@ import (
 // Cliente
 // =============================================================================
 
-// OCRClient implementa domain.OCRService usando Cloudflare Workers AI toMarkdown.
+// OCRClient implementa domain.OCRService usando toMarkdown + DeepSeek.
 type OCRClient struct {
-	accountID string
-	apiToken  string
-	client    *http.Client
+	cfAccountID    string
+	cfAPIToken     string
+	deepseekAPIKey string
+	client         *http.Client
 }
 
-// NewOCRClient crea un nuevo cliente OCR para Cloudflare Workers AI.
-func NewOCRClient(accountID, apiToken string) *OCRClient {
+// NewOCRClient crea un nuevo cliente OCR.
+func NewOCRClient(cfAccountID, cfAPIToken, deepseekAPIKey string) *OCRClient {
 	return &OCRClient{
-		accountID: accountID,
-		apiToken:  apiToken,
-		client: &http.Client{
-			Timeout: 60 * time.Second,
-		},
+		cfAccountID:    cfAccountID,
+		cfAPIToken:     cfAPIToken,
+		deepseekAPIKey: deepseekAPIKey,
+		client:         &http.Client{Timeout: 60 * time.Second},
 	}
 }
 
@@ -42,175 +43,215 @@ func NewOCRClient(accountID, apiToken string) *OCRClient {
 // domain.OCRService
 // =============================================================================
 
-// toMarkdownResponse es la respuesta de la API toMarkdown.
 type toMarkdownResponse struct {
 	Success bool `json:"success"`
 	Result  []struct {
 		Name     string `json:"name"`
 		MimeType string `json:"mimeType"`
-		Format   string `json:"format"`
-		Tokens   int    `json:"tokens"`
 		Data     string `json:"data"`
 	} `json:"result"`
 	Errors []struct {
-		Code    int    `json:"code"`
 		Message string `json:"message"`
 	} `json:"errors"`
 }
 
-// ExtractFromDocument descarga el archivo de R2 y lo envía a toMarkdown.
+type deepseekRequest struct {
+	Model    string           `json:"model"`
+	Messages []deepseekMsg    `json:"messages"`
+	Stream   bool             `json:"stream"`
+}
+
+type deepseekMsg struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type deepseekResponse struct {
+	Choices []struct {
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	} `json:"choices"`
+}
+
+// ExtractFromDocument implementa el pipeline OCR de dos pasos.
 func (c *OCRClient) ExtractFromDocument(ctx context.Context, fileURL string) (*domain.ExtractedData, error) {
-	// 1. Descargar archivo desde la URL prefirmada de R2
+	// 1. Descargar archivo de R2
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fileURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("crear request descarga: %w", err)
 	}
-
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("descargar archivo para OCR: %w", err)
+		return nil, fmt.Errorf("descargar archivo: %w", err)
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("descarga R2 falló con status %d", resp.StatusCode)
+		return nil, fmt.Errorf("descarga R2 falló status %d", resp.StatusCode)
 	}
-
 	fileBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("leer archivo descargado: %w", err)
+		return nil, fmt.Errorf("leer archivo: %w", err)
 	}
 
-	// 2. Enviar a toMarkdown como multipart
-	markdown, err := c.sendToMarkdown(ctx, fileBytes, "document.pdf")
+	// 2. Paso 1: toMarkdown — extraer texto raw
+	rawText, err := c.sendToMarkdown(ctx, fileBytes, "document.pdf")
 	if err != nil {
-		return nil, fmt.Errorf("toMarkdown OCR: %w", err)
+		return nil, fmt.Errorf("toMarkdown: %w", err)
 	}
 
-	// 3. Parsear markdown a ExtractedData
-	return parseMarkdown(markdown), nil
+	// 3. Paso 2: DeepSeek V4 Flash — clasificar y estructurar
+	return c.classifyWithDeepSeek(ctx, rawText)
 }
 
-// sendToMarkdown envía el archivo a la API toMarkdown de Cloudflare.
+// sendToMarkdown envía el archivo a Cloudflare toMarkdown.
 func (c *OCRClient) sendToMarkdown(ctx context.Context, fileBytes []byte, fileName string) (string, error) {
 	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	part, err := writer.CreateFormFile("files", fileName)
-	if err != nil {
-		return "", fmt.Errorf("crear form file: %w", err)
-	}
-	if _, err := part.Write(fileBytes); err != nil {
-		return "", fmt.Errorf("escribir archivo en form: %w", err)
-	}
-	writer.Close()
+	w := multipart.NewWriter(&body)
+	part, _ := w.CreateFormFile("files", fileName)
+	part.Write(fileBytes)
+	w.Close()
 
-	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/ai/tomarkdown", c.accountID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, &body)
-	if err != nil {
-		return "", fmt.Errorf("crear request toMarkdown: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+c.apiToken)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/ai/tomarkdown", c.cfAccountID)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, &body)
+	req.Header.Set("Authorization", "Bearer "+c.cfAPIToken)
+	req.Header.Set("Content-Type", w.FormDataContentType())
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("toMarkdown request: %w", err)
+		return "", err
 	}
 	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
 
-	respBytes, err := io.ReadAll(resp.Body)
+	var r toMarkdownResponse
+	if err := json.Unmarshal(b, &r); err != nil {
+		return "", fmt.Errorf("parse toMarkdown: %w", err)
+	}
+	if !r.Success || len(r.Result) == 0 {
+		return "", fmt.Errorf("toMarkdown failed: %s", string(b))
+	}
+	return r.Result[0].Data, nil
+}
+
+// classifyWithDeepSeek envía el texto raw a DeepSeek V4 Flash para clasificar.
+func (c *OCRClient) classifyWithDeepSeek(ctx context.Context, rawText string) (*domain.ExtractedData, error) {
+	prompt := buildClassificationPrompt(rawText)
+
+	body := deepseekRequest{
+		Model: "deepseek-chat",
+		Messages: []deepseekMsg{
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: prompt},
+		},
+		Stream: false,
+	}
+	jsonBody, _ := json.Marshal(body)
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://api.deepseek.com/v1/chat/completions",
+		bytes.NewReader(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.deepseekAPIKey)
+
+	resp, err := c.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("leer respuesta toMarkdown: %w", err)
+		return nil, fmt.Errorf("deepseek request: %w", err)
+	}
+	defer resp.Body.Close()
+	respBytes, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("deepseek API error (HTTP %d): %s", resp.StatusCode, string(respBytes))
 	}
 
-	var result toMarkdownResponse
-	if err := json.Unmarshal(respBytes, &result); err != nil {
-		return "", fmt.Errorf("parse toMarkdown response: %w", err)
+	var dsResp deepseekResponse
+	if err := json.Unmarshal(respBytes, &dsResp); err != nil {
+		return nil, fmt.Errorf("parse deepseek: %w", err)
+	}
+	if len(dsResp.Choices) == 0 {
+		return nil, fmt.Errorf("deepseek: respuesta vacía")
 	}
 
-	if !result.Success || len(result.Result) == 0 {
-		errMsg := "toMarkdown: respuesta vacía"
-		if len(result.Errors) > 0 {
-			errMsg = result.Errors[0].Message
-		}
-		return "", fmt.Errorf("%s (HTTP %d): %s", errMsg, resp.StatusCode, string(respBytes))
-	}
-
-	return result.Result[0].Data, nil
+	content := dsResp.Choices[0].Message.Content
+	return parseDeepSeekJSON(content, rawText), nil
 }
 
 // =============================================================================
-// Parseo de Markdown → ExtractedData
+// Prompts
 // =============================================================================
-// toMarkdown devuelve texto en formato markdown. Extraemos campos estructurados
-// usando heurísticas simples sobre el texto.
 
-func parseMarkdown(markdown string) *domain.ExtractedData {
-	data := &domain.ExtractedData{
-		RawResponse: markdown,
+const systemPrompt = `You are a travel document OCR classifier. Extract structured fields from the provided text.
+Return ONLY valid JSON with this exact schema:
+{
+  "document_type": "passport|national_id|drivers_license|visa|travel_insurance|vaccination_cert|boarding_pass|receipt|unknown",
+  "document_number": "string or null",
+  "full_name": "string or null",
+  "date_of_birth": "YYYY-MM-DD or null",
+  "expiry_date": "YYYY-MM-DD or null",
+  "issuing_country": "ISO 3166-1 alpha-2 code or null",
+  "nationality": "ISO 3166-1 alpha-2 code or null"
+}
+Do NOT include any text outside the JSON. Do NOT use markdown code blocks.`
+
+func buildClassificationPrompt(rawText string) string {
+	// Truncar a ~3000 caracteres para no exceder el contexto
+	text := rawText
+	if len(text) > 3000 {
+		text = text[:3000]
 	}
 
-	lines := strings.Split(markdown, "\n")
+	return fmt.Sprintf(`Classify this travel document and extract structured fields.
 
-	// Detectar tipo de documento por palabras clave
-	fullText := strings.ToLower(markdown)
-	switch {
-	case strings.Contains(fullText, "passport") || strings.Contains(fullText, "pasaporte"):
-		data.DocumentType = "passport"
-	case strings.Contains(fullText, "national id") || strings.Contains(fullText, "dni"):
-		data.DocumentType = "national_id"
-	case strings.Contains(fullText, "driver") || strings.Contains(fullText, "licence") || strings.Contains(fullText, "conducir"):
-		data.DocumentType = "drivers_license"
-	case strings.Contains(fullText, "visa"):
-		data.DocumentType = "visa"
-	case strings.Contains(fullText, "vaccin") || strings.Contains(fullText, "vacuna"):
-		data.DocumentType = "vaccination_cert"
-	case strings.Contains(fullText, "insurance") || strings.Contains(fullText, "seguro"):
-		data.DocumentType = "travel_insurance"
-	default:
+Document text:
+%s
+
+Return only the JSON object.`, text)
+}
+
+// =============================================================================
+// Parseo de DeepSeek JSON → ExtractedData
+// =============================================================================
+
+func parseDeepSeekJSON(jsonStr, rawText string) *domain.ExtractedData {
+	// Limpiar posibles markdown code blocks
+	jsonStr = strings.TrimSpace(jsonStr)
+	jsonStr = strings.TrimPrefix(jsonStr, "```json")
+	jsonStr = strings.TrimPrefix(jsonStr, "```")
+	jsonStr = strings.TrimSuffix(jsonStr, "```")
+	jsonStr = strings.TrimSpace(jsonStr)
+
+	data := &domain.ExtractedData{
+		RawResponse:  rawText,
+		OCRConfidence: 0.90,
+	}
+
+	var parsed struct {
+		DocumentType   string  `json:"document_type"`
+		DocumentNumber *string `json:"document_number"`
+		FullName       *string `json:"full_name"`
+		DateOfBirth    *string `json:"date_of_birth"`
+		ExpiryDate     *string `json:"expiry_date"`
+		IssuingCountry *string `json:"issuing_country"`
+		Nationality    *string `json:"nationality"`
+	}
+
+	if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
+		// Si falla el parseo JSON, devolver datos mínimos
+		data.DocumentType = "unknown"
+		return data
+	}
+
+	data.DocumentType = parsed.DocumentType
+	data.DocumentNumber = parsed.DocumentNumber
+	data.FullName = parsed.FullName
+	data.DateOfBirth = parsed.DateOfBirth
+	data.ExpiryDate = parsed.ExpiryDate
+	data.IssuingCountry = parsed.IssuingCountry
+	data.Nationality = parsed.Nationality
+
+	if data.DocumentType == "" {
 		data.DocumentType = "unknown"
 	}
-
-	// Extraer campos comunes de documentos de viaje
-	for _, line := range lines {
-		lineLower := strings.ToLower(strings.TrimSpace(line))
-		switch {
-		case strings.HasPrefix(lineLower, "name:") || strings.HasPrefix(lineLower, "nombre:"):
-			if v := extractValue(line); v != "" {
-				data.FullName = &v
-			}
-		case strings.HasPrefix(lineLower, "date of birth:") || strings.HasPrefix(lineLower, "fecha de nacimiento:"):
-			if v := extractValue(line); v != "" {
-				data.DateOfBirth = &v
-			}
-		case strings.HasPrefix(lineLower, "expiry") || strings.HasPrefix(lineLower, "expira") || strings.HasPrefix(lineLower, "valido hasta"):
-			if v := extractValue(line); v != "" {
-				data.ExpiryDate = &v
-			}
-		case strings.HasPrefix(lineLower, "document number:") || strings.HasPrefix(lineLower, "passport no") || strings.HasPrefix(lineLower, "número"):
-			if v := extractValue(line); v != "" {
-				data.DocumentNumber = &v
-			}
-		case strings.HasPrefix(lineLower, "nationality:") || strings.HasPrefix(lineLower, "nacionalidad:"):
-			if v := extractValue(line); v != "" {
-				data.Nationality = &v
-			}
-		case strings.HasPrefix(lineLower, "issuing") || strings.HasPrefix(lineLower, "country:") || strings.HasPrefix(lineLower, "país:"):
-			if v := extractValue(line); v != "" {
-				data.IssuingCountry = &v
-			}
-		}
-	}
-
-	data.OCRConfidence = 0.85 // toMarkdown no devuelve confianza; usamos valor fijo
 	return data
-}
-
-// extractValue extrae el valor después de ":" en una línea.
-func extractValue(line string) string {
-	parts := strings.SplitN(line, ":", 2)
-	if len(parts) == 2 {
-		return strings.TrimSpace(parts[1])
-	}
-	return ""
 }
