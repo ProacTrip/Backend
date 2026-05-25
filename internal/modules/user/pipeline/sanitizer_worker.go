@@ -212,7 +212,7 @@ func (s *SanitizerWorker) processMessage(ctx context.Context, msg redis.XMessage
 		doc.FailureReason = &reason
 		doc.OCRStatus = domain.OCRStatusFailed
 		_ = s.docRepo.Update(ctx, doc)
-		s.publishSSE(ctx, docID, "doc.failed", map[string]interface{}{
+		s.publishSSEEvent(ctx, doc.UserID, docID, "doc.failed", map[string]interface{}{
 			"document_id":  docID,
 			"file_name":    doc.FileName,
 			"ocr_status":   domain.OCRStatusFailed,
