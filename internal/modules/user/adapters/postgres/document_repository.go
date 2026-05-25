@@ -44,7 +44,7 @@ func (r *DocumentRepository) Create(ctx context.Context, doc *domain.UserDocumen
 			ocr_status, ocr_data, ocr_confidence, extracted_data,
 			has_newer_medical_data, medical_update_summary,
 			valid_from, valid_until, document_number, issuing_country,
-			metadata, created_at, updated_at
+			metadata, created_at, updated_at, content_hash
 		) VALUES (
 			$1, $2, $3, $4, $5,
 			$6, $7, $8, $9,
@@ -53,7 +53,7 @@ func (r *DocumentRepository) Create(ctx context.Context, doc *domain.UserDocumen
 			$13, $14, $15, $16,
 			$17, $18,
 			$19, $20, $21, $22,
-			$23, $24, $25
+			$23, $24, $25, $26
 		)
 	`
 
@@ -83,6 +83,7 @@ func (r *DocumentRepository) Create(ctx context.Context, doc *domain.UserDocumen
 		doc.Metadata,
 		doc.CreatedAt,
 		doc.UpdatedAt,
+		doc.ContentHash,
 	)
 	if err != nil {
 		return fmt.Errorf("create document: %w", err)
@@ -107,7 +108,7 @@ func (r *DocumentRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain
 			ocr_status, ocr_data, ocr_confidence, extracted_data,
 			has_newer_medical_data, medical_update_summary,
 			valid_from, valid_until, document_number, issuing_country,
-			metadata, created_at, updated_at
+			metadata, created_at, updated_at, content_hash
 		FROM user_documents
 		WHERE id = $1
 	`
@@ -255,6 +256,7 @@ func scanDocuments(rows pgx.Rows) ([]*domain.UserDocument, error) {
 			&doc.Metadata,
 			&doc.CreatedAt,
 			&doc.UpdatedAt,
+			&doc.ContentHash,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan document row: %w", err)

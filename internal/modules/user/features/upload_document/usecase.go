@@ -291,6 +291,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd UploadDocumentCommand) (*Upl
 		VerificationStatus: domain.VerificationStatusUnverified,
 		CreatedAt:          now,
 		UpdatedAt:          now,
+		ContentHash:        contentHash,
 	}
 	fs := int(realSize)
 	doc.FileSize = &fs

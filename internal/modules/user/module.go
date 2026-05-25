@@ -327,8 +327,9 @@ func NewModule(cfg Config) (*Module, error) {
 	// Delete Document
 	if m.r2Storage != nil {
 		deleteDocUC := delete_document.NewUseCase(delete_document.UseCaseDeps{
-			DocRepo: docRepo,
-			R2:      m.r2Storage,
+			DocRepo:   docRepo,
+			R2:        m.r2Storage,
+			Dragonfly: cfg.RedisClient,
 		})
 		m.deleteDocumentHandler = delete_document.NewHandler(deleteDocUC)
 	}

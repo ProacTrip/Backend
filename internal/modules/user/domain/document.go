@@ -96,7 +96,8 @@ type UserDocument struct {
 	IssuingCountry *string        `json:"issuing_country,omitzero"`
 	Metadata       json.RawMessage `json:"metadata,omitzero"`
 	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
+	UpdatedAt            time.Time  `json:"updated_at"`
+	ContentHash          string     `json:"-"` // blake3 hash para dedup, no se expone al frontend
 }
 
 // NewUserDocument crea un nuevo documento en estado queued.
