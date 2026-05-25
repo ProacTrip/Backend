@@ -550,7 +550,7 @@ curl -X GET {base_url}/travel-preferences \
   "seat_preference": "aisle",
   "meal_preference": "vegetarian",
   "special_assistance": ["wheelchair"],
-  "preferred_airlines": ["019d5439-cb43-716d-90b5-51dcbe980001"],
+  "preferred_airlines": ["IB", "BA"],
   "preferred_hotels": ["Marriott", "Hilton"],
   "avoid_layovers": true,
   "max_layover_duration": 120
@@ -591,7 +591,7 @@ PATCH /v1/user/profile/travel-preferences
 | `seat_preference` | string | No | `window`, `aisle`, `middle`, `no_preference` | Preferencia de asiento |
 | `meal_preference` | string | No | — | Preferencia de comida |
 | `special_assistance` | string[] | No | — | Asistencias especiales requeridas |
-| `preferred_airlines` | UUID[] | No | — | IDs de aerolíneas preferidas |
+| `preferred_airlines` | string[] | No | IATA codes (ej: `IB`, `AA`) o nombres de aerolínea (resueltos vía fuzzy search) | Códigos IATA de aerolíneas preferidas |
 | `preferred_hotels` | string[] | No | — | Cadenas hoteleras preferidas |
 | `avoid_layovers` | boolean | No | — | Evitar escalas |
 | `max_layover_duration` | int | No | ≥ 0 | Duración máxima de escala en minutos |
@@ -606,6 +606,7 @@ curl -X PATCH {base_url}/travel-preferences \
     "preferred_class": "business",
     "seat_preference": "window",
     "meal_preference": "vegetarian",
+    "preferred_airlines": ["IB", "BA", "Iberia"],
     "avoid_layovers": true,
     "max_layover_duration": 90
   }'
