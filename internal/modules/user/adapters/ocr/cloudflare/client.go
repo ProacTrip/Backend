@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"strings"
@@ -97,13 +98,21 @@ func (c *OCRClient) ExtractFromDocument(ctx context.Context, fileURL string) (*d
 	}
 
 	// 2. Paso 1: toMarkdown — extraer texto raw
+	slog.Info("ocr: calling toMarkdown", "size", len(fileBytes))
 	rawText, err := c.sendToMarkdown(ctx, fileBytes, "document.pdf")
 	if err != nil {
 		return nil, fmt.Errorf("toMarkdown: %w", err)
 	}
+	slog.Info("ocr: toMarkdown completed", "text_len", len(rawText))
 
 	// 3. Paso 2: DeepSeek V4 Flash — clasificar y estructurar
-	return c.classifyWithDeepSeek(ctx, rawText)
+	slog.Info("ocr: calling DeepSeek for classification")
+	result, err := c.classifyWithDeepSeek(ctx, rawText)
+	if err != nil {
+		return nil, err
+	}
+	slog.Info("ocr: DeepSeek classification result", "doc_type", result.DocumentType, "is_travel", result.IsTravelDocument())
+	return result, nil
 }
 
 // sendToMarkdown envía el archivo a Cloudflare toMarkdown.
@@ -164,9 +173,11 @@ func (c *OCRClient) classifyWithDeepSeek(ctx context.Context, rawText string) (*
 	respBytes, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("deepseek API error (HTTP %d): %s", resp.StatusCode, string(respBytes))
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("deepseek API error (HTTP %d): %s", resp.StatusCode, string(body))
 	}
 
+	slog.Info("ocr: deepseek response received", "status", resp.StatusCode)
 	var dsResp deepseekResponse
 	if err := json.Unmarshal(respBytes, &dsResp); err != nil {
 		return nil, fmt.Errorf("parse deepseek: %w", err)
@@ -176,6 +187,7 @@ func (c *OCRClient) classifyWithDeepSeek(ctx context.Context, rawText string) (*
 	}
 
 	content := dsResp.Choices[0].Message.Content
+	slog.Info("ocr: deepseek raw response", "content", content[:min(len(content), 200)])
 	return parseDeepSeekJSON(content, rawText), nil
 }
 
