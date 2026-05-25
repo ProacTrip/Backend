@@ -140,6 +140,7 @@ func (c *OCRClient) pdfToImages(pdfBytes []byte) ([]string, error) {
 // extractTextFromImage envía una imagen base64 al modelo de visión para extraer texto.
 func (c *OCRClient) extractTextFromImage(ctx context.Context, base64Image string) (string, error) {
 	dataURI := "data:image/png;base64," + base64Image
+	slog.Info("ocr: sending image to vision model", "data_uri_len", len(dataURI))
 	body := map[string]interface{}{
 		"messages": []map[string]string{
 			{"role": "system", "content": "Extract ALL text from this document image exactly as written. Preserve names, numbers, dates, and codes. Return only the extracted text, no commentary."},
@@ -194,6 +195,7 @@ func (c *OCRClient) callVisionAPI(ctx context.Context, body map[string]interface
 	if !vr.Success {
 		return "", fmt.Errorf("api returned error: %s", string(respBytes))
 	}
+	slog.Info("ocr: vision model raw response", "len", len(vr.Result.Response))
 	return vr.Result.Response, nil
 }
 
