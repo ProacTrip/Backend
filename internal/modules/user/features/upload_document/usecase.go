@@ -281,7 +281,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd UploadDocumentCommand) (*Upl
 	doc := &domain.UserDocument{
 		ID:                docID,
 		UserID:            userID,
-		DocumentTypeID:    uuid.Nil, // será refinado por el pipeline
+		DocumentTypeID:    nil, // será refinado por el pipeline OCR
 		FileName:          cmd.FileName,
 		StorageKey:        storageKey,
 		MimeType:          &detectedMime,
@@ -389,7 +389,7 @@ func (uc *UseCase) reuseGlobalDedup(
 	doc := &domain.UserDocument{
 		ID:                docID,
 		UserID:            userID,
-		DocumentTypeID:    uuid.Nil,
+		DocumentTypeID:    nil, // será refinado por el pipeline OCR (dedup)
 		FileName:          cmd.FileName,
 		StorageKey:        cached.StorageKey, // reuse same storage key
 		MimeType:          &cmd.MimeType,

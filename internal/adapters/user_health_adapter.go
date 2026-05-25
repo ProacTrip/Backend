@@ -235,7 +235,10 @@ func (a *UserHealthAdapter) GetDocumentContext(ctx context.Context, userID strin
 
 	var results []searchdomain.DocumentContext
 	for _, doc := range docs {
-		code := typeIDToCode[doc.DocumentTypeID]
+		if doc.DocumentTypeID == nil {
+			continue // skip documents sin tipo aún
+		}
+		code := typeIDToCode[*doc.DocumentTypeID]
 		if !travelDocumentCodes[code] {
 			continue // skip non-travel documents
 		}

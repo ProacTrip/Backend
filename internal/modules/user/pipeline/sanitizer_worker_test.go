@@ -128,7 +128,7 @@ func TestSanitizerWorker_ProcesaPNGCorrectamente(t *testing.T) {
 
 	userID := uuid.Must(uuid.NewV7())
 	docTypeID := uuid.Must(uuid.NewV7())
-	doc := domain.NewUserDocument(userID, docTypeID, "test.png", "raw/test.png", "image/png")
+	doc := domain.NewUserDocument(userID, &docTypeID, "test.png", "raw/test.png", "image/png")
 	doc.OCRStatus = domain.OCRStatusSanitizing
 
 	docRepo := newSanitizerMockDocRepo()
@@ -305,7 +305,7 @@ func TestSanitizerWorker_FalloDownload_QuedaEnPEL(t *testing.T) {
 
 	userID := uuid.Must(uuid.NewV7())
 	docTypeID := uuid.Must(uuid.NewV7())
-	doc := domain.NewUserDocument(userID, docTypeID, "test.png", "raw/test.png", "image/png")
+	doc := domain.NewUserDocument(userID, &docTypeID, "test.png", "raw/test.png", "image/png")
 	doc.OCRStatus = domain.OCRStatusSanitizing
 
 	docRepo := newSanitizerMockDocRepo()
@@ -360,7 +360,7 @@ func TestSanitizerWorker_SanitizaPDF_EliminaPeligroso(t *testing.T) {
 
 	userID := uuid.Must(uuid.NewV7())
 	docTypeID := uuid.Must(uuid.NewV7())
-	doc := domain.NewUserDocument(userID, docTypeID, "test.pdf", "raw/test.pdf", "application/pdf")
+	doc := domain.NewUserDocument(userID, &docTypeID, "test.pdf", "raw/test.pdf", "application/pdf")
 	doc.OCRStatus = domain.OCRStatusSanitizing
 
 	docRepo := newSanitizerMockDocRepo()

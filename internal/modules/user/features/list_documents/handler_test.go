@@ -137,7 +137,7 @@ func TestListDocumentsHandler_ResponseUsesDTO(t *testing.T) {
 				return []*domain.UserDocument{{
 					ID:                 docID,
 					UserID:             userID,
-					DocumentTypeID:     uuid.Nil,
+					DocumentTypeID:     nil,
 					FileName:           "pasaporte.pdf",
 					FileSize:           &size,
 					StorageKey:         "documents/raw/secret-key",

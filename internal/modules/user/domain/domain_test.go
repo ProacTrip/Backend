@@ -216,7 +216,7 @@ func TestMedicalSource_Values(t *testing.T) {
 func TestNewUserDocument(t *testing.T) {
 	userID := uuid.Must(uuid.NewV7())
 	docTypeID := uuid.Must(uuid.NewV7())
-	doc := NewUserDocument(userID, docTypeID, "passport.pdf", "keys/docs/abc123", "application/pdf")
+	doc := NewUserDocument(userID, &docTypeID, "passport.pdf", "keys/docs/abc123", "application/pdf")
 
 	if doc.ID == uuid.Nil {
 		t.Error("se esperaba UUIDv7 no nulo")
@@ -224,7 +224,7 @@ func TestNewUserDocument(t *testing.T) {
 	if doc.UserID != userID {
 		t.Errorf("UserID = %v, se esperaba %v", doc.UserID, userID)
 	}
-	if doc.DocumentTypeID != docTypeID {
+	if *doc.DocumentTypeID != docTypeID {
 		t.Errorf("DocumentTypeID = %v, se esperaba %v", doc.DocumentTypeID, docTypeID)
 	}
 	if doc.OCRStatus != OCRStatusQueued {
@@ -237,7 +237,8 @@ func TestNewUserDocument(t *testing.T) {
 
 func TestUserDocument_MarkValidationPassed(t *testing.T) {
 	userID := uuid.Must(uuid.NewV7())
-	doc := NewUserDocument(userID, uuid.Must(uuid.NewV7()), "doc.pdf", "key", "application/pdf")
+	id2 := uuid.Must(uuid.NewV7())
+	doc := NewUserDocument(userID, &id2, "doc.pdf", "key", "application/pdf")
 	oldUpdated := doc.UpdatedAt
 
 	time.Sleep(1 * time.Millisecond)
@@ -256,7 +257,8 @@ func TestUserDocument_MarkValidationPassed(t *testing.T) {
 
 func TestUserDocument_JSON(t *testing.T) {
 	userID := uuid.Must(uuid.NewV7())
-	doc := NewUserDocument(userID, uuid.Must(uuid.NewV7()), "doc.pdf", "key", "application/pdf")
+	id3 := uuid.Must(uuid.NewV7())
+	doc := NewUserDocument(userID, &id3, "doc.pdf", "key", "application/pdf")
 
 	data, err := json.Marshal(doc)
 	if err != nil {

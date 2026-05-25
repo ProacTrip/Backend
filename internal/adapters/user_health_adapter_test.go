@@ -249,7 +249,7 @@ func TestGetDocumentContext_FiltersPassportAndVisa(t *testing.T) {
 	passportDoc := &userdomain.UserDocument{
 		ID:             uuid.Must(uuid.NewV7()),
 		UserID:         userID,
-		DocumentTypeID: passportTypeID,
+		DocumentTypeID: &passportTypeID,
 		FileName:       "passport.pdf",
 		StorageKey:     "docs/passport.pdf",
 		ExtractedData:  passportData,
@@ -260,7 +260,7 @@ func TestGetDocumentContext_FiltersPassportAndVisa(t *testing.T) {
 	visaDoc := &userdomain.UserDocument{
 		ID:             uuid.Must(uuid.NewV7()),
 		UserID:         userID,
-		DocumentTypeID: visaTypeID,
+		DocumentTypeID: &visaTypeID,
 		FileName:       "visa.pdf",
 		StorageKey:     "docs/visa.pdf",
 		ExtractedData:  visaData,
@@ -271,7 +271,7 @@ func TestGetDocumentContext_FiltersPassportAndVisa(t *testing.T) {
 	insuranceDoc := &userdomain.UserDocument{
 		ID:             uuid.Must(uuid.NewV7()),
 		UserID:         userID,
-		DocumentTypeID: insuranceTypeID,
+		DocumentTypeID: &insuranceTypeID,
 		FileName:       "insurance.pdf",
 		StorageKey:     "docs/insurance.pdf",
 		ExtractedData:  insuranceData,

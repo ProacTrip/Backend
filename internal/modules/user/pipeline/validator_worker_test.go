@@ -93,7 +93,7 @@ func (m *validatorMockR2) HeadContentType(ctx context.Context, bucket, key strin
 // =============================================================================
 
 func newQueuedDoc(userID uuid.UUID, docTypeID uuid.UUID, mime string) *domain.UserDocument {
-	doc := domain.NewUserDocument(userID, docTypeID, "test.pdf", "raw/test.pdf", mime)
+	doc := domain.NewUserDocument(userID, &docTypeID, "test.pdf", "raw/test.pdf", mime)
 	doc.OCRStatus = domain.OCRStatusQueued
 	return doc
 }

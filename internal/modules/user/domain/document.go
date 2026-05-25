@@ -67,7 +67,7 @@ type DocumentType struct {
 type UserDocument struct {
 	ID             uuid.UUID `json:"id"`
 	UserID         uuid.UUID `json:"user_id"`
-	DocumentTypeID uuid.UUID `json:"document_type_id"`
+	DocumentTypeID *uuid.UUID `json:"document_type_id,omitzero"`
 	FileName       string    `json:"file_name"`
 	FileSize       *int      `json:"file_size,omitzero"`
 	MimeType       *string   `json:"mime_type,omitzero"`
@@ -100,7 +100,7 @@ type UserDocument struct {
 }
 
 // NewUserDocument crea un nuevo documento en estado queued.
-func NewUserDocument(userID, docTypeID uuid.UUID, fileName, storageKey, mimeType string) *UserDocument {
+func NewUserDocument(userID uuid.UUID, docTypeID *uuid.UUID, fileName, storageKey, mimeType string) *UserDocument {
 	now := time.Now()
 	return &UserDocument{
 		ID:                 uuid.Must(uuid.NewV7()),
