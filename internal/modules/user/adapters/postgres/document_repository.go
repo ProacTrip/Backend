@@ -141,6 +141,7 @@ func (r *DocumentRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain
 		&doc.Metadata,
 		&doc.CreatedAt,
 		&doc.UpdatedAt,
+		&doc.ContentHash,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, domain.ErrDocumentNotFound
