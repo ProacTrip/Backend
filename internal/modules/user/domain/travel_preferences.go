@@ -45,7 +45,7 @@ type TravelPreferences struct {
 	SeatPreference     *SeatPreference `json:"seat_preference,omitzero"`
 	MealPreference     *string        `json:"meal_preference,omitzero"`
 	SpecialAssistance  []string       `json:"special_assistance,omitzero"`
-	PreferredAirlines  []uuid.UUID    `json:"preferred_airlines,omitzero"`
+	PreferredAirlines  []string    `json:"preferred_airlines,omitzero"`
 	PreferredHotels    []string       `json:"preferred_hotels,omitzero"`
 	AvoidLayovers      bool           `json:"avoid_layovers"`
 	MaxLayoverDuration *int           `json:"max_layover_duration,omitzero"`

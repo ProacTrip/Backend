@@ -68,9 +68,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*TravelPreferences
 
 	if len(tp.PreferredAirlines) > 0 {
 		airlines := make([]string, len(tp.PreferredAirlines))
-		for i, a := range tp.PreferredAirlines {
-			airlines[i] = a.String()
-		}
+		copy(airlines, tp.PreferredAirlines)
 		resp.PreferredAirlines = airlines
 	}
 

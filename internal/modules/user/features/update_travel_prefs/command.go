@@ -13,7 +13,7 @@ type Command struct {
 	SeatPreference     *string   `json:"seat_preference,omitzero"`
 	MealPreference     *string   `json:"meal_preference,omitzero"`
 	SpecialAssistance  []string  `json:"special_assistance,omitzero"`
-	PreferredAirlines  []string  `json:"preferred_airlines,omitzero"` // UUID strings
+	PreferredAirlines  []string  `json:"preferred_airlines,omitzero"` // IATA codes (ej: IB, AA, BA) o nombres de aerolínea (resueltos vía fuzzy search)
 	PreferredHotels    []string  `json:"preferred_hotels,omitzero"`
 	AvoidLayovers      *bool     `json:"avoid_layovers,omitzero"`
 	MaxLayoverDuration *int      `json:"max_layover_duration,omitzero"`

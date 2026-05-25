@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/ProacTrip/Backend/internal/modules/search/shared/airlines"
 	"github.com/ProacTrip/Backend/internal/modules/user/domain"
 	"github.com/ProacTrip/Backend/internal/shared/eventbus"
 )
@@ -81,7 +82,9 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) error {
 	if existing == nil {
 		// Crear nuevas preferencias
 		prefs := domain.NewTravelPreferences(userID)
-		applyCommand(prefs, cmd)
+		if err := applyCommand(prefs, cmd); err != nil {
+			return fmt.Errorf("apply travel preferences: %w", err)
+		}
 		if err := uc.travelPrefsRepo.Create(ctx, prefs); err != nil {
 			return fmt.Errorf("create travel preferences: %w", err)
 		}
@@ -90,7 +93,9 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) error {
 	}
 
 	// Actualizar existentes
-	applyCommand(existing, cmd)
+	if err := applyCommand(existing, cmd); err != nil {
+		return fmt.Errorf("apply travel preferences: %w", err)
+	}
 	if err := uc.travelPrefsRepo.Update(ctx, existing); err != nil {
 		return fmt.Errorf("update travel preferences: %w", err)
 	}
@@ -100,7 +105,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) error {
 }
 
 // applyCommand aplica los campos no-nil del comando a las preferencias.
-func applyCommand(tp *domain.TravelPreferences, cmd Command) {
+func applyCommand(tp *domain.TravelPreferences, cmd Command) error {
 	if cmd.PreferredClass != nil {
 		tp.PreferredClass = domain.CabinClass(*cmd.PreferredClass)
 	}
@@ -115,13 +120,21 @@ func applyCommand(tp *domain.TravelPreferences, cmd Command) {
 		tp.SpecialAssistance = cmd.SpecialAssistance
 	}
 	if cmd.PreferredAirlines != nil {
-		airlines := make([]uuid.UUID, 0, len(cmd.PreferredAirlines))
+		airlineCodes := make([]string, 0, len(cmd.PreferredAirlines))
 		for _, a := range cmd.PreferredAirlines {
-			if id, err := uuid.Parse(a); err == nil {
-				airlines = append(airlines, id)
+			// Already a 2-char IATA code — accept directly
+			if len(a) == 2 && isAllUppercase(a) {
+				airlineCodes = append(airlineCodes, a)
+				continue
 			}
+			// Try to resolve airline name → IATA code via fuzzy search
+			iata, err := airlines.ResolveAirlineToIATA(a)
+			if err != nil {
+				return fmt.Errorf("aerolínea no reconocida: %q", a)
+			}
+			airlineCodes = append(airlineCodes, iata)
 		}
-		tp.PreferredAirlines = airlines
+		tp.PreferredAirlines = airlineCodes
 	}
 	if cmd.PreferredHotels != nil {
 		tp.PreferredHotels = cmd.PreferredHotels
@@ -132,6 +145,7 @@ func applyCommand(tp *domain.TravelPreferences, cmd Command) {
 	if cmd.MaxLayoverDuration != nil {
 		tp.MaxLayoverDuration = cmd.MaxLayoverDuration
 	}
+	return nil
 }
 
 func isValidCabinClass(c string) bool {
@@ -148,6 +162,16 @@ func isValidSeatPreference(s string) bool {
 		return true
 	}
 	return false
+}
+
+// isAllUppercase checks if a string consists only of uppercase ASCII letters.
+func isAllUppercase(s string) bool {
+	for _, r := range s {
+		if r < 'A' || r > 'Z' {
+			return false
+		}
+	}
+	return true
 }
 
 func (uc *UseCase) publishEvent(ctx context.Context, userID uuid.UUID) {
