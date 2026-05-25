@@ -10,7 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"image/png"
+	"image/jpeg"
 	"io"
 	"log/slog"
 	"net/http"
@@ -80,9 +80,8 @@ func (c *OCRClient) ExtractFromDocument(ctx context.Context, fileURL string) (*d
 		pageImages = images
 		slog.Info("ocr: PDF converted to images", "pages", len(pageImages))
 	} else {
-		// JPEG/PNG — usar directamente como base64
+		// JPEG/PNG directo — usar como base64
 		pageImages = []string{base64.StdEncoding.EncodeToString(fileBytes)}
-		slog.Info("ocr: using image directly")
 	}
 
 	// 3. Enviar cada página al modelo de visión
@@ -129,7 +128,7 @@ func (c *OCRClient) pdfToImages(pdfBytes []byte) ([]string, error) {
 			continue
 		}
 		var buf bytes.Buffer
-		if err := png.Encode(&buf, img); err != nil {
+		if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 60}); err != nil {
 			continue
 		}
 		images = append(images, base64.StdEncoding.EncodeToString(buf.Bytes()))
@@ -139,7 +138,7 @@ func (c *OCRClient) pdfToImages(pdfBytes []byte) ([]string, error) {
 
 // extractTextFromImage envía una imagen base64 al modelo de visión para extraer texto.
 func (c *OCRClient) extractTextFromImage(ctx context.Context, base64Image string) (string, error) {
-	dataURI := "data:image/png;base64," + base64Image
+	dataURI := "data:image/jpeg;base64," + base64Image
 	slog.Info("ocr: sending image to vision model", "data_uri_len", len(dataURI))
 	body := map[string]interface{}{
 		"messages": []map[string]string{
