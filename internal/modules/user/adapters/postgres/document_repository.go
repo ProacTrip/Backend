@@ -203,9 +203,16 @@ func (r *DocumentRepository) GetByUserIDFiltered(ctx context.Context, userID uui
 	argIdx := 2
 
 	if status != "" {
-		query += fmt.Sprintf(` AND ocr_status = $%d`, argIdx)
-		args = append(args, string(status))
-		argIdx++
+		// "processing" es umbrella para todos los estados en-flight del pipeline
+		if status == domain.OCRStatusProcessing {
+			query += fmt.Sprintf(` AND ocr_status IN ($%d, $%d, $%d, $%d)`, argIdx, argIdx+1, argIdx+2, argIdx+3)
+			args = append(args, string(domain.OCRStatusProcessing), string(domain.OCRStatusValidating), string(domain.OCRStatusSanitizing), string(domain.OCRStatusOCRProcessing))
+			argIdx += 4
+		} else {
+			query += fmt.Sprintf(` AND ocr_status = $%d`, argIdx)
+			args = append(args, string(status))
+			argIdx++
+		}
 	}
 	if docTypeCode != "" {
 		query += fmt.Sprintf(` AND document_type = $%d`, argIdx)
