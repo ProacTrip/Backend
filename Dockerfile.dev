@@ -17,11 +17,8 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copiar código fuente
+# Copiar código fuente (cache bust con timestamp)
+RUN date +%s > /tmp/build_ts
 COPY . .
-
-# Exponer puertos
-EXPOSE 8080 6060
-
 # Run con rebuild forzado (-a) para evitar cache de Go
 CMD ["go", "run", "-a", "-buildvcs=false", "./cmd/api"]

@@ -6,6 +6,7 @@ package upload_document
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -29,6 +30,8 @@ func NewHandler(usecase *UseCase) *Handler {
 // Handle extrae user_claims, procesa el multipart form y delega al usecase.
 func (h *Handler) Handle(c *echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "no-store, private")
+
+	slog.Info("DEBUG upload_document handler called", "path", c.Request().URL.Path)
 
 	claims, err := echo.ContextGet[*sharedauth.AccessClaims](c, "user_claims")
 	if err != nil {
