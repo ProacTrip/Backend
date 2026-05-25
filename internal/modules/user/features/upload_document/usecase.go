@@ -156,6 +156,7 @@ func (uc *UseCase) CheckRateLimit(ctx context.Context, userIDStr string) error {
 // Execute procesa la subida del documento.
 // Order: Magic bytes → MIME detection → Size validation → Max docs → blake3 → Dedup → Upload
 func (uc *UseCase) Execute(ctx context.Context, cmd UploadDocumentCommand) (*UploadDocumentResponse, error) {
+	slog.Info("DEBUG Execute called", "file_name", cmd.FileName, "size", len(cmd.FileBytes))
 	// 1. Parsear userID (auth verified by handler)
 	userID, err := uuid.Parse(cmd.UserID)
 	if err != nil {
