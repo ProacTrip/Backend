@@ -25,7 +25,7 @@ func SecureBucket() string {
 	if v := os.Getenv("R2_SECURE_BUCKET"); v != "" {
 		return v
 	}
-	return "proactrip"
+	return "proactrip-secure"
 }
 
 // AssetsBucket retorna el nombre del bucket para assets públicos.
@@ -34,7 +34,7 @@ func AssetsBucket() string {
 	if v := os.Getenv("R2_ASSETS_BUCKET"); v != "" {
 		return v
 	}
-	return "proactrip"
+	return "proactrip-assets"
 }
 
 // SSEBaseURL retorna la URL base para Server-Sent Events.

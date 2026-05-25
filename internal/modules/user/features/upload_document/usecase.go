@@ -307,6 +307,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd UploadDocumentCommand) (*Upl
 	}
 
 	// 9. Subir archivo a R2 raw/
+	slog.Info("doc upload: uploading to R2", "bucket", storage.SecureBucket(), "key", storageKey, "size", realSize, "mime", detectedMime)
 	if err := uc.storage.Upload(ctx, storage.SecureBucket(), storageKey,
 		bytes.NewReader(cmd.FileBytes), realSize, detectedMime); err != nil {
 		slog.Error("fallo al subir archivo a R2", "doc_id", docID, "error", err)
@@ -317,6 +318,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd UploadDocumentCommand) (*Upl
 		}
 		return nil, fmt.Errorf("subir archivo a R2: %w", err)
 	}
+	slog.Info("doc upload: R2 upload successful", "doc_id", docID, "bucket", storage.SecureBucket(), "key", storageKey)
 
 	// 10. Set dedup keys after successful upload
 	// user dedup: permanente (sin TTL)
