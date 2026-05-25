@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
+	"github.com/ProacTrip/Backend/internal/modules/search/shared/hotels"
 )
 
 // =============================================================================
@@ -436,6 +437,125 @@ func domainRequestToDetailsParams(req domain.HotelDetailsRequest) HotelDetailsPa
 		HL:              ptrStrDomain(req.HL),
 		Currency:        ptrStrDomain(req.Currency),
 		VacationRentals: req.VacationRentals,
+	}
+}
+
+// =============================================================================
+// Hotel Code Resolution — human-readable → SerpAPI numeric codes
+// =============================================================================
+
+// resolveAmenities converts amenities from string/int to []int SerpAPI codes.
+// Accepts []string, []int, or interface{} for dual-type compatibility during transition.
+func resolveAmenities(input any) ([]int, error) {
+	switch v := input.(type) {
+	case []int:
+		return v, nil
+	case []string:
+		result := make([]int, 0, len(v))
+		for _, s := range v {
+			code, ok := hotels.AmenityCode[strings.ToLower(strings.TrimSpace(s))]
+			if !ok {
+				return nil, fmt.Errorf("unknown amenity: %q", s)
+			}
+			result = append(result, code)
+		}
+		return result, nil
+	case []any:
+		result := make([]int, 0, len(v))
+		for _, item := range v {
+			switch t := item.(type) {
+			case float64:
+				result = append(result, int(t))
+			case int:
+				result = append(result, t)
+			case string:
+				code, ok := hotels.AmenityCode[strings.ToLower(strings.TrimSpace(t))]
+				if !ok {
+					return nil, fmt.Errorf("unknown amenity: %q", t)
+				}
+				result = append(result, code)
+			default:
+				return nil, fmt.Errorf("unsupported amenity type: %T", item)
+			}
+		}
+		return result, nil
+	default:
+		return nil, fmt.Errorf("unsupported amenities type: %T", input)
+	}
+}
+
+// resolvePropertyTypes converts property types from string/int to []int SerpAPI codes.
+func resolvePropertyTypes(input any) ([]int, error) {
+	switch v := input.(type) {
+	case []int:
+		return v, nil
+	case []string:
+		result := make([]int, 0, len(v))
+		for _, s := range v {
+			code, ok := hotels.PropertyTypeCode[strings.ToLower(strings.TrimSpace(s))]
+			if !ok {
+				return nil, fmt.Errorf("unknown property type: %q", s)
+			}
+			result = append(result, code)
+		}
+		return result, nil
+	case []any:
+		result := make([]int, 0, len(v))
+		for _, item := range v {
+			switch t := item.(type) {
+			case float64:
+				result = append(result, int(t))
+			case int:
+				result = append(result, t)
+			case string:
+				code, ok := hotels.PropertyTypeCode[strings.ToLower(strings.TrimSpace(t))]
+				if !ok {
+					return nil, fmt.Errorf("unknown property type: %q", t)
+				}
+				result = append(result, code)
+			default:
+				return nil, fmt.Errorf("unsupported property type: %T", item)
+			}
+		}
+		return result, nil
+	default:
+		return nil, fmt.Errorf("unsupported property_types type: %T", input)
+	}
+}
+
+// resolveHotelRating maps a human-readable rating string to a SerpAPI numeric code.
+func resolveHotelRating(input any) (int, error) {
+	switch v := input.(type) {
+	case int:
+		return v, nil
+	case float64:
+		return int(v), nil
+	case string:
+		code, ok := hotels.RatingCode[strings.ToLower(strings.TrimSpace(v))]
+		if !ok {
+			return 0, fmt.Errorf("unknown hotel rating: %q", v)
+		}
+		return code, nil
+	default:
+		return 0, fmt.Errorf("unsupported rating type: %T", input)
+	}
+}
+
+// resolveHotelSortBy maps a human-readable sort string to a SerpAPI numeric code.
+func resolveHotelSortBy(input any) (int, error) {
+	switch v := input.(type) {
+	case int:
+		return v, nil
+	case float64:
+		return int(v), nil
+	case string:
+		code, ok := hotels.SortByCode[strings.ToLower(strings.TrimSpace(v))]
+		if !ok {
+			return 0, fmt.Errorf("unknown hotel sort_by: %q", v)
+		}
+		return code, nil
+	default:
+		return 0, fmt.Errorf("unsupported sort_by type: %T", input)
 	}
 }
 

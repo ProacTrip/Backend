@@ -6,9 +6,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/ProacTrip/Backend/internal/modules/search/domain"
+	"github.com/ProacTrip/Backend/internal/modules/search/shared/airlines"
 	"github.com/ProacTrip/Backend/internal/modules/search/shared/airports"
 )
 
@@ -179,12 +181,18 @@ func buildSerpapiParams(req domain.FlightSearchRequest) map[string]string {
 		params["max_price"] = ftoa(*req.MaxPrice)
 	}
 
-	// Airlines
+	// Airlines — resolve names to IATA codes
 	if len(req.IncludeAirlines) > 0 {
-		params["include_airlines"] = strings.Join(req.IncludeAirlines, ",")
+		resolved := resolveAirlineCodes(req.IncludeAirlines)
+		if len(resolved) > 0 {
+			params["include_airlines"] = strings.Join(resolved, ",")
+		}
 	}
 	if len(req.ExcludeAirlines) > 0 {
-		params["exclude_airlines"] = strings.Join(req.ExcludeAirlines, ",")
+		resolved := resolveAirlineCodes(req.ExcludeAirlines)
+		if len(resolved) > 0 {
+			params["exclude_airlines"] = strings.Join(resolved, ",")
+		}
 	}
 
 	// Time ranges
@@ -279,6 +287,43 @@ func isAllUpperAlpha(s string) bool {
 		}
 	}
 	return true
+}
+
+// resolveAirlineCodes resolves airline names to IATA codes.
+// Already-valid 2-char uppercase codes pass through unchanged.
+// Names are resolved via the embedded airline dataset (exact + fuzzy).
+// Unknown airlines are logged as warnings and excluded from the call.
+func resolveAirlineCodes(names []string) []string {
+	result := make([]string, 0, len(names))
+	for _, name := range names {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			continue
+		}
+
+		// Already a 2-char uppercase IATA code — pass through
+		if len(trimmed) == 2 && isAllUpperAlpha(trimmed) {
+			result = append(result, trimmed)
+			continue
+		}
+
+		// Try to resolve via airline dataset
+		iata, err := airlines.ResolveAirlineToIATA(trimmed)
+		if err != nil {
+			// 3-char uppercase might be ICAO — pass through for SerpAPI to handle
+			if len(trimmed) == 3 && isAllUpperAlpha(trimmed) {
+				result = append(result, trimmed)
+				continue
+			}
+			slog.Warn("unresolved airline, excluding from search",
+				"input", trimmed,
+				"error", err.Error(),
+			)
+			continue
+		}
+		result = append(result, iata)
+	}
+	return result
 }
 
 // =============================================================================
