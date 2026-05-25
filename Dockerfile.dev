@@ -23,5 +23,5 @@ COPY . .
 # Exponer puertos
 EXPOSE 8080 6060
 
-# Run directo del binary (se rebuild manual)
-CMD ["go", "run", "-buildvcs=false", "./cmd/api"]
+# Run con rebuild forzado (-a) para evitar cache de Go
+CMD ["go", "run", "-a", "-buildvcs=false", "./cmd/api"]
