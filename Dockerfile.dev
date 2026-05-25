@@ -6,10 +6,11 @@
 
 FROM golang:1.26.1-alpine3.23
 
-# Install build dependencies (necesarios para CGO si los usas)
+# Install build and runtime dependencies (gcc+musl para CGO, mupdf para PDF→imagen)
 RUN apk add --no-cache \
     gcc \
-    musl-dev
+    musl-dev \
+    mupdf-dev
 
 WORKDIR /app
 
