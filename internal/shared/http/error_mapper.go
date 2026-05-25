@@ -2,6 +2,7 @@ package http
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -97,7 +98,7 @@ func MapError(c *echo.Context, err error) error {
 
 	// Fallback: generic internal error con trace_id
 	traceID := GetOrGenerateTraceID(c)
-	_ = c.Logger().Errorf("unmapped error (returning 500): %v", err)
+	slog.Error("unmapped error (returning 500)", "error", err, "path", c.Request().URL.Path)
 	c.Response().Header().Set("X-Trace-Id", traceID)
 	c.Response().Header().Set(echo.HeaderContentType, "application/problem+json")
 	return c.JSON(http.StatusInternalServerError, &serrors.Problem{
