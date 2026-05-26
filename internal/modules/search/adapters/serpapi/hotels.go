@@ -613,7 +613,7 @@ func mapHotelProperties(serpProps []HotelProperty, currency string) []domain.Hot
 func mapSingleHotelProperty(sp HotelProperty, currency string) domain.HotelProperty {
 	p := domain.HotelProperty{
 		ID:          sp.PropertyToken,
-		Type:        sp.Type,
+		Type:        normalizePropertyType(sp.Type),
 		Name:        sp.Name,
 		Description: sp.Description,
 		BookingURL:  sp.Link,
@@ -703,7 +703,7 @@ func mapHotelDetailsDomainResponse(detail *HotelPropertyDetail, currency string)
 	p := detail.HotelProperty
 	resp := &domain.HotelDetailsResponse{
 		ID:          p.PropertyToken,
-		Type:        p.Type,
+		Type:        normalizePropertyType(p.Type),
 		Name:        p.Name,
 		Description: p.Description,
 		BookingURL:  p.Link,
@@ -1089,4 +1089,13 @@ func parseEssentialInfoString(s string) HotelEssentialKV {
 		return HotelEssentialKV{Key: "area", Value: s}
 	}
 	return HotelEssentialKV{} // unknown — mapCapacity ignores empty Key
+}
+
+// normalizePropertyType convierte "vacation rental" (SerpAPI) → "vacation_rental" (dominio).
+// SerpAPI devuelve el tipo con espacio, pero el dominio usa guión bajo.
+func normalizePropertyType(t string) string {
+	if t == "vacation rental" {
+		return "vacation_rental"
+	}
+	return t
 }

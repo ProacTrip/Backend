@@ -200,7 +200,7 @@ func generateCacheKey(req domain.HotelSearchRequest) string {
 func filterHotels(properties []domain.HotelProperty) []domain.HotelProperty {
 	filtered := make([]domain.HotelProperty, 0, len(properties))
 	for _, p := range properties {
-		if p.Type != "vacation_rental" {
+		if p.Type != "vacation_rental" && p.Type != "vacation rental" {
 			filtered = append(filtered, p)
 		}
 	}
@@ -211,7 +211,7 @@ func filterHotels(properties []domain.HotelProperty) []domain.HotelProperty {
 func filterVacationRentals(properties []domain.HotelProperty) []domain.HotelProperty {
 	filtered := make([]domain.HotelProperty, 0, len(properties))
 	for _, p := range properties {
-		if p.Type == "vacation_rental" {
+		if p.Type == "vacation_rental" || p.Type == "vacation rental" {
 			filtered = append(filtered, p)
 		}
 	}
