@@ -37,7 +37,7 @@ func NewAdapter(client *Client) *Adapter {
 
 // SearchFlights performs a flight search via SerpAPI and maps results to domain entities.
 func (a *Adapter) SearchFlights(ctx context.Context, req domain.FlightSearchRequest) (*domain.FlightSearchResponse, error) {
-	params := buildSerpapiParams(req)
+	params := buildSerpapiParams(ctx, req)
 
 	raw, err := a.client.Search(ctx, params)
 	if err != nil {
@@ -104,15 +104,14 @@ func convertToBookingResponse(raw map[string]interface{}) (*serpapiBookingRespon
 // Construcción de Parámetros
 // =============================================================================
 
-func buildSerpapiParams(req domain.FlightSearchRequest) map[string]string {
+func buildSerpapiParams(ctx context.Context, req domain.FlightSearchRequest) map[string]string {
 	params := make(map[string]string)
 
-	// Resolve country names to IATA codes (e.g., "Perú" → "LIM", "México" → "MEX").
-	// Only resolves when the input is a single identifier (no commas — those are
-	// already explicit IATA/kgmid lists). Already-valid IATA codes like "MAD"
-	// and kgmids like "/m/04jpl" pass through unchanged.
-	departureID := resolveIdentifier(req.Departure)
-	arrivalID := resolveIdentifier(req.Arrival)
+	// Resolve location identifiers to SerpAPI-compatible IATA codes.
+	// Handles: explicit IATA codes (MAD), kgmids (/m/04jpl), country names (Perú → LIM),
+	// and fuzzy city name resolution (Lima → LIM, Buenos Aires → EZE).
+	departureID := resolveIdentifier(ctx, req.Departure)
+	arrivalID := resolveIdentifier(ctx, req.Arrival)
 
 	// Required fields
 	params["departure_id"] = departureID
@@ -241,13 +240,14 @@ func buildSerpapiParams(req domain.FlightSearchRequest) map[string]string {
 }
 
 // resolveIdentifier translates a user-provided location identifier into a
-// SerpAPI-compatible format. It handles three cases:
-//  1. Country name → IATA code (via countryToMainAirport map)
-//  2. Already-valid IATA code (e.g., "MAD") → passes through unchanged
-//  3. kgmid (e.g., "/m/04jpl") → passes through unchanged
-//  4. Comma-separated list (e.g., "CDG,ORY") → passes through unchanged
-//     (assumes user provided explicit airport identifiers)
-func resolveIdentifier(raw string) string {
+// SerpAPI-compatible IATA code. Resolution order:
+//  1. Comma-separated list (e.g., "CDG,ORY") → pass through unchanged
+//  2. kgmid (e.g., "/m/04jpl") → pass through unchanged
+//  3. 3 uppercase letters → already looks like IATA, pass through
+//  4. Country name → IATA code (hardcoded map: "Perú" → "LIM")
+//  5. Fuzzy airport resolution → city/airport name to IATA (300+ airports, typo-tolerant)
+//  6. No match → pass through as-is (SerpAPI may still understand it)
+func resolveIdentifier(ctx context.Context, raw string) string {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return trimmed
@@ -275,7 +275,13 @@ func resolveIdentifier(raw string) string {
 		return iata
 	}
 
-	// No match — pass through as-is (it might be a city name that SerpAPI accepts)
+	// Try fuzzy airport resolution (city name → IATA)
+	// e.g., "Lima" → "LIM", "Buenos Aires" → "EZE", "Nueva York" → "JFK"
+	if entry, err := airports.ResolveIATA(ctx, nil, trimmed); err == nil {
+		return entry.IATA
+	}
+
+	// No match — pass through as-is (SerpAPI may still understand it)
 	return trimmed
 }
 
