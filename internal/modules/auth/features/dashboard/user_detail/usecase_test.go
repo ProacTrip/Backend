@@ -251,9 +251,11 @@ func TestExecute_UserWithDocuments(t *testing.T) {
 	}
 	lister := &stubDocumentLister{
 		getDocsFn: func(ctx context.Context, uid uuid.UUID) ([]domain.DocumentSummary, error) {
+			passport := "passport"
+			visa := "visa"
 			return []domain.DocumentSummary{
-				{ID: docID1, FileName: "passport.pdf", DocumentType: "passport", VerificationStatus: "verified"},
-				{ID: docID2, FileName: "visa.pdf", DocumentType: "visa", VerificationStatus: "unverified"},
+				{ID: docID1, FileName: "passport.pdf", DocumentType: &passport, VerificationStatus: "verified"},
+				{ID: docID2, FileName: "visa.pdf", DocumentType: &visa, VerificationStatus: "unverified"},
 			}, nil
 		},
 	}
@@ -269,11 +271,11 @@ func TestExecute_UserWithDocuments(t *testing.T) {
 	if len(resp.Documents) != 2 {
 		t.Errorf("documents len = %d, expected 2", len(resp.Documents))
 	}
-	if resp.Documents[0].DocumentType != "passport" {
-		t.Errorf("doc[0].type = %s, expected passport", resp.Documents[0].DocumentType)
+	if resp.Documents[0].DocumentType == nil || *resp.Documents[0].DocumentType != "passport" {
+		t.Errorf("doc[0].type = %v, expected passport", resp.Documents[0].DocumentType)
 	}
-	if resp.Documents[1].DocumentType != "visa" {
-		t.Errorf("doc[1].type = %s, expected visa", resp.Documents[1].DocumentType)
+	if resp.Documents[1].DocumentType == nil || *resp.Documents[1].DocumentType != "visa" {
+		t.Errorf("doc[1].type = %v, expected visa", resp.Documents[1].DocumentType)
 	}
 }
 

@@ -25,7 +25,7 @@ type Command struct {
 	// shared.ResolveSearchDefaults(). Not part of the JSON API.
 	GL       string `json:"-"`
 	HL       string `json:"-"`
-	Currency string `json:"-"`
+	Currency string `json:"currency,omitzero"` // Client-provided override (navbar selection)
 	ClientIP string `json:"-"`
 }
 

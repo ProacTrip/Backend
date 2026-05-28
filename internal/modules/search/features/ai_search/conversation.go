@@ -31,6 +31,10 @@ const (
 	// userConvsKeyPrefix is the set key for listing a user's active conversations.
 	userConvsKeyPrefix = "user:convs:"
 
+	// convOwnerKeyPrefix is the reverse-mapping key for resolving
+	// a userID from a conversation ID during expiry notifications.
+	convOwnerKeyPrefix = "conv:owner:"
+
 	// conversationTTL is the TTL for conversation keys in DragonflyDB.
 	// Resets on every POST activity. GET reads do NOT reset.
 	conversationTTL = 5 * time.Minute
@@ -48,6 +52,12 @@ func convKey(id string) string {
 // userConvsKey builds the Dragonfly set key for a user's conversations.
 func userConvsKey(userID string) string {
 	return fmt.Sprintf("%s%s", userConvsKeyPrefix, userID)
+}
+
+// convOwnerKey builds the reverse-mapping key to resolve a userID
+// from a conversation ID during expiry notifications.
+func convOwnerKey(convID string) string {
+	return fmt.Sprintf("%s%s", convOwnerKeyPrefix, convID)
 }
 
 // =============================================================================
@@ -142,6 +152,10 @@ func (s *ConvStore) Save(ctx context.Context, conv *Conversation) error {
 	if conv.UserID != "" {
 		pipe.SAdd(ctx, userConvsKey(conv.UserID), conv.ID)
 		pipe.Expire(ctx, userConvsKey(conv.UserID), conversationTTL)
+
+		// Reverse mapping: conv:owner:{convID} → userID for expiry notifications.
+		// Stored with the same TTL so it expires together with the conversation.
+		pipe.Set(ctx, convOwnerKey(conv.ID), conv.UserID, conversationTTL)
 	} else {
 		slog.DebugContext(ctx, "ConversationStore.Save: skipping user index for anonymous conversation",
 			slog.String("conversation_id", conv.ID),
@@ -208,6 +222,9 @@ func (s *ConvStore) Delete(ctx context.Context, convID, userID string) error {
 	pipe := s.rdb.Pipeline()
 	pipe.Del(ctx, key)
 	pipe.SRem(ctx, userConvsKey(userID), convID)
+	// REQ-W4: Clean up reverse-mapping key to prevent stale SSE events
+	// for deleted conversations.
+	pipe.Del(ctx, convOwnerKey(convID))
 
 	if _, err := pipe.Exec(ctx); err != nil {
 		slog.ErrorContext(ctx, "ConversationStore.Delete: pipeline failed",

@@ -14,6 +14,8 @@ import (
 	docverification "github.com/ProacTrip/Backend/internal/modules/auth/features/dashboard/document_verification"
 )
 
+func strPtr(s string) *string { return &s }
+
 // =============================================================================
 // Stub / Mock
 // =============================================================================
@@ -56,7 +58,7 @@ func testDocRow(id uuid.UUID, status string) *domain.DocumentRow {
 		UserID:             uuid.Must(uuid.NewV7()),
 		VerificationStatus: status,
 		OCRStatus:          "completed",
-		DocumentTypeCode:   "passport",
+		DocumentTypeCode:   strPtr("passport"),
 		FileName:           "passport.pdf",
 	}
 }

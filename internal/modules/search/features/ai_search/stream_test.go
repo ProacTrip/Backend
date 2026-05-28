@@ -22,7 +22,7 @@ func TestWriteSearchEvent(t *testing.T) {
 		"results_state": "empty",
 	}
 
-	err := WriteSearchEvent(w, "Barcelona, España", "hotels", searchData)
+	err := WriteSearchEvent(w, "Barcelona, España", "hotels", searchData, nil)
 	if err != nil {
 		t.Fatalf("WriteSearchEvent failed: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestSSEEventOrdering(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	WriteChunkEvent(w, "Buscando hoteles...")
-	WriteSearchEvent(w, "Madrid", "hotels", map[string]string{"results_state": "complete"})
+	WriteSearchEvent(w, "Madrid", "hotels", map[string]string{"results_state": "complete"}, nil)
 	WriteChunkEvent(w, "Encontré 5 hoteles en Madrid.")
 	WriteFiltersEvent(w, map[string]interface{}{"stars": []int{3, 4, 5}}, map[string]interface{}{})
 	WriteDoneEvent(w, "conv_001", 1)

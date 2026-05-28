@@ -351,7 +351,7 @@ func Load() *Config {
 			APIKey:         getEnv("AI_SEARCH_API_KEY", ""),
 			Model:          getEnv("AI_SEARCH_MODEL", ""),
 			DiscoveryModel: getEnv("AI_SEARCH_DISCOVERY_MODEL", ""),
-			Timeout:        getEnvDuration("AI_SEARCH_TIMEOUT", 30*time.Second),
+			Timeout:        getEnvDuration("AI_SEARCH_TIMEOUT", 60*time.Second),
 		},
 		OCR: AIOCRConfig{
 			AccountID:      getEnv("CF_ACCOUNT_ID", ""),

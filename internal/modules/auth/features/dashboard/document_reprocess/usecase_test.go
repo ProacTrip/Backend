@@ -13,6 +13,8 @@ import (
 	docreprocess "github.com/ProacTrip/Backend/internal/modules/auth/features/dashboard/document_reprocess"
 )
 
+func strPtr(s string) *string { return &s }
+
 // =============================================================================
 // Stub
 // =============================================================================
@@ -40,7 +42,7 @@ func testDoc(id uuid.UUID, ocrStatus string) *domain.DocumentRow {
 		UserID:             uuid.Must(uuid.NewV7()),
 		VerificationStatus: "unverified",
 		OCRStatus:          ocrStatus,
-		DocumentTypeCode:   "passport",
+		DocumentTypeCode:   strPtr("passport"),
 		FileName:           "doc.pdf",
 		StorageKey:         "raw/" + id.String(),
 	}

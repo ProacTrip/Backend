@@ -1320,9 +1320,17 @@ type stubToolCallStreamer struct {
 }
 
 func (s *stubToolCallStreamer) ChatWithTools(ctx context.Context, messages []domain.ChatMessage, tools []map[string]interface{}) (*domain.ToolCallStreamResult, error) {
+	return s.ChatWithToolsStream(ctx, messages, tools, nil)
+}
+
+func (s *stubToolCallStreamer) ChatWithToolsStream(ctx context.Context, messages []domain.ChatMessage, tools []map[string]interface{}, onChunk func(text string)) (*domain.ToolCallStreamResult, error) {
 	if s.calls < len(s.responses) {
 		resp := s.responses[s.calls]
 		s.calls++
+		// Simulate streaming by calling onChunk with the full text
+		if onChunk != nil && resp.AssistantText != "" {
+			onChunk(resp.AssistantText)
+		}
 		return resp, nil
 	}
 	return &domain.ToolCallStreamResult{AssistantText: "done"}, nil
@@ -1381,7 +1389,7 @@ func TestExecuteChatStream_SingleToolCall(t *testing.T) {
 		}},
 	}
 
-	turnCount, err := uc.ExecuteChatStream(ctx, w, messages, tools, 3, ai_search.ConversationContext{})
+	turnCount, err := uc.ExecuteChatStream(ctx, w, "", "", messages, tools, 3, ai_search.ConversationContext{})
 	if err != nil {
 		t.Fatalf("ExecuteChatStream failed: %v", err)
 	}
@@ -1455,7 +1463,7 @@ func TestExecuteChatStream_MultiTurn(t *testing.T) {
 	}
 	tools := []map[string]interface{}{}
 
-	turnCount, err := uc.ExecuteChatStream(ctx, w, messages, tools, 3, ai_search.ConversationContext{})
+	turnCount, err := uc.ExecuteChatStream(ctx, w, "", "", messages, tools, 3, ai_search.ConversationContext{})
 	if err != nil {
 		t.Fatalf("ExecuteChatStream failed: %v", err)
 	}
@@ -1505,7 +1513,7 @@ func TestExecuteChatStream_MaxTurnsGuard(t *testing.T) {
 	tools := []map[string]interface{}{}
 
 	// maxTurns = 1 — should stop after first tool call round
-	turnCount, err := uc.ExecuteChatStream(ctx, w, messages, tools, 1, ai_search.ConversationContext{})
+	turnCount, err := uc.ExecuteChatStream(ctx, w, "", "", messages, tools, 1, ai_search.ConversationContext{})
 	if err != nil {
 		t.Fatalf("ExecuteChatStream failed: %v", err)
 	}

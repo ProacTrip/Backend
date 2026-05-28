@@ -81,6 +81,13 @@ type AdapterToolCall struct {
 //
 // Returns the assistant text message (accumulated from stream) and any tool calls.
 func (a *Adapter) ChatWithTools(ctx context.Context, messages []chatMessage, tools []ToolDef) (*AdapterToolCallResult, error) {
+	return a.ChatWithToolsStream(ctx, messages, tools, nil)
+}
+
+// ChatWithToolsStream sends messages and tools via streaming and calls onChunk
+// for each text delta as it arrives from DeepSeek. If onChunk is nil, text is
+// accumulated silently (backward-compatible with ChatWithTools).
+func (a *Adapter) ChatWithToolsStream(ctx context.Context, messages []chatMessage, tools []ToolDef, onChunk func(text string)) (*AdapterToolCallResult, error) {
 	params := DefaultDiscoveryParams()
 	params.Tools = tools
 
@@ -94,13 +101,15 @@ func (a *Adapter) ChatWithTools(ctx context.Context, messages []chatMessage, too
 	for event := range ch {
 		if event.Delta != "" {
 			result.AssistantMessage += event.Delta
+			if onChunk != nil {
+				onChunk(event.Delta)
+			}
 		}
 		if event.ReasoningContent != "" {
 			result.ReasoningContent += event.ReasoningContent
 		}
 		if event.Done && event.FinishReason == "tool_calls" && len(event.ToolCalls) > 0 {
 			for _, tc := range event.ToolCalls {
-				// Parse the JSON arguments from Parameters (json.RawMessage)
 				var args map[string]interface{}
 				if len(tc.Function.Parameters) > 0 {
 					if err := json.Unmarshal(tc.Function.Parameters, &args); err != nil {
@@ -273,8 +282,56 @@ func buildDiscoverySystemPrompt(prompt DiscoveryPrompt) string {
 // systemPrompt is the complete system prompt for DeepSeek (~30 lines).
 // Kept extremely short so small models (DeepSeek V4 Flash) produce clean JSON.
 // The {language} placeholder is replaced at call time by buildSystemPrompt.
-const systemPrompt = `You are a travel search assistant. Your ONLY job is to extract search parameters from user messages and return JSON.
-Current date: {today_date} (YYYY-MM-DD). Use this year for all dates unless user specifies otherwise.
+const systemPrompt = `CRITICAL RULE #1 — RESULTS IN SEPARATE PANEL:
+The flight and hotel search results are displayed automatically in a results panel on the right side of the screen. You MUST NOT repeat, list, or format these results in your text response. Your text must be a SHORT summary (1-2 sentences). NEVER output prices, tables, bullet lists of hotels, or flight details. The user sees those in the panel. Example bad response: "| Hotel | Precio |..." — NEVER do this. Example good response: "Encontré 5 hoteles en Madrid. El mejor valorado es el Catalonia Plaza Mayor. ¿Filtro por algo más?"
+
+PRIMARY DIRECTIVE — READ THIS FIRST:
+You are a STRICT travel search API. You MUST ONLY return JSON. You MUST NEVER output conversational text, explanations, or answers to non-travel questions. If the user asks anything unrelated to travel search (sports, trivia, "cuando es el mundial", "capital of", coding, general knowledge), you MUST return this exact JSON: {"type":"incomplete","confidence":0.0,"missing_fields":[],"follow_up":"Soy un asistente de viajes. ¿Querés que busque vuelos u hoteles para vos?","flight_params":{},"hotel_params":{}} — Do NOT provide any information about the off-topic subject. Do NOT explain why you can't answer. Just return the redirect JSON.
+
+Current date: {today_date} (YYYY-MM-DD). Use this year for all dates.
+
+CRITICAL — MULTI-TURN CONTEXT:
+This is a MULTI-TURN conversation. The user may provide information across multiple messages. You MUST remember and accumulate ALL information the user has given you in PREVIOUS messages (departure city, destination, dates, budget, travelers, preferences). If the user already told you their departure city in a previous message, DO NOT ask again — use it. If they mentioned their budget, use it. Build a complete picture from the ENTIRE conversation history, not just the current message.
+
+DATE HANDLING:
+- Current date is {today_date}. Use this year for ALL date calculations.
+- If the user specifies a month without exact dates (e.g., "agosto", "en junio", "todo el mes", "anytime in July"), infer the full month range: outbound_date="YYYY-MM-01", return_date/check_out_date="YYYY-MM-[last day]". Use the current year from {today_date}.
+- If the user says "una semana en [month]" without specific dates, ask for exact dates (week boundaries matter for pricing).
+- If the user mentions relative time ("próximo mes", "el mes que viene", "en verano"), resolve to the correct month using {today_date} as reference.
+- NEVER ask for dates if the user already provided them (even as partial month ranges) in a previous message.
+- If the user says "desde [city]" in a follow-up message, they are specifying their departure — do NOT ask "¿desde dónde?" again
+
+CONVERSATION MEMORY — EXAMPLES:
+- User turn 1: "recomiendame destinos de playa" → type=incomplete/ambiguous, ask follow-up
+- User turn 2: "de lima peru a republica dominicana, presupuesto 1000 euros" → type=flights|hotels|both with departure=LIM, destination="Punta Cana, República Dominicana", max_price=1000 — DO NOT ask for departure or destination again
+- User turn 3: "todo agosto" → type=flights|hotels|both with outbound_date="2026-08-01", return_date="2026-08-31" — DO NOT ask for dates, use the ones you already have
+- User turn 4: "ibiza" → type=flights|hotels|both with destination="Ibiza, España" — DO NOT ask "¿qué destino?" again
+
+IMPORTANT — DON'T RE-ASK WHAT'S ALREADY SPECIFIED:
+- If the user already said "todo el mes de agosto", "los 31 días", or "el mes completo", use outbound_date="YYYY-08-01" and return_date="YYYY-08-31". Do NOT ask "¿cuántos días?" again.
+- If the user already specified their origin city (e.g., "desde Madrid", "de Lima"), use it. Do NOT ask "¿desde dónde?" or offer alternatives.
+- If the user already chose a destination (e.g., "Ibiza", "me gusta Ibiza"), use it. Do NOT list other destinations.
+- If the user already specified budget, travelers, or preferences in ANY previous message, use them — DO NOT ask again.
+
+OFF-TOPIC DETECTION:
+If the user asks something COMPLETELY unrelated to travel (sports events, general trivia, coding questions, "cuando es el mundial", "what is the capital of...", etc.), respond with type=incomplete, confidence=0.0, and a follow_up that gently redirects: "Soy un asistente de viajes. ¿Querés que busque vuelos u hoteles para vos?" — Do NOT answer the off-topic question.
+
+CRITICAL — SILENT OPERATION:
+- NEVER mention that you're checking dates, fixing years, trying different parameters, or retrying searches. The user must NOT see your internal reasoning.
+- NEVER output text like "Parece que las fechas...", "Vamos a probar con...", "Probemos con...", "¡Bien!", or similar process commentary.
+- Present ONLY the final results and recommendations. All tool-calling, date correction, and parameter adjustment must happen silently.
+- If a search returns no results, just say so concisely — don't explain the search process.
+
+CRITICAL — RESULTS DISPLAY:
+- When you call search_flights or search_hotels tools and get results, do NOT copy the results into your text response. The structured results (flights list, hotels list, prices) are displayed in a SEPARATE results panel on the right side of the screen.
+- Your text response should be a brief summary or recommendation (2-3 sentences max), like: "Encontré 5 hoteles en Madrid. El mejor relación calidad-precio es X. ¿Querés que filtre por algo más?"
+- NEVER output markdown tables, price lists, or hotel/flight details in your chat text — the system renders those in the results panel automatically.
+
+STYLE RULES:
+- NO uses emojis ni stickers en tus respuestas
+- NO confundas la nacionalidad del usuario con su ubicación actual — son cosas distintas
+- Si no sabés la ubicación del usuario, preguntá en vez de asumir
+- RESPOND IN {language} ALWAYS
 
 OUTPUT FORMAT — return ONLY this JSON structure:
 {
@@ -355,6 +412,17 @@ func (a *Adapter) Parse(ctx context.Context, message string, history []domain.Co
 			return nil, fmt.Errorf("deepseek parse: %w", err)
 		}
 
+		// Pre-check: if the AI answered an off-topic question with conversational
+		// text instead of JSON, return a redirect intent immediately — don't waste
+		// retries trying to parse non-JSON into TravelIntent.
+		if isOffTopicResponse(raw) {
+			return &domain.TravelIntent{
+				Type:       "incomplete",
+				Confidence: 0.0,
+				FollowUp:   "Soy un asistente de viajes. ¿Querés que busque vuelos u hoteles para vos?",
+			}, nil
+		}
+
 		intent, parseErr := parseResponse(raw)
 		if parseErr == nil {
 			return intent, nil
@@ -377,6 +445,37 @@ func (a *Adapter) Parse(ctx context.Context, message string, history []domain.Co
 
 	// unreachable — loop returns before here
 	return nil, domain.ErrAIParseFailure
+}
+
+// isOffTopicResponse detects when the AI answered a non-travel question with
+// conversational text instead of JSON. This catches cases where the model
+// ignores the system prompt's off-topic guardrail.
+func isOffTopicResponse(raw string) bool {
+	lower := strings.ToLower(raw)
+
+	// If the response looks like valid JSON (starts with { and contains "type"),
+	// it's a proper travel intent — let it through.
+	if strings.HasPrefix(strings.TrimSpace(raw), "{") && strings.Contains(lower, `"type"`) {
+		return false
+	}
+
+	// Detect off-topic conversational responses by checking for known patterns.
+	// These are questions the AI should NOT answer but often does anyway.
+	offTopicPatterns := []string{
+		"mundial", "fifa", "world cup",
+		"capital de", "what is the capital",
+		"presidente de", "who is the president",
+		"receta de", "how to cook",
+		"código", "programación", "javascript", "python",
+	}
+
+	for _, pattern := range offTopicPatterns {
+		if strings.Contains(lower, pattern) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // =============================================================================

@@ -149,6 +149,11 @@ func (m *Module) EventConsumer() *consumer.UserEventConsumer {
 	return m.eventConsumer
 }
 
+// UpsertProfileUseCase returns the upsert profile usecase for cross-module wiring.
+func (m *Module) UpsertProfileUseCase() *upsert_profile.UseCase {
+	return m.upsertProfileUseCase
+}
+
 // NewModule crea e inicializa el módulo User con todas sus dependencias.
 // Las migraciones se ejecutan desde bootstrap antes de llamar a NewModule.
 func NewModule(cfg Config) (*Module, error) {
@@ -355,6 +360,7 @@ func NewModule(cfg Config) (*Module, error) {
 				m.medicalProfileRepo,
 				m.medicalPendingRepo,
 				m.encryptionService,
+				m.profileRepo,
 			)
 		}
 	}
@@ -546,7 +552,7 @@ func registerUserErrorMappings() {
 		case errors.Is(err, domain.ErrInvalidGender):
 			return serrors.ErrBadRequest("Género inválido. Valores permitidos: male, female, non_binary, prefer_not_to_say", err)
 		case errors.Is(err, domain.ErrInvalidCountryCode):
-			return serrors.ErrBadRequest("Código de país inválido. Debe ser ISO 3166-1 alpha-2 (2 letras)", err)
+			return serrors.ErrBadRequest("Nacionalidad inválida. Debe ser un código ISO 3166-1 de 2 letras (ej: AR) o el nombre completo del país (ej: Argentina), entre 2 y 100 caracteres", err)
 		case errors.Is(err, domain.ErrInvalidLanguageCode):
 			return serrors.ErrBadRequest("Código de idioma inválido. Debe tener entre 2 y 5 caracteres", err)
 		case errors.Is(err, domain.ErrInvalidCurrencyCode):

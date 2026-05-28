@@ -118,7 +118,7 @@ func (m *sanitizerMockR2) Delete(ctx context.Context, bucket, key string) error 
 // =============================================================================
 
 func TestSanitizerWorker_ProcesaPNGCorrectamente(t *testing.T) {
-	sse.Init()
+	sse.Init(context.Background(), nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -350,7 +350,7 @@ func TestSanitizerWorker_FalloDownload_QuedaEnPEL(t *testing.T) {
 // =============================================================================
 
 func TestSanitizerWorker_SanitizaPDF_EliminaPeligroso(t *testing.T) {
-	sse.Init()
+	sse.Init(context.Background(), nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

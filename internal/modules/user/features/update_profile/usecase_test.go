@@ -194,8 +194,8 @@ func TestUpdateProfile_NationalityValidation(t *testing.T) {
 		{"AR válido", "AR", true},
 		{"ES válido", "ES", true},
 		{"US válido", "US", true},
-		{"inválido largo", "Argentina", false},
-		{"inválido 1 char", "A", false},
+		{"nombre completo válido", "Argentina", true},
+		{"inválido muy corto", "A", false},
 	}
 
 	for _, tc := range tests {

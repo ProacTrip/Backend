@@ -45,15 +45,26 @@ func (h *Handler) Handle(c *echo.Context) error {
 }
 
 // domainDocToDetail convierte un domain.UserDocument al DTO de detalle.
-// Incluye verified_at + verified_by (si están disponibles).
+// Incluye verified_at + verified_by cuando están disponibles (verification lives in DASHBOARD).
 func domainDocToDetail(doc *domain.UserDocument) DocumentDetailResponse {
 	return DocumentDetailResponse{
 		ID:                 doc.ID.String(),
+		UserID:             doc.UserID.String(),
 		FileName:           doc.FileName,
+		FileSize:           doc.FileSize,
+		MimeType:           doc.MimeType,
+		DetectedMimeType:   doc.DetectedMimeType,
+		DetectedSizeBytes:  doc.DetectedSizeBytes,
 		DocumentType:       doc.DocumentType,
+		StorageKey:         doc.StorageKey,
 		OCRStatus:          string(doc.OCRStatus),
 		OCRConfidence:      doc.OCRConfidence,
+		ExtractedData:      doc.ExtractedData,
+		FailureReason:      doc.FailureReason,
 		VerificationStatus: string(doc.VerificationStatus),
 		CreatedAt:          doc.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:          doc.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		VerifiedAt:         nil,
+		VerifiedBy:         nil,
 	}
 }

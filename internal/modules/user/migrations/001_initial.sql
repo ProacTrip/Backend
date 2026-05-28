@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     last_name VARCHAR(100),
     date_of_birth DATE,
     gender VARCHAR(20),
-    nationality VARCHAR(2),
+    nationality VARCHAR(100),
     phone VARCHAR(50),
     avatar_url TEXT,
     bio TEXT,
@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     currency_code VARCHAR(3) NOT NULL DEFAULT 'EUR',
     role VARCHAR(20) NOT NULL DEFAULT 'client',
     status VARCHAR(20) NOT NULL DEFAULT 'active',
+    ocr_populated BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uq_profiles_email UNIQUE (email),
@@ -119,13 +120,8 @@ CREATE TABLE IF NOT EXISTS document_types (
 INSERT INTO document_types (code, name, description, is_identity, requires_ocr, is_active, sort_order)
 VALUES
     ('passport',            'Passport',              'International passport',             true,  true,  true, 1),
-    ('national_id',         'National ID',           'Government-issued identity card',    true,  true,  true, 2),
-    ('drivers_license',     'Drivers License',       'Driving license document',           true,  true,  true, 3),
-    ('visa',                'Visa',                  'Travel visa document',               false, true,  true, 4),
-    ('travel_insurance',    'Travel Insurance',      'Insurance policy document',          false, false, true, 5),
-    ('vaccination_cert',    'Vaccination Certificate','Health vaccination record',          false, true,  true, 6),
-    ('boarding_pass',       'Boarding Pass',         'Flight boarding pass',               false, false, true, 7),
-    ('receipt',             'Receipt',               'Payment receipt',                    false, false, true, 8)
+    ('visa',                'Visa',                  'Travel visa document',               false, true,  true, 2),
+    ('vaccination_cert',    'Vaccination Certificate','Health vaccination record',          false, true,  true, 3)
 ON CONFLICT (code) DO NOTHING;
 
 -- =============================================================================
@@ -154,7 +150,7 @@ CREATE TABLE IF NOT EXISTS user_documents (
     valid_from TIMESTAMPTZ,
     valid_until TIMESTAMPTZ,
     document_number VARCHAR(100),
-    issuing_country VARCHAR(2),
+    issuing_country VARCHAR(100),
     metadata JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,

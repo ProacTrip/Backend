@@ -3,6 +3,9 @@
 package domain
 
 import (
+	"fmt"
+	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -63,6 +66,7 @@ type UserProfile struct {
 	CurrencyCode string  `json:"currency_code"` // NOT NULL DEFAULT 'EUR'
 	Role         string           `json:"role,omitzero"`  // "client" or "admin", default "client"
 	Status       UserProfileStatus `json:"status,omitzero"` // default "active"
+	OcrPopulated bool              `json:"ocr_populated"`   // true cuando OCR ya pobló datos personales
 	CreatedAt       time.Time            `json:"created_at"`
 	UpdatedAt       time.Time            `json:"updated_at"`
 }
@@ -122,6 +126,69 @@ func (p *UserProfile) SetAvatar(avatarURL *string) {
 	p.UpdatedAt = time.Now()
 }
 
+// PopulateFromOCR rellena datos personales desde un documento de identidad (pasaporte, DNI, etc.).
+// Solo aplica si OcrPopulated == false — one-time population.
+// El nombre se divide asumiendo formato español: APELLIDOS Nombres (surnames first).
+// Con 3+ palabras: primeras N-2 = apellidos, últimas 2 = nombres.
+// Con 2 palabras: asume formato inglés (first = nombre, second = apellido).
+func (p *UserProfile) PopulateFromOCR(extracted *ExtractedData) bool {
+	if p.OcrPopulated {
+		return false
+	}
+	changed := false
+	if extracted.FullName != nil && *extracted.FullName != "" {
+		parts := strings.Fields(*extracted.FullName)
+		var firstName, lastName string
+		switch {
+		case len(parts) >= 4:
+			// Formato español con 2+ apellidos y 2 nombres: SURNAME1 SURNAME2 NAME1 NAME2
+			firstName = strings.Join(parts[len(parts)-2:], " ")
+			lastName = strings.Join(parts[:len(parts)-2], " ")
+		case len(parts) == 3:
+			// SURNAME1 SURNAME2 NAME o SURNAME NAME1 NAME2
+			// Asumir 2 apellidos + 1 nombre (más común en docs españoles)
+			firstName = parts[len(parts)-1]
+			lastName = strings.Join(parts[:len(parts)-1], " ")
+		case len(parts) == 2:
+			// Formato inglés: NAME SURNAME
+			firstName = parts[0]
+			lastName = parts[1]
+		default:
+			firstName = parts[0]
+		}
+		p.FirstName = &firstName
+		if lastName != "" {
+			p.LastName = &lastName
+		}
+		changed = true
+	}
+	if extracted.DateOfBirth != nil && *extracted.DateOfBirth != "" {
+		if dob, err := parseDate(*extracted.DateOfBirth); err == nil {
+			p.DateOfBirth = &dob
+			changed = true
+		} else {
+			slog.Warn("ocr: unparseable date_of_birth, field not applied to profile",
+				"raw", *extracted.DateOfBirth,
+				"error", err,
+			)
+		}
+	}
+	if extracted.Nationality != nil && *extracted.Nationality != "" {
+		p.Nationality = extracted.Nationality
+		changed = true
+	}
+	if extracted.Gender != nil && *extracted.Gender != "" {
+		g := mapGender(*extracted.Gender)
+		p.Gender = &g
+		changed = true
+	}
+	if changed {
+		p.OcrPopulated = true
+		p.UpdatedAt = time.Now()
+	}
+	return changed
+}
+
 // FullName retorna el nombre completo
 func (p *UserProfile) FullName() string {
 	if p.FirstName == nil && p.LastName == nil {
@@ -158,4 +225,88 @@ type EnvPrefs struct {
 // HasAny returns true if at least one preference is non-empty.
 func (e EnvPrefs) HasAny() bool {
 	return e.LanguageCode != "" || e.CurrencyCode != "" || e.CountryCode != "" || e.TimezoneName != ""
+}
+
+// =============================================================================
+// Helpers para PopulateFromOCR
+// =============================================================================
+
+// parseDate intenta parsear una fecha en formatos comunes de documentos,
+// incluyendo meses textuales en inglés y español (OCR y AI a veces los mezclan).
+func parseDate(raw string) (time.Time, error) {
+	// Normalizar: AI/OCR a veces concatena abreviaturas bilingües (ej: "AGOIAUG")
+	raw = normalizeBilingualMonth(raw)
+
+	formats := []string{
+		"2006-01-02",          // ISO
+		"02/01/2006",          // DD/MM/YYYY
+		"02 01 2006",          // DD MM YYYY
+		"2006/01/02",          // YYYY/MM/DD
+		"02-01-2006",          // DD-MM-YYYY
+		"20060102",            // YYYYMMDD
+		"02 Jan 2006",         // English 3-letter month
+		"2 Jan 2006",          // English 3-letter month (1-2 digit day)
+		"02 January 2006",     // English full month
+		"2 January 2006",      // English full month (1-2 digit day)
+	}
+	for _, f := range formats {
+		if t, err := time.Parse(f, raw); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unparseable date: %s", raw)
+}
+
+// normalizeBilingualMonth corrige corrupciones donde la AI concatena
+// abreviaturas de mes en dos idiomas (ej: "14 AGOIAUG 2004" → "14 Aug 2004").
+// También traduce abreviaturas en español al inglés (ej: "ENE" → "Jan").
+func normalizeBilingualMonth(raw string) string {
+	// Spanish → English month abbreviation mapping
+	esToEn := map[string]string{
+		"ENE": "Jan", "FEBR": "Feb", "MAR": "Mar", "ABR": "Apr",
+		"MAY": "May", "JUN": "Jun", "JUL": "Jul", "AGO": "Aug",
+		"SEPT": "Sep", "SEP": "Sep", "OCT": "Oct", "NOV": "Nov",
+		"NOVI": "Nov", "DIC": "Dec",
+	}
+	monthAbbrs := map[string]bool{
+		"JAN": true, "FEB": true, "MAR": true, "APR": true,
+		"MAY": true, "JUN": true, "JUL": true, "AUG": true,
+		"SEP": true, "OCT": true, "NOV": true, "DEC": true,
+		"ENE": true, "FEBR": true, "ABR": true, "AGO": true,
+		"SEPT": true, "NOVI": true, "DIC": true,
+	}
+	parts := strings.Fields(raw)
+	for i, part := range parts {
+		upper := strings.ToUpper(part)
+		// Encontrar la abreviatura de mes más larga que aparece al inicio o final
+		lastMatch := ""
+		for abbr := range monthAbbrs {
+			if (strings.HasPrefix(upper, abbr) || strings.HasSuffix(upper, abbr)) && len(abbr) > len(lastMatch) {
+				lastMatch = abbr
+			}
+		}
+		if lastMatch != "" {
+			// Traducir español → inglés para que time.Parse lo entienda
+			if en, ok := esToEn[lastMatch]; ok {
+				parts[i] = en
+			} else {
+				parts[i] = lastMatch
+			}
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// mapGender mapea representaciones comunes de género a los valores del dominio.
+func mapGender(raw string) Gender {
+	switch strings.ToUpper(strings.TrimSpace(raw)) {
+	case "M", "MALE", "MASCULINO", "HOMBRE", "VARON", "VARÓN":
+		return GenderMale
+	case "F", "FEMALE", "FEMENINO", "MUJER":
+		return GenderFemale
+	case "X", "NB", "NON_BINARY", "NO_BINARIO", "NO_BINARIE":
+		return GenderNonBinary
+	default:
+		return GenderPreferNotToSay
+	}
 }

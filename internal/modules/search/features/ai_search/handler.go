@@ -245,8 +245,30 @@ func sseEventRaw(c *echo.Context, event, data string) {
 }
 
 // sseError sends an error SSE event to the client.
+// Uses sseEvent (which calls json.Marshal) to ensure valid, parseable JSON
+// even when the error message contains special characters like double-quotes
+// or backslashes. Fixes REQ-C1: SSE Error JSON Safety.
 func sseError(c *echo.Context, message string) {
-	sseEventRaw(c, "error", fmt.Sprintf(`{"error":"%s"}`, message))
+	sseEvent(c, "error", map[string]string{"error": message})
+}
+
+// isOffTopicMessage detects clearly non-travel questions so the backend
+// can redirect immediately without spending AI credits.
+func isOffTopicMessage(msg string) bool {
+	lower := strings.ToLower(msg)
+	patterns := []string{
+		"mundial", "fifa", "world cup",
+		"capital de", "presidente",
+		"receta", "cocinar",
+		"código", "programar", "javascript", "python", "java",
+		"clima hoy", "qué hora es", "cuántos días tiene",
+	}
+	for _, p := range patterns {
+		if strings.Contains(lower, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // =============================================================================
@@ -260,21 +282,70 @@ func sseError(c *echo.Context, message string) {
 func (h *Handler) handleToolCallingStream(c *echo.Context, cmd Command, userID string) {
 	ctx := c.Request().Context()
 
+	// Off-topic guard: if the user asks a clearly non-travel question,
+	// return a redirect message via SSE without calling the AI.
+	if isOffTopicMessage(cmd.Message) {
+		sseEvent(c, "chunk", map[string]string{"content": "Soy un asistente de viajes. ¿Querés que busque vuelos u hoteles para vos?"})
+		sseEventRaw(c, "done", fmt.Sprintf(`{"conversation_id":"","turn_count":0}`))
+		return
+	}
+
 	// Resolve location hint for system context injection
 	hint := h.usecase.resolveLocationHint(ctx, userID, cmd.ClientIP)
 
-	// Build initial chat messages
-	messages := make([]domain.ChatMessage, 0, 3)
-	if hint != "" {
-		messages = append(messages, domain.ChatMessage{
-			Role:    "system",
-			Content: hint,
-		})
+	// Load previous conversation history for multi-turn context.
+	var prevMessages []domain.ChatMessage
+	if cmd.ConversationID != "" {
+		prevConv, loadErr := h.convStore.Load(ctx, cmd.ConversationID)
+		if loadErr != nil {
+			slog.WarnContext(ctx, "handleToolCallingStream: failed to load conversation",
+				slog.String("conversation_id", cmd.ConversationID),
+				slog.String("error", loadErr.Error()),
+			)
+		}
+		if prevConv != nil {
+			for _, m := range prevConv.Messages {
+				prevMessages = append(prevMessages, domain.ChatMessage{
+					Role:       m.Role,
+					Content:    m.Content,
+					ToolCallID: m.ToolCallID,
+					ToolCalls:  m.ToolCalls,
+				})
+			}
+			slog.DebugContext(ctx, "handleToolCallingStream: loaded previous conversation",
+				slog.String("conversation_id", cmd.ConversationID),
+				slog.Int("prev_messages", len(prevMessages)),
+			)
+		}
 	}
 
-	// Inject medical/travel/document context for authenticated users
+	// System prompt for tool-calling path.
+	messages := []domain.ChatMessage{
+		{
+			Role: "system",
+			Content: "Sos un asistente de viajes que busca vuelos y hoteles usando herramientas. " +
+				"CRÍTICO: Los resultados de búsqueda (vuelos, hoteles, precios) se muestran AUTOMÁTICAMENTE en un panel separado. " +
+				"NO repitas los resultados en tu texto. Tu respuesta debe ser un RESUMEN BREVE (1-2 frases). " +
+				"NUNCA escribas tablas, listas de precios, ni detalles de vuelos/hoteles en el chat. " +
+				"Ejemplo de respuesta CORRECTA: 'Encontré 5 hoteles en Madrid. El mejor valorado es X. ¿Filtro por algo más?' " +
+				"Ejemplo de respuesta INCORRECTA: '| Hotel | Precio |...' — NUNCA hagas esto. " +
+				"NO uses emojis. NO menciones que estás revisando fechas o corrigiendo años. " +
+				"Recordá TODO lo que el usuario te dijo en mensajes anteriores (destino, fechas, presupuesto, origen). " +
+				"Si el usuario ya te dijo su ciudad de origen, NO preguntes '¿desde dónde?' de nuevo. " +
+				"Si ya te dijo el destino, NO preguntes '¿a dónde?' de nuevo. " +
+				"Si ya te dijo 'todo el mes' o '31 días', NO preguntes cuántos días.",
+		},
+	}
+
+	// Inject medical/travel/document context FIRST, so the location hint
+	// (injected after) takes priority. This prevents the AI from using
+	// the user's nationality as their current location when a GeoIP-based
+	// location hint is available.
 	includeMedicalAlerts := false
-	if userID != "" && h.userHealth != nil {
+	_, accessErr := c.Cookie("__Secure-access_token")
+	_, legacyErr := c.Cookie("access_token")
+	hasAuthCookie := accessErr == nil || legacyErr == nil
+	if hasAuthCookie && h.userHealth != nil {
 		if medicalMsg := h.buildMedicalContextMessage(ctx, userID); medicalMsg != "" {
 			messages = append(messages, domain.ChatMessage{
 				Role:    "system",
@@ -282,6 +353,41 @@ func (h *Handler) handleToolCallingStream(c *echo.Context, cmd Command, userID s
 			})
 		}
 		includeMedicalAlerts = true
+	}
+
+	// Location hint injected AFTER medical context so it overrides any
+	// nationality-based location assumptions. Based on /v1/environment (GeoIP).
+	if hint != "" {
+		messages = append(messages, domain.ChatMessage{
+			Role:    "system",
+			Content: hint,
+		})
+	}
+
+	// Style rules — these are part of the AI's system prompt in the adapter,
+	// NOT injected as separate system messages that could leak into the UI.
+
+	// Append previous conversation history so the AI remembers what was
+	// discussed in earlier turns. System messages are re-injected fresh above.
+	// Tool messages are required by DeepSeek's API contract (every assistant
+	// message with tool_calls MUST be followed by tool responses), but we
+	// replace the raw search result JSON with a compact summary to stay under
+	// token limits — the full JSON can be 10KB+ per message.
+	for _, m := range prevMessages {
+		if m.Role == "system" {
+			continue
+		}
+		if m.Role == "tool" {
+			// Send a minimal acknowledgement so DeepSeek doesn't reject the request.
+			// The AI already has the search results from the assistant's tool_calls.
+			messages = append(messages, domain.ChatMessage{
+				Role:       "tool",
+				Content:    `{"status":"completed"}`,
+				ToolCallID: m.ToolCallID,
+			})
+			continue
+		}
+		messages = append(messages, m)
 	}
 
 	messages = append(messages, domain.ChatMessage{
@@ -302,7 +408,7 @@ func (h *Handler) handleToolCallingStream(c *echo.Context, cmd Command, userID s
 
 	maxTurns := h.usecase.maxTurnsForUser(userID)
 
-	_, err := h.usecase.ExecuteChatStream(ctx, c.Response(), messages, tools, maxTurns, convCtx)
+	_, err := h.usecase.ExecuteChatStream(ctx, c.Response(), userID, cmd.ConversationID, messages, tools, maxTurns, convCtx)
 	if err != nil {
 		// Error already sent as SSE event by ExecuteChatStream.
 		slog.ErrorContext(ctx, "ai_search: ExecuteChatStream failed",
@@ -399,10 +505,11 @@ func (h *Handler) buildMedicalContextMessage(ctx context.Context, userID string)
 		}
 	}
 
-	// Nationality
+	// Nationality (IMPORTANT: this is the user's nationality/passport country,
+	// NOT their current location — do NOT confuse the two).
 	nationality := h.userHealth.GetNationality(ctx, userID)
 	if nationality != "" {
-		parts = append(parts, "NACIONALIDAD: "+nationality+".")
+		parts = append(parts, "NACIONALIDAD: "+nationality+" (esto es tu nacionalidad, NO tu ubicación actual).")
 	}
 
 	if len(parts) == 0 {

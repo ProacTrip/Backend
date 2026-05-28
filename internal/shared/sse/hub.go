@@ -3,9 +3,13 @@
 package sse
 
 import (
+	"context"
+	"encoding/json"
+	"log/slog"
 	"sync"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 )
 
 // Hub gestiona canales por usuario para la entrega de eventos en tiempo real.
@@ -30,6 +34,14 @@ const channelBufferSize = 64
 // Los consumidores lentos (buffer lleno) se descartan silenciosamente — un envío
 // no bloqueante con un caso default asegura que los publicadores nunca se bloqueen.
 func (h *Hub) Publish(userID uuid.UUID, event Event) {
+	h.publishLocal(userID, event)
+}
+
+// publishLocal envía el evento a los canales del usuario sin pasar por el bridge.
+// Es la ruta de entrega local (in-memory). La usa Publish (legacy local-only),
+// PublishAndBridge (local + cross-instance), y el bridge subscriber (solo local,
+// sin re-publicar a Pub/Sub como prevención de loop).
+func (h *Hub) publishLocal(userID uuid.UUID, event Event) {
 	h.mu.RLock()
 	userChannels := h.channels[userID]
 	h.mu.RUnlock()
@@ -41,9 +53,47 @@ func (h *Hub) Publish(userID uuid.UUID, event Event) {
 	for ch := range userChannels {
 		select {
 		case ch <- event:
+			if event.Type != "" {
+				slog.Debug("sse: event delivered", "user_id", userID, "type", event.Type)
+			}
 		default:
-			// Descarta el evento para consumidores lentos — no bloquea al publicador.
+			slog.Warn("sse: event dropped (channel full)", "user_id", userID, "type", event.Type)
 		}
+	}
+}
+
+// PublishAndBridge entrega el evento localmente Y lo publica en el canal
+// Dragonfly Pub/Sub {sse}:events para fan-out cross-instance.
+// Nil rdb → solo entrega local (no-op del bridge).
+// Error de PUBLISH → log WARN, la entrega local continúa.
+func (h *Hub) PublishAndBridge(ctx context.Context, rdb *redis.Client, userID uuid.UUID, event Event) {
+	h.publishLocal(userID, event)
+
+	if rdb == nil {
+		return
+	}
+
+	msg := BridgeMessage{
+		UserID:    userID.String(),
+		EventType: event.Type,
+		EventData: event.Data,
+	}
+	payload, err := json.Marshal(msg)
+	if err != nil {
+		slog.Warn("sse: failed to marshal bridge message",
+			slog.String("user_id", userID.String()),
+			slog.String("event_type", event.Type),
+			slog.String("error", err.Error()),
+		)
+		return
+	}
+
+	if err := rdb.Publish(ctx, "{sse}:events", payload).Err(); err != nil {
+		slog.Warn("sse: bridge publish failed",
+			slog.String("user_id", userID.String()),
+			slog.String("event_type", event.Type),
+			slog.String("error", err.Error()),
+		)
 	}
 }
 

@@ -39,6 +39,12 @@ func NewToolCallStreamer(adapter *Adapter) domain.ToolCallStreamer {
 // ChatWithTools converts domain types to deepseek internal types, calls the
 // adapter's streaming ChatWithTools, and converts the result back to domain types.
 func (s *ToolCallStreamerAdapter) ChatWithTools(ctx context.Context, messages []domain.ChatMessage, tools []map[string]interface{}) (*domain.ToolCallStreamResult, error) {
+	return s.ChatWithToolsStream(ctx, messages, tools, nil)
+}
+
+// ChatWithToolsStream calls the adapter's ChatWithToolsStream with an onChunk
+// callback for real-time token streaming.
+func (s *ToolCallStreamerAdapter) ChatWithToolsStream(ctx context.Context, messages []domain.ChatMessage, tools []map[string]interface{}, onChunk func(text string)) (*domain.ToolCallStreamResult, error) {
 	// Convert domain.ChatMessage → chatMessage
 	chatMsgs, err := toChatMessages(messages)
 	if err != nil {
@@ -51,8 +57,8 @@ func (s *ToolCallStreamerAdapter) ChatWithTools(ctx context.Context, messages []
 		return nil, fmt.Errorf("convert tools: %w", err)
 	}
 
-	// Call the adapter
-	result, err := s.adapter.ChatWithTools(ctx, chatMsgs, toolDefs)
+	// Call the adapter with streaming callback
+	result, err := s.adapter.ChatWithToolsStream(ctx, chatMsgs, toolDefs, onChunk)
 	if err != nil {
 		return nil, err
 	}

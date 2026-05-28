@@ -30,6 +30,7 @@ type ExtractedData struct {
 	ExpiryDate     *string `json:"expiry_date,omitzero"`
 	IssuingCountry *string `json:"issuing_country,omitzero"`
 	Nationality    *string `json:"nationality,omitzero"`
+	Gender         *string `json:"gender,omitzero"` // M, F, X — extraído de documentos de identidad
 
 	// Campos médicos (extraídos de certificados, recetas, etc.)
 	MedicalFields map[string]string `json:"medical_fields,omitzero"`
@@ -39,16 +40,17 @@ type ExtractedData struct {
 	RawResponse   string  `json:"raw_response,omitzero"`
 }
 
-// IsTravelDocument retorna true si el documento extraído es un documento de viaje reconocido.
+// IsTravelDocument retorna true si el documento extraído es de viaje reconocido.
 func (e *ExtractedData) IsTravelDocument() bool {
-	if e.DocumentType == "" {
-		return false
-	}
 	switch e.DocumentType {
-	case "passport", "national_id", "drivers_license", "visa",
-		"travel_insurance", "vaccination_cert", "boarding_pass", "receipt":
+	case "passport", "national_id", "drivers_license", "visa", "vaccination_cert", "travel_insurance":
 		return true
 	default:
 		return false
 	}
+}
+
+// IsIdentityDocument retorna true si es documento de identidad (pasaporte).
+func (e *ExtractedData) IsIdentityDocument() bool {
+	return e.DocumentType == "passport"
 }

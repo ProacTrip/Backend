@@ -28,7 +28,8 @@ import (
 
 // ConversationTTL is the TTL for conversation Hash fields in Dragonfly.
 // Each field expires independently via HEXPIRE.
-const ConversationTTL = 10 * time.Minute
+// Must match ai_search.conversationTTL (5 minutes) for consistency (REQ-W3).
+const ConversationTTL = 5 * time.Minute
 
 // =============================================================================
 // Errors

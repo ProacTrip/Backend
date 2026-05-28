@@ -67,6 +67,7 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*GetProfileRespons
 		Nationality: profile.Nationality,
 		Phone:       profile.Phone,
 		Bio:       profile.Bio,
+		RoleName:    profile.Role,
 		AvatarURL: profile.AvatarURL,
 		Location: LocationResponse{
 			Currency: profile.CurrencyCode,

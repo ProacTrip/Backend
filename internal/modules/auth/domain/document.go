@@ -16,7 +16,7 @@ type DocumentRow struct {
 	VerificationStatus string
 	OCRStatus          string
 	DocumentTypeID     uuid.UUID
-	DocumentTypeCode   string
+	DocumentTypeCode   *string
 	FileName           string
 	FileSize           *int
 	MimeType           string
@@ -32,7 +32,7 @@ type DocumentRow struct {
 type DocumentSummary struct {
 	ID                 uuid.UUID  `json:"id"`
 	FileName           string     `json:"file_name"`
-	DocumentType       string     `json:"document_type"`
+	DocumentType       *string    `json:"document_type,omitzero"`
 	OCRStatus          string     `json:"ocr_status"`
 	OCRConfidence      *float64   `json:"ocr_confidence,omitzero"`
 	VerificationStatus string     `json:"verification_status"`

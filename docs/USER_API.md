@@ -123,9 +123,9 @@ Procesamiento asíncrono con workers conectados vía Dragonfly Streams:
 ┌──────────────┐               ┌────────────────────┐
 │ PostgreSQL   │               │ SSE Event Hub      │
 │               │               │                    │
-│ documents     │               │ document.updated   │
-│ extracted_data│               │ document.completed │
-│ status        │               │ document.failed    │
+│ documents     │               │ doc.processing     │
+│ extracted_data│               │ doc.completed      │
+│ status        │               │ doc.failed         │
 └──────────────┘               └────────────────────┘
 
 
@@ -351,8 +351,11 @@ GET /v1/realtime/events
 |--------|--------|
 | `user.avatar.updated` | Avatar procesado y activado por el worker |
 | `user.profile.updated` | Perfil modificado (por el usuario o por sistema) |
-| `document.processing.completed` | Documento procesado exitosamente por OCR |
-| `document.verification.updated` | Admin cambió el estado de verificación |
+| `doc.completed` | Documento procesado exitosamente por OCR |
+| `doc.verification.updated` | Admin cambió el estado de verificación |
+| `doc.rejected` | Documento rechazado por validación |
+| `doc.failed` | Documento con fallo irrecuperable |
+| `doc.processing` | Documento entró al pipeline de procesamiento |
 | `medical.conflict.created` | OCR detectó un conflicto médico |
 | `medical.conflict.resolved` | Usuario resolvió un conflicto médico |
 
@@ -1498,15 +1501,12 @@ curl -X GET {base_url}/documents/019d5439-cb43-716d-90b5-51dcbe980908 \
   "ocr_status": "completed",
   "ocr_confidence": 0.97,
   "extracted_data": {
-    "first_name": "Aurelio",
-    "last_name": "García",
+    "full_name": "Aurelio García",
     "document_number": "A12345678",
     "issuing_country": "PER",
     "nationality": "ESPANOLA",
     "date_of_birth": "1990-05-15",
-    "gender": "M",
-    "valid_from": "2020-01-15",
-    "valid_until": "2030-01-14"
+    "expiry_date": "2030-01-14"
   },
   "failure_reason": null,
   "verification_status": "verified",
@@ -1521,7 +1521,7 @@ curl -X GET {base_url}/documents/019d5439-cb43-716d-90b5-51dcbe980908 \
 > - `mime_type`: el MIME enviado por el frontend.
 > - `detected_mime_type`: el MIME detectado por el backend tras validación.
 > - `ocr_status`: `queued`, `processing`, `completed`, `rejected`, `failed`.
-> - `verification_status`: `pending`, `verified`, `rejected`, `manual_review`, `suspicious`.
+> - `verification_status`: `unverified`, `verified`, `rejected`, `manual_review`, `suspicious`.
 
 **Response Headers:**
 
@@ -1587,7 +1587,7 @@ curl -X GET {base_url}/documents/019d5439-cb43-716d-90b5-51dcbe980908/download-u
 | Código | HTTP | Problem Type | Cuándo |
 |--------|------|-------------|--------|
 | `DOCUMENT_NOT_FOUND` | 404 | `document-not-found` | No existe el documento o no pertenece al usuario |
-| `DOCUMENT_NOT_READY` | 400 | `document-not-ready` | `ocr_status` no es `completed` ni `rejected` y es `pending`|
+| `DOCUMENT_NOT_READY` | 400 | `document-not-ready` | `ocr_status` no es `completed` ni `rejected` (está en queued, processing o failed) |
 | `TOKEN_INVALID` | 401 | `unauthorized` | Cookie inválida o expirada |
 | `INTERNAL_ERROR` | 500 | `internal-error` | Error inesperado |
 

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -43,9 +44,11 @@ func NewUserRepository(db *pgxpool.Pool) *UserRepository {
 // =============================================================================
 
 // UpsertProfile implementa el patrón Upsert para perfiles de usuario.
-// IMPORTANTE: Usa user_id como clave de conflicto (no id)
-// La migración tiene: id (PK auto-generado) y user_id (UNIQUE, FK al auth)
+// Usa user_id como clave de conflicto primaria. Si hay conflicto de email
+// (uq_profiles_email) porque otro user_id ya tiene ese email, se reasigna
+// el perfil al nuevo user_id. Esto cubre re-registros OAuth con el mismo email.
 func (r *UserRepository) UpsertProfile(ctx context.Context, profile *domain.UserProfile) error {
+	// Try the standard upsert first (ON CONFLICT user_id)
 	query := `
 		INSERT INTO user_profiles (
 			user_id, email, first_name, last_name, phone,
@@ -83,10 +86,45 @@ func (r *UserRepository) UpsertProfile(ctx context.Context, profile *domain.User
 	)
 
 	if err != nil {
-		return fmt.Errorf("upsert profile: %w", err)
+		// If the email already belongs to another user_id (uq_profiles_email),
+		// reassign the profile to the new user_id. This handles OAuth re-registration
+		// where the same email gets a new user_id.
+		if isUniqueViolation(err, "uq_profiles_email") {
+			reassignQuery := `
+				INSERT INTO user_profiles (
+					user_id, email, first_name, last_name, phone,
+					avatar_url, bio,
+					language_code, currency_code, role, status, created_at, updated_at
+				) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+				ON CONFLICT (email) DO UPDATE SET
+					user_id = EXCLUDED.user_id,
+					first_name = COALESCE(EXCLUDED.first_name, user_profiles.first_name),
+					last_name = COALESCE(EXCLUDED.last_name, user_profiles.last_name),
+					avatar_url = COALESCE(EXCLUDED.avatar_url, user_profiles.avatar_url),
+					updated_at = EXCLUDED.updated_at
+			`
+			_, err = r.db.Exec(ctx, reassignQuery,
+				profile.UserID, profile.Email, profile.FirstName,
+				profile.LastName, profile.Phone, profile.AvatarURL,
+				profile.Bio, profile.LanguageCode, profile.CurrencyCode,
+				profile.Role, profile.Status, profile.CreatedAt, profile.UpdatedAt,
+			)
+		}
+		if err != nil {
+			return fmt.Errorf("upsert profile: %w", err)
+		}
 	}
 
 	return nil
+}
+
+// isUniqueViolation checks if a PostgreSQL error is a unique constraint violation.
+func isUniqueViolation(err error, constraintName string) bool {
+	var pgErr interface{ SQLState() string }
+	if errors.As(err, &pgErr) {
+		return pgErr.SQLState() == "23505" && strings.Contains(err.Error(), constraintName)
+	}
+	return false
 }
 
 // GetByUserID recupera un perfil por user_id
@@ -96,6 +134,7 @@ func (r *UserRepository) GetByUserID(ctx context.Context, userID uuid.UUID) (*do
 		       up.first_name, up.last_name, up.date_of_birth, up.gender, up.nationality,
 		       up.phone, up.avatar_url, up.bio,
 		       up.language_code, up.currency_code, up.role, up.status,
+		       up.ocr_populated,
 		       up.created_at, up.updated_at
 		FROM user_profiles up
 		WHERE up.user_id = $1
@@ -121,6 +160,7 @@ func (r *UserRepository) GetByUserID(ctx context.Context, userID uuid.UUID) (*do
 		&p.CurrencyCode,
 		&p.Role,
 		&p.Status,
+		&p.OcrPopulated,
 		&p.CreatedAt,
 		&p.UpdatedAt,
 	)
@@ -145,6 +185,7 @@ func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Use
 		       up.first_name, up.last_name, up.date_of_birth, up.gender, up.nationality,
 		       up.phone, up.avatar_url, up.bio,
 		       up.language_code, up.currency_code, up.role, up.status,
+		       up.ocr_populated,
 		       up.created_at, up.updated_at
 		FROM user_profiles up
 		WHERE up.id = $1
@@ -170,6 +211,7 @@ func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Use
 		&p.CurrencyCode,
 		&p.Role,
 		&p.Status,
+		&p.OcrPopulated,
 		&p.CreatedAt,
 		&p.UpdatedAt,
 	)
@@ -202,15 +244,16 @@ func (r *UserRepository) Create(ctx context.Context, profile *domain.UserProfile
 func (r *UserRepository) Update(ctx context.Context, profile *domain.UserProfile) error {
 	query := `
 		UPDATE user_profiles SET
-			first_name     = COALESCE(NULLIF($2, ''), first_name),
-			last_name      = COALESCE(NULLIF($3, ''), last_name),
+			first_name     = COALESCE($2, first_name),
+			last_name      = COALESCE($3, last_name),
 			date_of_birth  = COALESCE($4, date_of_birth),
 			gender         = COALESCE($5, gender),
 			nationality    = COALESCE($6, nationality),
 			phone          = COALESCE($7, phone),
 			bio            = COALESCE($8, bio),
-			language_code  = COALESCE(NULLIF($9, ''), language_code),
-			currency_code  = COALESCE(NULLIF($10, ''), currency_code),
+			language_code  = COALESCE($9, language_code),
+			currency_code  = COALESCE($10, currency_code),
+			ocr_populated  = $11,
 			updated_at     = NOW()
 		WHERE user_id = $1
 	`
@@ -226,6 +269,7 @@ func (r *UserRepository) Update(ctx context.Context, profile *domain.UserProfile
 		profile.Bio,
 		profile.LanguageCode,
 		profile.CurrencyCode,
+		profile.OcrPopulated,
 	)
 	if err != nil {
 		return fmt.Errorf("update profile: %w", err)
@@ -240,8 +284,8 @@ func (r *UserRepository) Update(ctx context.Context, profile *domain.UserProfile
 func (r *UserRepository) UpdateLocale(ctx context.Context, userID uuid.UUID, language, currency string) error {
 	query := `
 		UPDATE user_profiles SET
-			language_code    = COALESCE(NULLIF($2, ''), language_code),
-			currency_code    = COALESCE(NULLIF($3, ''), currency_code),
+			language_code    = COALESCE($2, language_code),
+			currency_code    = COALESCE($3, currency_code),
 			updated_at       = NOW()
 		WHERE user_id = $1
 	`

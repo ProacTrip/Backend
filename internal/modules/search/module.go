@@ -524,21 +524,38 @@ func startConversationExpiryListener(rdb *redis.Client) {
 				continue
 			}
 
-			// We need a userID to publish — but the keyspace notification only
-			// gives us the convID. UserID is embedded in the conversation JSON,
-			// which is already deleted by this point. The SSE hub requires a
-			// userID (uuid.UUID) to route the event to the correct subscriber.
+			// Resolve userID from the reverse-mapping key conv:owner:{convID}.
+			ownerKey := "conv:owner:" + convID
+			userIDStr, err := rdb.Get(ctx, ownerKey).Result()
+			if err != nil {
+				if err != redis.Nil {
+					slog.Debug("conversation expiry listener: failed to resolve owner",
+						slog.String("conversation_id", convID),
+						slog.String("error", err.Error()),
+					)
+				}
+				// Key not found (anonymous or expired concurrently) — nothing to do.
+				continue
+			}
 
-			// Strategy: we cannot reliably determine the userID from an expired
-			// key. The frontend handles this by polling GET /conversations/{id}
-			// on reconnect and detecting 404 as "expired". The SSE event is a
-			// best-effort optimization — if the user is connected, the event
-			// fires; if not, the polling fallback handles it.
+			ownerID, err := uuid.Parse(userIDStr)
+			if err != nil {
+				slog.Debug("conversation expiry listener: invalid owner ID",
+					slog.String("conversation_id", convID),
+					slog.String("owner_id", userIDStr),
+					slog.String("error", err.Error()),
+				)
+				continue
+			}
 
-			// For now, log the expiry. A future optimization could store
-			// a reverse-mapping key (conv:owner:{convID}) to resolve the userID.
-			slog.Debug("conversation expiry listener: SSE publish skipped (no userID resolver yet)",
+			hub.Publish(ownerID, sse.Event{
+				Type: "search.conversation.expired",
+				Data: map[string]string{"conversation_id": convID},
+			})
+
+			slog.Debug("conversation expiry listener: SSE event published",
 				slog.String("conversation_id", convID),
+				slog.String("user_id", userIDStr),
 			)
 		}
 

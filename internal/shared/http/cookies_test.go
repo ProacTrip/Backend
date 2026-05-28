@@ -258,12 +258,12 @@ func TestClearAuthCookies_MaxAgeCero_ClearSiteDataHeader(t *testing.T) {
 		t.Fatal("cookie __Secure-refresh_token no encontrada en clear")
 	}
 
-	// MaxAge = 0 (eliminar cookie)
-	if accessCookie.MaxAge != 0 {
-		t.Errorf("clear access cookie MaxAge = %d, want 0", accessCookie.MaxAge)
+	// MaxAge = -1 → generates Max-Age=0 (delete cookie immediately)
+	if accessCookie.MaxAge != -1 {
+		t.Errorf("clear access cookie MaxAge = %d, want -1", accessCookie.MaxAge)
 	}
-	if refreshCookie.MaxAge != 0 {
-		t.Errorf("clear refresh cookie MaxAge = %d, want 0", refreshCookie.MaxAge)
+	if refreshCookie.MaxAge != -1 {
+		t.Errorf("clear refresh cookie MaxAge = %d, want -1", refreshCookie.MaxAge)
 	}
 
 	// Value vacío
@@ -308,8 +308,8 @@ func TestClearAuthCookies_SinDominio_DomainNoPresente(t *testing.T) {
 	if accessCookie.Domain != "" {
 		t.Errorf("clear cookie sin dominio no debe tener Domain, pero tiene %q", accessCookie.Domain)
 	}
-	if accessCookie.MaxAge != 0 {
-		t.Errorf("clear cookie MaxAge = %d, want 0", accessCookie.MaxAge)
+	if accessCookie.MaxAge != -1 {
+		t.Errorf("clear cookie MaxAge = %d, want -1", accessCookie.MaxAge)
 	}
 }
 
@@ -341,8 +341,8 @@ func TestClearAuthCookiesDev_NombresCorrectos_MaxAgeCero(t *testing.T) {
 	if !ok {
 		t.Error("ClearAuthCookiesDev debe limpiar cookie 'access_token'")
 	} else {
-		if accessCookie.MaxAge != 0 {
-			t.Errorf("dev clear access_token MaxAge = %d, want 0", accessCookie.MaxAge)
+		if accessCookie.MaxAge != -1 {
+			t.Errorf("dev clear access_token MaxAge = %d, want -1 (generates Max-Age=0)", accessCookie.MaxAge)
 		}
 		if accessCookie.Value != "" {
 			t.Errorf("dev clear access_token Value = %q, want empty", accessCookie.Value)
@@ -356,8 +356,8 @@ func TestClearAuthCookiesDev_NombresCorrectos_MaxAgeCero(t *testing.T) {
 	if !ok {
 		t.Error("ClearAuthCookiesDev debe limpiar cookie 'refresh_token'")
 	} else {
-		if refreshCookie.MaxAge != 0 {
-			t.Errorf("dev clear refresh_token MaxAge = %d, want 0", refreshCookie.MaxAge)
+		if refreshCookie.MaxAge != -1 {
+			t.Errorf("dev clear refresh_token MaxAge = %d, want -1 (generates Max-Age=0)", refreshCookie.MaxAge)
 		}
 		if refreshCookie.Value != "" {
 			t.Errorf("dev clear refresh_token Value = %q, want empty", refreshCookie.Value)

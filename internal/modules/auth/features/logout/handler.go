@@ -19,38 +19,40 @@ type Handler struct {
 	usecase      *UseCase
 	isProduction bool
 	cookieDomain string
+	frontendURL  string
 }
 
-func NewHandler(usecase *UseCase, isProduction bool, cookieDomain string) *Handler {
+func NewHandler(usecase *UseCase, isProduction bool, cookieDomain, frontendURL string) *Handler {
 	return &Handler{
 		usecase:      usecase,
 		isProduction: isProduction,
 		cookieDomain: cookieDomain,
+		frontendURL:  frontendURL,
 	}
 }
 
 func (h *Handler) Handle(c *echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "no-store, private")
 
-	tokenStr := h.extractToken(c)
-
-	cmd := Command{Token: tokenStr}
-	if err := cmd.Validate(); err != nil {
-		return httperr.MapError(c, err)
-	}
-
-	_, err := h.usecase.Execute(c.Request().Context(), cmd)
-	if err != nil {
-		return httperr.MapError(c, err)
-	}
-
+	// Always clear cookies first — even if the token is invalid or missing.
 	if h.isProduction {
 		httperr.ClearAuthCookies(c, h.cookieDomain)
 	} else {
 		httperr.ClearAuthCookiesDev(c)
 	}
 
-	return c.JSON(http.StatusOK, map[string]string{"message": "Sesión cerrada exitosamente."})
+	tokenStr := h.extractToken(c)
+
+	// Best-effort: if we have a valid token, invalidate the session.
+	if tokenStr != "" {
+		cmd := Command{Token: tokenStr}
+		if err := cmd.Validate(); err == nil {
+			h.usecase.Execute(c.Request().Context(), cmd)
+		}
+	}
+
+	// Redirect to frontend home — browser processes Set-Cookie + follows redirect
+	return c.Redirect(http.StatusFound, h.frontendURL+"/")
 }
 
 func (h *Handler) extractToken(c *echo.Context) string {

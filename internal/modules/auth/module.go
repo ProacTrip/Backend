@@ -25,6 +25,7 @@ import (
 	userdetail "github.com/ProacTrip/Backend/internal/modules/auth/features/dashboard/user_detail"
 	"github.com/ProacTrip/Backend/internal/modules/auth/features/login"
 	"github.com/ProacTrip/Backend/internal/modules/auth/features/logout"
+	"github.com/ProacTrip/Backend/internal/modules/auth/features/me"
 	oauthorize "github.com/ProacTrip/Backend/internal/modules/auth/features/oauth/authorize"
 	oacallback "github.com/ProacTrip/Backend/internal/modules/auth/features/oauth/callback"
 	"github.com/ProacTrip/Backend/internal/modules/auth/features/register"
@@ -63,6 +64,9 @@ type Module struct {
 	LoginHandler       *login.Handler
 	Logout             *logout.UseCase
 	LogoutHandler      *logout.Handler
+
+	// Identity endpoint — returns user info from PASETO claims (all roles)
+	MeHandler *me.Handler
 
 	// OAuth Features
 	OAuthAuthorize        *oauthorize.UseCase
@@ -204,7 +208,8 @@ func NewModule(cfg Config) (*Module, error) {
 		TokenSvc:    m.TokenService,
 		DragonflyDB: cfg.DragonflyClient,
 	})
-	m.LogoutHandler = logout.NewHandler(m.Logout, cfg.IsProduction, cfg.CookieDomain)
+	m.LogoutHandler = logout.NewHandler(m.Logout, cfg.IsProduction, cfg.CookieDomain, cfg.FrontendURL)
+	m.MeHandler = me.NewHandler()
 
 	// ========== OAUTH FEATURES ==========
 
@@ -328,6 +333,14 @@ func (m *Module) WireResendVerification(notifier resend_verification.Notificatio
 	})
 
 	m.ResendVerificationHandler = resend_verification.NewHandler(uc)
+}
+
+// WireOAuthProfileCreator sets the synchronous profile creator on the OAuth
+// callback usecase. Must be called AFTER the user module is initialized.
+// Without this, profiles are only created asynchronously via the consumer,
+// causing PROFILE_NOT_FOUND on /perfil after OAuth login.
+func (m *Module) WireOAuthProfileCreator(pc oacallback.ProfileCreator) {
+	m.OAuthCallback.SetProfileCreator(pc)
 }
 
 // GeneratePasetoKey genera una clave PASETO aleatoria de 32 bytes

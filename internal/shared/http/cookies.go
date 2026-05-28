@@ -101,13 +101,15 @@ func SetAuthCookiesDev(c *echo.Context, accessToken, refreshToken string) error 
 }
 
 // ClearAuthCookies limpia las cookies de autenticación (logout)
-// Envía Clear-Site-Data header + cookies con Max-Age=0
+// Envía Clear-Site-Data header + cookies con Max-Age=0.
+// En Go, http.Cookie{MaxAge: -1} genera "Max-Age=0" en el header HTTP.
+// MaxAge: 0 omite el atributo (cookie de sesión, no se borra).
 func ClearAuthCookies(c *echo.Context, cookieDomain string) error {
 	accessCookie := &http.Cookie{
 		Name:     accessCookieName,
 		Value:    "",
 		Path:     cookiePath,
-		MaxAge:   0,
+		MaxAge:   -1, // genera Max-Age=0 → borra inmediatamente
 		HttpOnly: true,
 		Secure:   true,
 		SameSite: cookieSameSite,
@@ -120,7 +122,7 @@ func ClearAuthCookies(c *echo.Context, cookieDomain string) error {
 		Name:     refreshCookieName,
 		Value:    "",
 		Path:     cookiePath,
-		MaxAge:   0,
+		MaxAge:   -1, // genera Max-Age=0 → borra inmediatamente
 		HttpOnly: true,
 		Secure:   true,
 		SameSite: cookieSameSite,
@@ -137,14 +139,14 @@ func ClearAuthCookies(c *echo.Context, cookieDomain string) error {
 }
 
 // ClearAuthCookiesDev is the dev-only variant clearing access_token/refresh_token
-// via c.SetCookie() with MaxAge=0, HttpOnly, SameSite=Lax. No Secure, no Clear-Site-Data header.
-// Matches SetAuthCookiesDev pattern.
+// via c.SetCookie() with MaxAge=-1 (generates Max-Age=0), HttpOnly, SameSite=Lax.
+// No Secure, no Clear-Site-Data header. Matches SetAuthCookiesDev pattern.
 func ClearAuthCookiesDev(c *echo.Context) error {
 	accessCookie := &http.Cookie{
 		Name:     "access_token",
 		Value:    "",
 		Path:     cookiePath,
-		MaxAge:   0,
+		MaxAge:   -1, // genera Max-Age=0 → borra inmediatamente
 		HttpOnly: true,
 		SameSite: cookieSameSite,
 	}
@@ -153,7 +155,7 @@ func ClearAuthCookiesDev(c *echo.Context) error {
 		Name:     "refresh_token",
 		Value:    "",
 		Path:     cookiePath,
-		MaxAge:   0,
+		MaxAge:   -1, // genera Max-Age=0 → borra inmediatamente
 		HttpOnly: true,
 		SameSite: cookieSameSite,
 	}

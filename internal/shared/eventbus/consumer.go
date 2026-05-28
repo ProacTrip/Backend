@@ -15,9 +15,10 @@ import (
 
 // EnsureConsumerGroup creates a Redis Consumer Group if it does not already exist.
 // It is idempotent — returns nil if the group already exists (BUSYGROUP).
-// The group starts reading from "0" (earliest) for first-time consumers.
+// The group starts reading from "$" (latest) for first-time consumers, preventing
+// replay of historical stream messages on initial consumer group creation.
 func EnsureConsumerGroup(ctx context.Context, rdb *redis.Client, stream, group string) error {
-	err := rdb.XGroupCreateMkStream(ctx, stream, group, "0").Err()
+	err := rdb.XGroupCreateMkStream(ctx, stream, group, "$").Err()
 	if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
 		return err
 	}

@@ -1,12 +1,20 @@
 // Hub singleton para el paquete de tiempo real SSE.
 package sse
 
+import (
+	"context"
+
+	"github.com/redis/go-redis/v9"
+)
+
 var defaultHub *Hub
 
-// Init crea y almacena el Hub singleton.
+// Init crea y almacena el Hub singleton y arranca el bridge cross-instance.
 // Debe llamarse durante el arranque (bootstrap) antes del registro de rutas.
-func Init() {
+// rdb puede ser nil: el bridge se convierte en no-op (solo entrega local).
+func Init(ctx context.Context, rdb *redis.Client) {
 	defaultHub = NewHub()
+	NewBridge(defaultHub, rdb).Start(ctx)
 }
 
 // GetHub devuelve el Hub singleton.

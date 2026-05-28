@@ -81,7 +81,7 @@ func (m *avatarMockRepo) UpdateAvatar(ctx context.Context, userID uuid.UUID, ava
 // =============================================================================
 
 func TestAvatarValidator_ProcesaAvatarCorrectamente(t *testing.T) {
-	sse.Init()
+	sse.Init(context.Background(), nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

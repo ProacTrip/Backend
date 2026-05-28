@@ -34,6 +34,12 @@ type EventPublisher interface {
 	Publish(ctx context.Context, stream string, payload map[string]any) (string, error)
 }
 
+// ProfileCreator creates a user profile synchronously after OAuth registration.
+// Implemented by the user module's upsert_profile usecase.
+type ProfileCreator interface {
+	CreateProfile(ctx context.Context, userID uuid.UUID, email, firstName, avatarURL string) error
+}
+
 // OAuthProviderSelector resuelve el proveedor OAuth por código.
 type OAuthProviderSelector interface {
 	GetProvider(providerCode string) (domain.OAuthProvider, error)
@@ -48,6 +54,7 @@ type UseCase struct {
 	tokenSvc           TokenService
 	dragonfly          *redis.Client
 	eventPublisher     EventPublisher
+	profileCreator     ProfileCreator
 }
 
 type UseCaseDeps struct {
@@ -58,6 +65,7 @@ type UseCaseDeps struct {
 	TokenSvc       TokenService
 	Dragonfly      *redis.Client
 	EventPublisher EventPublisher
+	ProfileCreator ProfileCreator
 }
 
 func NewUseCase(deps UseCaseDeps) *UseCase {
@@ -69,7 +77,14 @@ func NewUseCase(deps UseCaseDeps) *UseCase {
 		tokenSvc:       deps.TokenSvc,
 		dragonfly:      deps.Dragonfly,
 		eventPublisher: deps.EventPublisher,
+		profileCreator: deps.ProfileCreator,
 	}
+}
+
+// SetProfileCreator allows wiring the profile creator after construction,
+// when the user module initializes after the auth module.
+func (uc *UseCase) SetProfileCreator(pc ProfileCreator) {
+	uc.profileCreator = pc
 }
 
 // Execute procesa el callback OAuth completo.
@@ -257,6 +272,19 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) (*Response, error) 
 			slog.ErrorContext(ctx, "failed to publish auth user event",
 				slog.String("event", "auth.user.registered"),
 				slog.Any("error", err),
+			)
+		}
+	}
+
+	// 8.5. Create profile synchronously so /perfil works immediately.
+	// The async consumer (auth.user.registered) also does this, but there's
+	// a race condition if the user navigates to /perfil before the consumer
+	// processes the event. Synchronous creation guarantees the profile exists.
+	if uc.profileCreator != nil {
+		if err := uc.profileCreator.CreateProfile(ctx, user.ID, user.Email, userInfo.GivenName, userInfo.Picture); err != nil {
+			slog.WarnContext(ctx, "oauth callback: profile creation failed (non-fatal)",
+				slog.String("user_id", user.ID.String()),
+				slog.String("error", err.Error()),
 			)
 		}
 	}

@@ -196,7 +196,7 @@ func createOCRWorker(t *testing.T, rdb *redis.Client, r2 *ocrMockR2, ocs *ocrMoc
 	docRepo *ocrMockDocRepo, medRepo *ocrMockMedicalRepo, pendRepo *ocrMockPendingRepo,
 	enc *ocrMockEncryption) *pipeline.OCRWorker {
 
-	return pipeline.NewOCRWorker(rdb, r2, ocs, docRepo, medRepo, pendRepo, enc)
+	return pipeline.NewOCRWorker(rdb, r2, ocs, docRepo, medRepo, pendRepo, enc, nil)
 }
 
 // =============================================================================
@@ -204,7 +204,7 @@ func createOCRWorker(t *testing.T, rdb *redis.Client, r2 *ocrMockR2, ocs *ocrMoc
 // =============================================================================
 
 func TestOCRWorker_ProcesaPasaporte(t *testing.T) {
-	sse.Init()
+	sse.Init(context.Background(), nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -291,7 +291,7 @@ func TestOCRWorker_ProcesaPasaporte(t *testing.T) {
 // =============================================================================
 
 func TestOCRWorker_DocumentoNoViaje_Rechazado(t *testing.T) {
-	sse.Init()
+	sse.Init(context.Background(), nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -363,7 +363,7 @@ func TestOCRWorker_DocumentoNoViaje_Rechazado(t *testing.T) {
 // =============================================================================
 
 func TestOCRWorker_AplicaDatosMedicos_EmergencyContactInsurance(t *testing.T) {
-	sse.Init()
+	sse.Init(context.Background(), nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -472,7 +472,7 @@ func TestOCRWorker_AplicaDatosMedicos_EmergencyContactInsurance(t *testing.T) {
 // =============================================================================
 
 func TestOCRWorker_ConflictoMedico_CreaPendingUpdate(t *testing.T) {
-	sse.Init()
+	sse.Init(context.Background(), nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -617,7 +617,7 @@ func TestOCRWorker_FaltaDocumentID_RechazaInmediato(t *testing.T) {
 // =============================================================================
 
 func TestOCRWorker_FalloExtraccion_DocumentoFailed(t *testing.T) {
-	sse.Init()
+	sse.Init(context.Background(), nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

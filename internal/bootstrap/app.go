@@ -30,6 +30,7 @@ import (
 	userModule "github.com/ProacTrip/Backend/internal/modules/user"
 	userStorage "github.com/ProacTrip/Backend/internal/modules/user/adapters/storage"
 	sendverification "github.com/ProacTrip/Backend/internal/modules/notification/features/send_verification_email"
+	"github.com/ProacTrip/Backend/internal/modules/user/features/upsert_profile"
 	"github.com/ProacTrip/Backend/internal/shared/cache"
 	contextutil "github.com/ProacTrip/Backend/internal/shared/context"
 	"github.com/ProacTrip/Backend/internal/shared/database"
@@ -68,6 +69,17 @@ func (a *resendNotificationAdapter) SendVerificationEmail(ctx context.Context, u
 	}
 	err := a.uc.Execute(ctx, cmd)
 	return err
+}
+
+// oauthProfileAdapter adapts the user module's upsert_profile usecase to the
+// oauth/callback.ProfileCreator interface. Defined here (composition root) to
+// avoid cross-module imports from auth → user/features.
+type oauthProfileAdapter struct {
+	uc *upsert_profile.UseCase
+}
+
+func (a *oauthProfileAdapter) CreateProfile(ctx context.Context, userID uuid.UUID, email, firstName, avatarURL string) error {
+	return a.uc.Execute(ctx, userID, email, firstName, avatarURL)
 }
 
 type App struct {
@@ -241,7 +253,7 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	eventBus := eventbus.NewEventBus(rdb)
 
 	// SSE Hub (initialize before modules so worker pipelines can publish)
-	sse.Init()
+	sse.Init(appCtx, rdb)
 
 	// Inicializar módulos
 
@@ -348,6 +360,10 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	// El adapter (resendNotificationAdapter) está definido a nivel paquete en este archivo
 	// (composition root) para evitar imports cross-module desde auth → notification/features.
 	authMod.WireResendVerification(&resendNotificationAdapter{uc: notifMod.SendVerificationEmailUseCase})
+
+	// Wire OAuth profile creator — creates profile synchronously after OAuth login
+	// so /perfil works immediately without waiting for the async consumer.
+	authMod.WireOAuthProfileCreator(&oauthProfileAdapter{uc: userMod.UpsertProfileUseCase()})
 
 	// Start user consumer (BACKGROUND - consume eventos de Dragonfly Streams)
 	if err := userMod.EventConsumer().Start(appCtx); err != nil {
@@ -490,8 +506,12 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	// Login endpoint
 	authGroup.POST("/login", authMod.LoginHandler.Handle, anonRateLimitMW)
 
-	// Logout endpoint — auth middleware + authenticated rate limiting
-	authGroup.POST("/logout", authMod.LogoutHandler.Handle, authMiddleware.Handle, authRateLimitMW)
+	// Logout endpoint — always clears cookies even if token is invalid
+	// (handles disabled/locked accounts where token was already revoked)
+	authGroup.POST("/logout", authMod.LogoutHandler.Handle)
+
+	// Identity endpoint — returns user info from PASETO claims (all roles, no role restriction)
+	authGroup.GET("/me", authMod.MeHandler.Handle, authMiddleware.Handle, authRateLimitMW)
 
 	// OAuth endpoints — públicas, sin auth middleware (obviamente)
 	authGroup.GET("/oauth/:provider", authMod.OAuthAuthorizeHandler.Handle, anonRateLimitMW)
@@ -506,12 +526,14 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	searchGroup.POST("/flight-details", searchMod.FlightDetailsHandler.Handle)
 	searchGroup.POST("/hotels", searchMod.SearchHotelsHandler.Handle)
 	searchGroup.POST("/hotel-details", searchMod.HotelDetailsHandler.Handle)
-	// AI search — supports streaming via "stream": true in the request body
-	searchGroup.POST("/ai", searchMod.AISearchHandler.Handle)
+
+	// AI search sub-group — provider rate limit guards AI provider calls (REQ-W2)
+	aiGroup := searchGroup.Group("/ai", ratelimit.ProviderRateLimitMiddleware(rateLimiter, "ai"))
+	aiGroup.POST("", searchMod.AISearchHandler.Handle)
 	// AI search conversation CRUD
-	searchGroup.GET("/ai/conversations", searchMod.AISearchHandler.HandleListConversations)
-	searchGroup.GET("/ai/conversations/:id", searchMod.AISearchHandler.HandleGetConversation)
-	searchGroup.DELETE("/ai/conversations/:id", searchMod.AISearchHandler.HandleDeleteConversation)
+	aiGroup.GET("/conversations", searchMod.AISearchHandler.HandleListConversations)
+	aiGroup.GET("/conversations/:id", searchMod.AISearchHandler.HandleGetConversation)
+	aiGroup.DELETE("/conversations/:id", searchMod.AISearchHandler.HandleDeleteConversation)
 
 	// Ejecutar búsqueda guardada — requiere auth (cookie), no opcional
 	if searchMod.ExecuteSavedSearchHandler != nil {
@@ -527,10 +549,9 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	userPublicGroup := e.Group("/v1/user") // rutas públicas sin auth middleware
 	userMod.RegisterRoutes(userGroup, userPublicGroup, authMiddleware.Handle)
 
-	// SSE realtime events: /v1/realtime/events (authenticated via cookie)
-	sseGroup := e.Group("")
-	sseGroup.Use(authMiddleware.Handle)
-	sseGroup.GET("/v1/realtime/events", sse.Handler(sse.GetHub()))
+	// SSE realtime events: /v1/realtime/events
+	// authMiddleware.Optional() extrae el userID del token si existe, no rechaza anónimos.
+	e.GET("/v1/realtime/events", sse.Handler(sse.GetHub()), authMiddleware.Optional())
 
 	// ========== DASHBOARD ROUTES ==========
 	// Todas las rutas del dashboard requieren PASETO válido + permiso users:read base.

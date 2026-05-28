@@ -40,7 +40,7 @@ func TestHandler_ClearsDevCookies_InDevMode(t *testing.T) {
 	})
 
 	// isProduction=false, cookieDomain="" (dev)
-	h := NewHandler(uc, false, "")
+	h := NewHandler(uc, false, "", "http://localhost:3000")
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/auth/logout", nil)
 	req.AddCookie(&http.Cookie{Name: "access_token", Value: "dev-access-token"})
@@ -52,8 +52,14 @@ func TestHandler_ClearsDevCookies_InDevMode(t *testing.T) {
 		t.Fatalf("Handle() unexpected error: %v", err)
 	}
 
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected status 200, got %d", rec.Code)
+	if rec.Code != http.StatusFound {
+		t.Errorf("expected status 302, got %d", rec.Code)
+	}
+
+	// Verify redirect to frontend home
+	loc := rec.Header().Get("Location")
+	if loc != "http://localhost:3000/" {
+		t.Errorf("expected Location 'http://localhost:3000/', got %q", loc)
 	}
 
 	// Verify dev cookie names are cleared (NOT __Secure-*)
@@ -79,7 +85,7 @@ func TestHandler_ClearsProdCookies_InProductionMode(t *testing.T) {
 	})
 
 	// isProduction=true, cookieDomain=".proactrip.com"
-	h := NewHandler(uc, true, ".proactrip.com")
+	h := NewHandler(uc, true, ".proactrip.com", "http://localhost:3000")
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/auth/logout", nil)
 	req.AddCookie(&http.Cookie{Name: "__Secure-access_token", Value: "prod-access-token"})
@@ -91,8 +97,8 @@ func TestHandler_ClearsProdCookies_InProductionMode(t *testing.T) {
 		t.Fatalf("Handle() unexpected error: %v", err)
 	}
 
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected status 200, got %d", rec.Code)
+	if rec.Code != http.StatusFound {
+		t.Errorf("expected status 302, got %d", rec.Code)
 	}
 
 	// Verify production cookie names are cleared

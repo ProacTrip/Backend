@@ -505,10 +505,18 @@ func (m *AuthMiddleware) refreshSessionTTL(ctx context.Context, userID string) {
 // checkAccountStatus — verifica el estado de la cuenta.
 // En modo enforce: retorna echo.NewHTTPError para detener la cadena de middleware.
 // En modo observe: solo loguea y retorna nil.
-
+//
+// SSE connections (/v1/realtime/events) skip enforcement so the account.disabled
+// event can be delivered to the already-connected user before their session ends.
 func (m *AuthMiddleware) checkAccountStatus(c *echo.Context, status string, enforce bool) error {
 	ctx := c.Request().Context()
 	path := c.Request().URL.Path
+
+	// SSE realtime connections must survive account status changes
+	// so the account.disabled event reaches the user.
+	if strings.HasPrefix(path, "/v1/realtime") {
+		return nil
+	}
 
 	switch status {
 	case string(domain.StatusDisabled):

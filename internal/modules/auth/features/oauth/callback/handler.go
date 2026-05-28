@@ -3,8 +3,8 @@ package callback
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
-	"strings"
 
 	httperr "github.com/ProacTrip/Backend/internal/shared/http"
 	"github.com/labstack/echo/v5"
@@ -70,6 +70,10 @@ func (h *Handler) Handle(c *echo.Context) error {
 
 	resp, err := h.usecase.Execute(c.Request().Context(), cmd)
 	if err != nil {
+		slog.ErrorContext(c.Request().Context(), "oauth callback error",
+			slog.String("error", err.Error()),
+			slog.String("code", h.errorCodeFrom(err)),
+		)
 		return h.redirectError(c, h.errorCodeFrom(err))
 	}
 
@@ -94,25 +98,39 @@ func (h *Handler) redirectError(c *echo.Context, errorCode string) error {
 }
 
 // errorCodeFrom extrae el código de dominio del error unwrapeando la cadena.
-// Busca el código OAUTH_* en el error más interno de la cadena (formato "CODE: mensaje").
-// Si no encuentra un código de dominio, retorna el fallback OAUTH_EXCHANGE_FAILED.
+// Busca el código (texto antes de ":") en cada error de la cadena.
+// Retorna el primer código encontrado que coincida con el patrón "CODIGO: mensaje".
+// Si no encuentra ningún código válido, retorna el fallback OAUTH_EXCHANGE_FAILED.
 func (h *Handler) errorCodeFrom(err error) string {
 	current := err
 	for current != nil {
 		errStr := current.Error()
-		// Extraer el código antes de los dos puntos (formato: "CODE: mensaje")
 		for i, ch := range errStr {
 			if ch == ':' {
 				code := errStr[:i]
-				if strings.HasPrefix(code, "OAUTH_") {
+				// Validar que sea un código en mayúsculas con guiones bajos (formato de dominio)
+				if len(code) >= 5 && isDomainCode(code) {
 					return code
 				}
-				// Tiene formato "algo: mensaje" pero no es OAUTH_* → seguir unwrapeando
 				break
 			}
 		}
 		current = errors.Unwrap(current)
 	}
-	// No se encontró ningún código OAUTH_* en la cadena de errores → fallback
 	return "OAUTH_EXCHANGE_FAILED"
+}
+
+// isDomainCode verifica si un string tiene formato de código de dominio
+// (mayúsculas, guiones bajos, sin espacios).
+func isDomainCode(s string) bool {
+	for _, ch := range s {
+		if ch >= 'A' && ch <= 'Z' {
+			continue
+		}
+		if ch == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }

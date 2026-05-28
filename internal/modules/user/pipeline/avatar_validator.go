@@ -16,6 +16,7 @@ import (
 
 	"github.com/ProacTrip/Backend/internal/modules/user/domain"
 	"github.com/ProacTrip/Backend/internal/shared/eventbus"
+	"github.com/ProacTrip/Backend/internal/shared/sse"
 )
 
 // =============================================================================
@@ -202,6 +203,12 @@ func (v *AvatarValidator) processMessage(ctx context.Context, msg redis.XMessage
 	}
 
 	slog.Info("avatar validator: avatar updated", "user_id", userID, "avatar_url", avatarURL)
+
+	// Notificar al frontend vía SSE para que actualice el avatar en tiempo real
+	sse.GetHub().Publish(userID, sse.Event{Type: "user.avatar.updated", Data: map[string]interface{}{
+		"user_id":    userID.String(),
+		"avatar_url": avatarURL,
+	}})
 }
 
 // =============================================================================

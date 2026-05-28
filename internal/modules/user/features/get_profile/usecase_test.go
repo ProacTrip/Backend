@@ -74,6 +74,39 @@ func TestGetProfile_HappyPath(t *testing.T) {
 	if resp.Location.Language != "es" {
 		t.Errorf("Location.Language = %s, se esperaba es", resp.Location.Language)
 	}
+	if resp.RoleName != "client" {
+		t.Errorf("RoleName = %s, se esperaba client", resp.RoleName)
+	}
+}
+
+func TestGetProfile_AdminRole(t *testing.T) {
+	userID := uuid.Must(uuid.NewV7())
+	profile := domain.NewUserProfile(userID, "admin@example.com")
+	profile.Role = "admin"
+	profile.FirstName = new("Admin")
+	profile.LastName = new("User")
+	profile.LanguageCode = "en"
+	profile.CurrencyCode = "USD"
+
+	uc := NewUseCase(UseCaseDeps{
+		ProfileRepo: &mockProfileRepo{
+			getByUserIDFn: func(ctx context.Context, id uuid.UUID) (*domain.UserProfile, error) {
+				return profile, nil
+			},
+		},
+	})
+
+	cmd := Command{UserID: userID.String()}
+	resp, err := uc.Execute(t.Context(), cmd)
+	if err != nil {
+		t.Fatalf("error inesperado: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("response no debería ser nil")
+	}
+	if resp.RoleName != "admin" {
+		t.Errorf("RoleName = %s, se esperaba admin", resp.RoleName)
+	}
 }
 
 func TestGetProfile_ProfileNotFound(t *testing.T) {

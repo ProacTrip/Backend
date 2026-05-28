@@ -65,12 +65,17 @@ func WriteChunkEvent(w http.ResponseWriter, content string) error {
 // destination is a human-readable location (e.g., "Barcelona, España" or "MAD→BCN").
 // searchType is "hotels" or "flights".
 // data is the search response payload.
-func WriteSearchEvent(w http.ResponseWriter, destination, searchType string, data interface{}) error {
-	return writeSSEEventJSON(w, "search", map[string]interface{}{
+// searchParams are the original AI-extracted parameters (dates, airports, etc.) — nil if unavailable.
+func WriteSearchEvent(w http.ResponseWriter, destination, searchType string, data interface{}, searchParams map[string]interface{}) error {
+	payload := map[string]interface{}{
 		"destination": destination,
 		"type":        searchType,
 		"data":        data,
-	})
+	}
+	if searchParams != nil {
+		payload["search_params"] = searchParams
+	}
+	return writeSSEEventJSON(w, "search", payload)
 }
 
 // WriteFiltersEvent writes an SSE "filters" event with available and active filters.

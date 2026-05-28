@@ -169,7 +169,7 @@ El frontend reconstruye el estado del usuario al autenticarse o al recargar la p
 3. `GET /v1/environment` → ubicación actual como placeholder en la UI.
 4. `GET /v1/realtime/events` → conexión SSE para sincronización en tiempo real.
 
-**NO existe `/v1/auth/me`.** El perfil de usuario es la fuente de verdad para el estado del frontend.
+`GET /v1/auth/me` existe como endpoint de identidad ligera. Devuelve `id`, `email`, `role_name` y `permissions` (RBAC). Es usado por el frontend para conocer los permisos del usuario sin llamar al perfil completo.
 
 ---
 

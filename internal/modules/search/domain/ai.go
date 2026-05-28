@@ -62,7 +62,16 @@ type DiscoveryInterpreter interface {
 // ToolCallStreamer streams chat completions with tool calling support.
 // Returns the assistant's accumulated text and any tool calls requested.
 type ToolCallStreamer interface {
+	// ChatWithTools sends messages and tools to the AI provider and returns
+	// the complete result after the stream finishes. For real-time streaming,
+	// use ChatWithToolsStream.
 	ChatWithTools(ctx context.Context, messages []ChatMessage, tools []map[string]interface{}) (*ToolCallStreamResult, error)
+
+	// ChatWithToolsStream sends messages and tools to the AI provider and
+	// calls onChunk for each text delta AS IT ARRIVES from the provider.
+	// This enables true token-by-token streaming to the frontend.
+	// Returns the complete result when the stream finishes.
+	ChatWithToolsStream(ctx context.Context, messages []ChatMessage, tools []map[string]interface{}, onChunk func(text string)) (*ToolCallStreamResult, error)
 }
 
 // ChatMessage is a simple message struct for the tool calling adapter (avoids import cycle).
@@ -129,7 +138,8 @@ type ConversationState struct {
 type ConversationMessage struct {
 	Role       string    `json:"role"`                  // "user", "assistant", "system", "tool"
 	Content    string    `json:"content"`
-	ToolCallID string    `json:"tool_call_id,omitzero"` // for tool messages
+	ToolCallID string    `json:"tool_call_id,omitzero"` // for tool response messages
+	ToolCalls  []ToolCall `json:"tool_calls,omitzero"`   // for assistant messages with tool calls
 	Timestamp  time.Time `json:"timestamp"`
 }
 

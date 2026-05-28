@@ -18,6 +18,7 @@ type GetProfileResponse struct {
 	Nationality *string   `json:"nationality,omitzero"`
 	Phone       *string   `json:"phone,omitzero"`
 	Bio         *string   `json:"bio,omitzero"`
+	RoleName    string    `json:"role_name,omitzero"`
 	AvatarURL *string `json:"avatar_url"`
 
 	Location LocationResponse `json:"location"`

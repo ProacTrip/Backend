@@ -258,7 +258,7 @@ CREATE INDEX idx_uai_user_id ON user_auth_identities(user_id);
 -- 1. Create admin user
 INSERT INTO users (
     id, email, email_verified, email_verified_at, password_hash,
-    status, role_id, mfa_enabled, failed_login_attempts, created_at, updated_at
+    status, role_id, first_name, mfa_enabled, failed_login_attempts, created_at, updated_at
 )
 SELECT
     uuidv7(),
@@ -269,6 +269,7 @@ SELECT
     '$argon2id$v=19$m=65536,t=3,p=4$7uSScickGokih2Yd09NYcQ$w43HqGfvbeIKIXPNFsovygtfY1QjHnVYKkEIamo58+A',
     'active',
     (SELECT id FROM roles WHERE name = 'admin' LIMIT 1),
+    'Admin',
     true,
     0,
     NOW(),

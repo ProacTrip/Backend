@@ -6,6 +6,7 @@ package account_status
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,6 +15,7 @@ import (
 	"github.com/ProacTrip/Backend/internal/modules/auth/domain"
 	"github.com/ProacTrip/Backend/internal/shared/eventbus"
 	"github.com/ProacTrip/Backend/internal/shared/session"
+	sse "github.com/ProacTrip/Backend/internal/shared/sse"
 )
 
 // =============================================================================
@@ -166,8 +168,25 @@ func (uc *UseCase) publishAccountDisabledEvent(userID uuid.UUID, email string, a
 		stream := eventbus.StreamName("auth.account.events")
 		_, err := uc.eventPublisher.Publish(ctx, stream, flatPayload)
 		if err != nil {
-			_ = err // fire-and-forget
+			slog.ErrorContext(ctx, "failed to publish account_disabled event to Dragonfly",
+				slog.String("user_id", userID.String()),
+				slog.String("error", err.Error()),
+			)
 		}
+
+		// SSE Hub: fuerza logout en tiempo real al usuario deshabilitado.
+		// PublishAndBridge: entrega local + cross-instance vía Dragonfly Pub/Sub.
+		// Best-effort: si el Hub no está inicializado (ej. tests), se ignora silenciosamente.
+		func() {
+			defer func() { _ = recover() }()
+			sse.GetHub().PublishAndBridge(ctx, uc.rdb, userID, sse.Event{
+				Type: "account.disabled",
+				Data: map[string]any{
+					"reason":  "account_disabled",
+					"user_id": userID.String(),
+				},
+			})
+		}()
 	}()
 }
 
@@ -191,7 +210,24 @@ func (uc *UseCase) publishAccountEnabledEvent(userID uuid.UUID, email string, ac
 		stream := eventbus.StreamName("auth.account.events")
 		_, err := uc.eventPublisher.Publish(ctx, stream, flatPayload)
 		if err != nil {
-			_ = err // fire-and-forget
+			slog.ErrorContext(ctx, "failed to publish account_enabled event to Dragonfly",
+				slog.String("user_id", userID.String()),
+				slog.String("error", err.Error()),
+			)
 		}
+
+		// SSE Hub: notifica en tiempo real al usuario habilitado.
+		// PublishAndBridge: entrega local + cross-instance vía Dragonfly Pub/Sub.
+		// Best-effort: si el Hub no está inicializado (ej. tests), se ignora silenciosamente.
+		func() {
+			defer func() { _ = recover() }()
+			sse.GetHub().PublishAndBridge(ctx, uc.rdb, userID, sse.Event{
+				Type: "account.enabled",
+				Data: map[string]any{
+					"reason":  "account_enabled",
+					"user_id": userID.String(),
+				},
+			})
+		}()
 	}()
 }

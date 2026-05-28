@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -76,12 +77,14 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command) error {
 		}
 	}
 
-	// 3. Validar nacionalidad (ISO 3166-1 alpha-2, 2 letras).
-	// La validación completa contra una lista de países se difiere.
+	// 3. Validar nacionalidad (código ISO 3166-1 alpha-2 de 2 letras o nombre completo).
+	// Acepta tanto códigos como nombres (ej: "AR", "Argentina").
 	if cmd.Nationality != nil {
-		if len(*cmd.Nationality) != 2 {
+		n := strings.TrimSpace(*cmd.Nationality)
+		if len(n) < 2 || len(n) > 100 {
 			return domain.ErrInvalidCountryCode
 		}
+		*cmd.Nationality = n
 	}
 
 	// 4. Validar language code (ISO 639, 2-5 caracteres)

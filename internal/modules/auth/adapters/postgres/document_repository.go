@@ -51,7 +51,7 @@ func (r *DocumentRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain
 		       ud.file_name, ud.file_size, ud.mime_type, ud.storage_key,
 		       ud.ocr_confidence, ud.created_at, ud.updated_at
 		FROM user_documents ud
-		JOIN document_types dt ON ud.document_type_id = dt.id
+		LEFT JOIN document_types dt ON ud.document_type_id = dt.id
 		WHERE ud.id = $1
 	`
 
@@ -91,13 +91,13 @@ func (r *DocumentRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain
 func (r *DocumentRepository) GetByIDForUpdate(ctx context.Context, id uuid.UUID) (*domain.DocumentRow, error) {
 	query := `
 		SELECT ud.id, ud.user_id, ud.verification_status, ud.ocr_status,
-		       ud.document_type_id, dt.code AS document_type_code,
+		       ud.document_type_id, COALESCE(dt.code, '') AS document_type_code,
 		       ud.file_name, ud.file_size, ud.mime_type, ud.storage_key,
 		       ud.ocr_confidence, ud.created_at, ud.updated_at
 		FROM user_documents ud
-		JOIN document_types dt ON ud.document_type_id = dt.id
+		LEFT JOIN document_types dt ON ud.document_type_id = dt.id
 		WHERE ud.id = $1
-		FOR UPDATE
+		FOR UPDATE OF ud
 	`
 
 	var row domain.DocumentRow
@@ -228,7 +228,7 @@ func (r *DocumentRepository) UpdateVerificationStatus(ctx context.Context, id uu
 // UpdateOCRStatus actualiza ocr_status en user_documents.
 // DR-REQ-1: usado por el feature document_reprocess para poner el doc en "queued".
 func (r *DocumentRepository) UpdateOCRStatus(ctx context.Context, id uuid.UUID, status string) error {
-	query := `UPDATE user_documents SET ocr_status = $1, updated_at = NOW() WHERE id = $2`
+	query := `UPDATE user_documents SET ocr_status = $1, failure_reason = NULL, updated_at = NOW() WHERE id = $2`
 
 	ct, err := r.pool.Exec(ctx, query, status, id)
 	if err != nil {
@@ -251,11 +251,11 @@ func (r *DocumentRepository) UpdateOCRStatus(ctx context.Context, id uuid.UUID, 
 // UD-REQ-1.2: si el usuario no tiene documentos, retorna slice vacío (no nil).
 func (r *DocumentRepository) GetUserDocuments(ctx context.Context, userID uuid.UUID) ([]domain.DocumentSummary, error) {
 	query := `
-		SELECT ud.id, ud.file_name, dt.code AS document_type,
-		       ud.ocr_status, ud.ocr_confidence,
-		       ud.verification_status, ud.file_size, ud.created_at
+		SELECT ud.id, ud.file_name, COALESCE(dt.code, '') AS document_type,
+		       ud.ocr_status, ud.ocr_confidence, ud.verification_status,
+		       ud.file_size, ud.created_at
 		FROM user_documents ud
-		JOIN document_types dt ON ud.document_type_id = dt.id
+		LEFT JOIN document_types dt ON ud.document_type_id = dt.id
 		WHERE ud.user_id = $1
 		ORDER BY ud.created_at DESC
 	`

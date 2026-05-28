@@ -74,6 +74,7 @@ type OCRWorker struct {
 	medicalRepo       MedicalProfileManager
 	pendingRepo       MedicalPendingCreator
 	encryptionService domain.EncryptionService
+	profileRepo       domain.ProfileRepository // para auto-poblar datos personales desde docs de identidad
 	group             string
 	consumer          string
 	dlqStream         string
@@ -90,6 +91,7 @@ func NewOCRWorker(
 	medicalRepo MedicalProfileManager,
 	pendingRepo MedicalPendingCreator,
 	encryptionService domain.EncryptionService,
+	profileRepo domain.ProfileRepository,
 ) *OCRWorker {
 	return &OCRWorker{
 		rdb:               rdb,
@@ -99,6 +101,7 @@ func NewOCRWorker(
 		medicalRepo:       medicalRepo,
 		pendingRepo:       pendingRepo,
 		encryptionService: encryptionService,
+		profileRepo:       profileRepo,
 		group:             docOCRGroup,
 		consumer:          fmt.Sprintf("doc-ocr-%d", time.Now().UnixMilli()),
 		dlqStream:         DocDLQStream,
@@ -292,6 +295,11 @@ func (w *OCRWorker) processMessage(ctx context.Context, msg redis.XMessage) {
 
 	doc.UpdatedAt = time.Now()
 
+	// 6b. Auto-poblar datos personales desde documentos de identidad (one-time)
+	if w.profileRepo != nil && extracted.IsIdentityDocument() {
+		w.populateProfile(ctx, doc.UserID, extracted)
+	}
+
 	// 7. Comparar y aplicar datos médicos si existen
 	if extracted.MedicalFields != nil && len(extracted.MedicalFields) > 0 {
 		w.compareAndApplyMedicalData(ctx, doc, extracted)
@@ -320,8 +328,28 @@ func (w *OCRWorker) processMessage(ctx context.Context, msg redis.XMessage) {
 }
 
 // =============================================================================
-// Manejo de datos médicos
+// Auto-populación de perfil desde documentos de identidad
 // =============================================================================
+
+// populateProfile auto-pobla los datos personales del perfil desde un documento
+// de identidad (pasaporte, DNI, licencia). Solo aplica si OcrPopulated == false
+// (one-time population). Si el perfil ya fue poblado por OCR, no lo toca.
+func (w *OCRWorker) populateProfile(ctx context.Context, userID uuid.UUID, extracted *domain.ExtractedData) {
+	profile, err := w.profileRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		slog.Warn("doc OCR: no se pudo obtener perfil para auto-población", "user_id", userID, "error", err)
+		return
+	}
+	if profile.PopulateFromOCR(extracted) {
+		if err := w.profileRepo.Update(ctx, profile); err != nil {
+			slog.Warn("doc OCR: no se pudo actualizar perfil con datos OCR", "user_id", userID, "error", err)
+			return
+		}
+		slog.Info("doc OCR: perfil poblado desde documento de identidad",
+			"user_id", userID, "doc_type", extracted.DocumentType,
+			"full_name", extracted.FullName, "nationality", extracted.Nationality)
+	}
+}
 
 // medicalFieldMap mapea nombres de campos OCR a campos del perfil médico.
 var medicalFieldMap = map[string]string{
@@ -495,6 +523,7 @@ func (w *OCRWorker) markRejected(ctx context.Context, doc *domain.UserDocument, 
 	doc.OCRStatus = domain.OCRStatusRejected
 	doc.FailureReason = &reason
 	doc.UpdatedAt = time.Now()
+	slog.Info("doc OCR: rejected", "doc_id", doc.ID, "reason", reason)
 	if err := w.docRepo.Update(ctx, doc); err != nil {
 		slog.Error("doc OCR: mark rejected update error", "doc_id", doc.ID, "error", err)
 	}
@@ -536,6 +565,7 @@ func (w *OCRWorker) publishSSEEvent(ctx context.Context, userID, docID uuid.UUID
 		Type: "doc." + event,
 		Data: payload,
 	}
+	slog.Info("sse: publishing", "user_id", userID.String(), "event", hubEvent.Type, "doc_id", docID.String())
 	sse.GetHub().Publish(userID, hubEvent)
 }
 

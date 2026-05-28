@@ -87,7 +87,7 @@ func TestGetProfileHandler_Handle(t *testing.T) {
 			},
 			wantStatus: http.StatusOK,
 			wantContains: []string{`"id"`, `"user_id"`, `"email"`, `"first_name"`, `"last_name"`,
-				`"gender"`, `"location"`},
+				`"gender"`, `"location"`, `"role_name"`},
 		},
 		{
 			name:        "debe retornar error cuando no hay claims en el contexto",

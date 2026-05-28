@@ -197,7 +197,17 @@ func (uc *UseCase) Execute(ctx context.Context, cmd Command, userID string) (*Re
 		slog.String("user_id", userID),
 	)
 
-	// 2. Default: exact search (existing behavior)
+	// 2. Route to discovery pipeline when available (REQ-W1).
+	// Discovery handles open-ended queries without specific flight/hotel parameters.
+	// Only applies to first messages (no conversation_id) — follow-ups
+	// always go through the exact search pipeline to continue the conversation.
+	// Queries with dates, IATA codes, or explicit flight/hotel terms are also excluded
+	// by isDiscoveryQuery.
+	if uc.discoveryInterpreter != nil && cmd.ConversationID == "" && isDiscoveryQuery(cmd.Message) {
+		return uc.runDiscovery(ctx, cmd, userID)
+	}
+
+	// 3. Default: exact search (existing behavior)
 	return uc.runExactSearch(ctx, cmd, userID)
 }
 
@@ -462,13 +472,31 @@ func (uc *UseCase) runExactSearch(ctx context.Context, cmd Command, userID strin
 	// ListUserConversations and HandleGetConversation can retrieve it.
 	// This dual-write ensures backward compatibility while maintaining
 	// the user conversation index (user:convs:{userID}) via SADD.
+	// Build SearchCache from the flight/hotel responses so the frontend
+	// can restore results when loading a previous conversation.
+	searchCache := make(map[string]*CachedSearch)
+	if flightResp != nil {
+		flightJSON, _ := json.Marshal(flightResp)
+		searchCache["flights"] = &CachedSearch{
+			Response: flightJSON,
+			Type:     "flights",
+		}
+	}
+	if hotelResp != nil {
+		hotelJSON, _ := json.Marshal(hotelResp)
+		searchCache["hotels"] = &CachedSearch{
+			Response: hotelJSON,
+			Type:     "hotels",
+		}
+	}
 	if saveErr := uc.convStore.Save(ctx, &Conversation{
-		ID:        conv.ID,
-		UserID:    conv.UserID,
-		Messages:  conv.Messages,
-		TurnCount: conv.TurnCount,
-		MaxTurns:  conv.MaxTurns,
-		CreatedAt: conv.CreatedAt,
+		ID:          conv.ID,
+		UserID:      conv.UserID,
+		Messages:    conv.Messages,
+		SearchCache: searchCache,
+		TurnCount:   conv.TurnCount,
+		MaxTurns:    conv.MaxTurns,
+		CreatedAt:   conv.CreatedAt,
 	}); saveErr != nil {
 		slog.ErrorContext(ctx, "ai_search: failed to save new-format conversation",
 			slog.String("conversation_id", conv.ID),
@@ -600,6 +628,26 @@ func (uc *UseCase) runDiscovery(ctx context.Context, cmd Command, userID string)
 		Content:   aiMessage,
 		Timestamp: now,
 	}
+	// Save to LEGACY store (ConversationState) so getOrCreateConversation
+	// can find it when the user sends a follow-up message. Without this,
+	// each follow-up starts a new conversation with zero context.
+	if saveErr := uc.convStore.SaveConversation(ctx, &domain.ConversationState{
+		ID:        convID.String(),
+		UserID:    userID,
+		Messages:  []domain.ConversationMessage{userMsg, assistantMsg},
+		TurnCount: 1,
+		MaxTurns:  maxTurns,
+		CreatedAt: now,
+		ExpiresAt: now.Add(10 * time.Minute),
+	}); saveErr != nil {
+		slog.ErrorContext(ctx, "ai_search: failed to save discovery conversation (legacy)",
+			slog.String("conversation_id", convID.String()),
+			slog.String("error", saveErr.Error()),
+		)
+	}
+
+	// Also save to the new Conversation format ({conv}:{id}) so
+	// HandleGetConversation and conversation history work correctly.
 	if saveErr := uc.convStore.Save(ctx, &Conversation{
 		ID:        convID.String(),
 		UserID:    userID,
@@ -708,6 +756,71 @@ func (uc *UseCase) maxTurnsForUser(userID string) int {
 	return uc.anonMaxTurns
 }
 
+// isDiscoveryQuery checks whether a message is likely a discovery query
+// (open-ended, no specific flight/hotel search parameters).
+// Returns true for queries like "recomiéndame playas" or "destinos baratos en Europa".
+// Returns false for queries with dates, IATA codes, or explicit flight/hotel terms.
+//
+// The AI interpreter doesn't yet classify "discovery" as a distinct intent type,
+// so this heuristic gates routing to the discovery pipeline (REQ-W1).
+func isDiscoveryQuery(message string) bool {
+	lower := strings.ToLower(message)
+
+	// Explicit date patterns → exact search
+	if strings.Contains(lower, "202") || strings.Contains(lower, "enero") ||
+		strings.Contains(lower, "febrero") || strings.Contains(lower, "marzo") ||
+		strings.Contains(lower, "abril") || strings.Contains(lower, "mayo") ||
+		strings.Contains(lower, "junio") || strings.Contains(lower, "julio") ||
+		strings.Contains(lower, "agosto") || strings.Contains(lower, "septiembre") ||
+		strings.Contains(lower, "octubre") || strings.Contains(lower, "noviembre") ||
+		strings.Contains(lower, "diciembre") ||
+		strings.Contains(lower, "january") || strings.Contains(lower, "february") ||
+		strings.Contains(lower, "march") || strings.Contains(lower, "april") ||
+		strings.Contains(lower, "june") || strings.Contains(lower, "july") ||
+		strings.Contains(lower, "august") || strings.Contains(lower, "september") ||
+		strings.Contains(lower, "october") || strings.Contains(lower, "november") ||
+		strings.Contains(lower, "december") {
+		return false
+	}
+
+	// Flight-specific terms → exact search
+	if strings.Contains(lower, "vuelo") || strings.Contains(lower, "vuelos") ||
+		strings.Contains(lower, "pasaje") || strings.Contains(lower, "pasajes") ||
+		strings.Contains(lower, "ida y vuelta") || strings.Contains(lower, "solo ida") ||
+		strings.Contains(lower, "escala") {
+		return false
+	}
+
+	// Hotel-specific terms → exact search
+	if strings.Contains(lower, "hotel") || strings.Contains(lower, "alojamiento") ||
+		strings.Contains(lower, "habitación") || strings.Contains(lower, "estadia") {
+		return false
+	}
+
+	// Discovery keywords → discovery pipeline
+	discoveryKeywords := []string{
+		"recomiéndame", "recomiendame", "recomienda", "recomendar",
+		"descubrir", "descubriendo", "conocer",
+		"destino", "destinos", "viaje", "viajes", "viajar",
+		"vacaciones", "escapada", "turismo",
+		"playa", "playas", "montaña", "montañas",
+		"barato", "baratos", "económico", "económicos",
+		"mejor época", "cuando ir", "clima",
+	}
+	for _, kw := range discoveryKeywords {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+
+	// Very short queries without search terms → discovery
+	if len(strings.Fields(message)) <= 3 {
+		return true
+	}
+
+	return false
+}
+
 // =============================================================================
 // Location hint — injects detected user location as AI context
 // =============================================================================
@@ -718,11 +831,13 @@ func (uc *UseCase) maxTurnsForUser(userID string) int {
 // resolveLocationHint determines the user's location for AI context injection.
 //
 // Resolution strategy:
-//   - Auth users: read country_code from profile:{userID}:prefs Dragonfly hash,
-//     resolve country name via CountryMetadata, and try to get main airport/city.
-//   - Anonymous: parse the env:{ip} Dragonfly cache (full EnvironmentResponse JSON)
-//     to extract city, country, and country_code.
-//   - If both fail or no data is available, returns "" (no hint injected).
+//   - Both auth and anonymous users: parse the env:{ip} Dragonfly cache
+//     (full EnvironmentResponse JSON from /v1/environment) to extract
+//     city, country, and country_code. IATA airport code is resolved
+//     from city or country name.
+//   - If no data is available, returns "" (no hint injected).
+//   - CountryCode is NOT read from profile prefs — that's the user's
+//     nationality, not their current location.
 //
 // The returned string is a Spanish system context message instructing the AI
 // to use the detected location as default departure for flight searches.
@@ -787,33 +902,9 @@ func (uc *UseCase) resolveLocationHint(ctx context.Context, userID, clientIP str
 		}
 	}
 
-	// Fallback: use config defaults when no location data is available
-	// (e.g. first request in local dev where /v1/environment hasn't been called).
-	if city == "" && country == "" && countryCode == "" {
-		if defaultCC := uc.defaultsCfg.CountryCode; defaultCC != "" {
-			// Intentar obtener CountryInfo desde la caché de entorno para la IP.
-			ci, ciErr := sharedEnv.GetCountryInfo(ctx, uc.rdb, clientIP)
-			if ciErr == nil && ci.Country != "" {
-				countryCode = defaultCC
-				country = ci.Country
-				if mainIATA, found := airports.ResolveCountryToIATA(country); found {
-					iata = mainIATA
-					// Try to get the main city for this country (without the ", Country" suffix).
-					if cityWithCountry, found := airports.ResolveCountryToMainCity(country); found {
-						// Strip ", Country" suffix if present (e.g. "Buenos Aires, Argentina" → "Buenos Aires").
-						parts := strings.SplitN(cityWithCountry, ",", 2)
-						city = strings.TrimSpace(parts[0])
-					}
-				}
-				slog.DebugContext(ctx, "resolveLocationHint: resolved via DEFAULT_COUNTRY_CODE env var",
-					slog.String("country_code", defaultCC),
-					slog.String("country", country),
-					slog.String("city", city),
-					slog.String("iata", iata),
-				)
-			}
-		}
-	}
+	// NO fallback: if IP-based location resolution fails, return empty hint.
+	// The AI will ask "¿desde dónde?" instead of assuming a wrong location.
+	// DEFAULT_COUNTRY_CODE is a platform currency/pricing default, NOT a user location.
 
 	if city == "" && country == "" && countryCode == "" {
 		slog.DebugContext(ctx, "resolveLocationHint: no location data available")
@@ -1229,8 +1320,8 @@ var validTripType = map[string]bool{
 // language is passed to the AI interpreter so the system prompt includes
 // the user's detected language directive.
 func (uc *UseCase) interpretWithCache(ctx context.Context, message string, history []domain.ConversationMessage, language string) (*domain.TravelIntent, bool, error) {
-	// Compute blake3 hash of message + history for cache key
-	hash := blake3Hash(message, history)
+	// Compute blake3 hash of message + history + language for cache key (REQ-W5)
+	hash := blake3Hash(message, history, language)
 	cacheKey := fmt.Sprintf("ai:interpret:%x", hash)
 
 	// Try cache first (skip if no cache configured)
@@ -1263,13 +1354,18 @@ func isCompleteIntent(intentType string) bool {
 }
 
 // blake3Hash computes a blake3 hash of the message concatenated with serialized
-// conversation history. The hash is deterministic: same message + same history
-// always produces the same key, enabling cache hits across conversations.
-func blake3Hash(message string, history []domain.ConversationMessage) []byte {
+// conversation history and language. The hash is deterministic: same message +
+// same history + same language always produces the same key, enabling cache hits
+// across conversations. Language is included so same text in different languages
+// produces different cache entries (REQ-W5).
+func blake3Hash(message string, history []domain.ConversationMessage, language string) []byte {
 	h := blake3.New(32, nil)
 
 	// Hash the message
 	h.Write([]byte(message))
+
+	// Hash the language tag
+	h.Write([]byte(language))
 
 	// Hash each history entry
 	for _, msg := range history {
@@ -1323,6 +1419,15 @@ func (uc *UseCase) executeSingleToolCall(ctx context.Context, w http.ResponseWri
 			return result
 		}
 
+		// Normalize hallucinated dates (AI may return past years).
+		// The model is trained on historical data and often uses last year.
+		if cmd.CheckInDate != "" {
+			cmd.CheckInDate = normalizeDate(cmd.CheckInDate)
+		}
+		if cmd.CheckOutDate != "" {
+			cmd.CheckOutDate = normalizeDate(cmd.CheckOutDate)
+		}
+
 		// Prefill GL/HL/Currency from conversation context when the AI omits them.
 		// DragonflyDB v1.38+: GL must be a lowercase 2-letter country code.
 		if cmd.GL == nil && convCtx.CountryCode != "" {
@@ -1372,6 +1477,14 @@ func (uc *UseCase) executeSingleToolCall(ctx context.Context, w http.ResponseWri
 			result.Error = err
 			result.Content = fmt.Sprintf(`{"error": "invalid arguments: %s"}`, err.Error())
 			return result
+		}
+
+		// Normalize hallucinated dates (AI may return past years).
+		if cmd.OutboundDate != "" {
+			cmd.OutboundDate = normalizeDate(cmd.OutboundDate)
+		}
+		if cmd.ReturnDate != "" {
+			cmd.ReturnDate = normalizeDate(cmd.ReturnDate)
 		}
 
 		// Prefill GL/HL/Currency from conversation context when the AI omits them.
@@ -1506,12 +1619,16 @@ func BuildToolResultMessages(results []ToolResult) []domain.ConversationMessage 
 // It sends messages + tools to the AI, streams text chunks, executes tool calls
 // when requested, injects results back, and continues up to maxTurns rounds.
 //
+// conversationID is the client-provided conversation UUID. If empty, a new UUID
+// is generated. This preserves the same conversation_id across multi-turn tool-calling
+// sessions so GET /conversations/{id} returns the full history (REQ-C2).
+//
 // convCtx provides resolved defaults (country_code, language, currency) to prefill
 // tool call arguments when the AI omits them. Pass an empty ConversationContext
 // if no conversation-level context is available.
 //
 // Returns the number of tool call rounds executed.
-func (uc *UseCase) ExecuteChatStream(ctx context.Context, w http.ResponseWriter, messages []domain.ChatMessage, tools []map[string]interface{}, maxTurns int, convCtx ConversationContext) (int, error) {
+func (uc *UseCase) ExecuteChatStream(ctx context.Context, w http.ResponseWriter, userID string, conversationID string, messages []domain.ChatMessage, tools []map[string]interface{}, maxTurns int, convCtx ConversationContext) (int, error) {
 	if uc.toolCallStreamer == nil {
 		return 0, fmt.Errorf("tool call streamer: %w", domain.ErrAIUnavailable)
 	}
@@ -1520,21 +1637,23 @@ func (uc *UseCase) ExecuteChatStream(ctx context.Context, w http.ResponseWriter,
 	}
 
 	turnCount := 0
+	var allResults []ToolResult // accumulate across turns for SearchCache persistence
 
 	for turn := 0; turn < maxTurns; turn++ {
-		// 1. Stream AI response
-		result, err := uc.toolCallStreamer.ChatWithTools(ctx, messages, tools)
+		// 1. Stream AI response token-by-token via onChunk callback.
+		// Each text delta from DeepSeek is sent to the frontend immediately
+		// as an SSE "chunk" event before the full response is complete.
+		var accumulatedText string
+		result, err := uc.toolCallStreamer.ChatWithToolsStream(ctx, messages, tools, func(text string) {
+			accumulatedText += text
+			WriteChunkEvent(w, text)
+		})
 		if err != nil {
 			WriteErrorEvent(w, fmt.Sprintf("AI error: %v", err))
 			return turnCount, fmt.Errorf("chat with tools: %w", err)
 		}
 
-		// 2. Stream accumulated text as chunk events
-		if result.AssistantText != "" {
-			WriteChunkEvent(w, result.AssistantText)
-		}
-
-		// 3. If no tool calls, we're done
+		// 2. If no tool calls, we're done (text already streamed via onChunk)
 		if len(result.ToolCalls) == 0 {
 			break
 		}
@@ -1552,8 +1671,24 @@ func (uc *UseCase) ExecuteChatStream(ctx context.Context, w http.ResponseWriter,
 
 		// 5. Execute tool calls concurrently
 		results := uc.ExecuteToolCalls(ctx, w, toolCalls, convCtx)
+		allResults = append(allResults, results...)
 
 		// 6. Emit search SSE events for each result
+		// Build lookup: callID → AI-extracted search params with corrected dates
+		searchParamsByCallID := make(map[string]map[string]interface{}, len(toolCalls))
+		for _, tc := range toolCalls {
+			if tc.Arguments == nil {
+				continue
+			}
+			// Normalize hallucinated dates (AI may return wrong year)
+			dateFields := []string{"outbound_date", "return_date", "check_in_date", "check_out_date"}
+			for _, f := range dateFields {
+				if v, ok := tc.Arguments[f].(string); ok && v != "" {
+					tc.Arguments[f] = normalizeDate(v)
+				}
+			}
+			searchParamsByCallID[tc.ID] = tc.Arguments
+		}
 		for _, r := range results {
 			searchType := r.Name
 			switch r.Name {
@@ -1567,7 +1702,7 @@ func (uc *UseCase) ExecuteChatStream(ctx context.Context, w http.ResponseWriter,
 			if r.Error == nil && r.Content != "" {
 				json.Unmarshal([]byte(r.Content), &data)
 			}
-			WriteSearchEvent(w, r.Destination, searchType, data)
+			WriteSearchEvent(w, r.Destination, searchType, data, searchParamsByCallID[r.CallID])
 		}
 
 		// 7. Add assistant message with tool calls to history
@@ -1595,12 +1730,64 @@ func (uc *UseCase) ExecuteChatStream(ctx context.Context, w http.ResponseWriter,
 	}
 
 	// Emit done event with conversation ID.
-	// Generate a fresh conversation ID for this stream session — the caller
-	// (handler) is responsible for persisting the conversation state.
-	convID, _ := uuid.NewV7()
-	convIDStr := convID.String()
+	// REQ-C2: reuse client-provided conversation_id for multi-turn consistency.
+	convIDStr := conversationID
+	if convIDStr == "" {
+		convID, _ := uuid.NewV7()
+		convIDStr = convID.String()
+	}
 
 	WriteDoneEvent(w, convIDStr, turnCount)
+
+	// Persist conversation state for retrieval via GET /conversations/{id}.
+	// Convert accumulated ChatMessages to ConversationMessages for storage.
+	if uc.convStore != nil {
+		convMsgs := make([]domain.ConversationMessage, len(messages))
+		for i, msg := range messages {
+			convMsgs[i] = domain.ConversationMessage{
+				Role:       msg.Role,
+				Content:    msg.Content,
+				ToolCallID: msg.ToolCallID,
+				ToolCalls:  msg.ToolCalls,
+				Timestamp:  time.Now(),
+			}
+		}
+		// Build SearchCache from tool call results so the frontend
+		// can restore search results when loading a previous conversation.
+		searchCache := make(map[string]*CachedSearch)
+		for _, r := range allResults {
+			if r.Error != nil || r.Content == "" {
+				continue
+			}
+			searchType := r.Name
+			switch r.Name {
+			case "search_hotels":
+				searchType = "hotels"
+			case "search_flights":
+				searchType = "flights"
+			}
+			searchCache[r.CallID] = &CachedSearch{
+				Response:    json.RawMessage(r.Content),
+				Destination: r.Destination,
+				Type:        searchType,
+			}
+		}
+		conv := &Conversation{
+			ID:          convIDStr,
+			UserID:      userID,
+			Messages:    convMsgs,
+			SearchCache: searchCache,
+			Context:     convCtx,
+			TurnCount:   turnCount,
+			MaxTurns:    maxTurns,
+		}
+		if err := uc.convStore.Save(ctx, conv); err != nil {
+			slog.WarnContext(ctx, "ai_search: failed to persist streaming conversation",
+				slog.String("conversation_id", convIDStr),
+				slog.String("error", err.Error()),
+			)
+		}
+	}
 
 	return turnCount, nil
 }

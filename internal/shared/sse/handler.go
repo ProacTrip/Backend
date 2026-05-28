@@ -7,24 +7,31 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 
 	sharedauth "github.com/ProacTrip/Backend/internal/shared/auth"
+	"github.com/ProacTrip/Backend/internal/shared/ratelimit"
 )
 
 // Handler devuelve un controlador de Echo para GET /v1/realtime/events.
-// Extrae los claims del usuario del middleware de autenticación, se suscribe al
-// hub y transmite los eventos como SSE hasta que el cliente se desconecte.
+// Soporta tanto usuarios autenticados (via access_token cookie) como anónimos
+// (via anon_token cookie). Para anónimos, el userID es el valor del anon_token.
 func Handler(hub *Hub) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		// 1. Extraer los claims del usuario del contexto (establecidos por el middleware de autenticación).
+		// 1. Resolver userID: auth claims primero, luego anon_token cookie.
+		// Si no hay ninguno, generar un UUID temporal para permitir la conexión.
+		var userID string
 		claims, err := sharedauth.GetAccessClaims(c)
-		if err != nil {
-			slog.Warn("sse: missing user_claims in context",
-				slog.String("path", c.Request().URL.Path))
-			return c.JSON(http.StatusUnauthorized, map[string]string{
-				"error": "authentication required",
-			})
+		if err == nil && claims != nil {
+			userID = claims.UserID.String()
+		} else {
+			userID = ratelimit.AnonIDFromContext(c)
+		}
+		if userID == "" {
+			// No identifier at all — generate a temporary one.
+			// The anon_token cookie will be set by the first search request.
+			userID = uuid.New().String()
 		}
 
 		// 2. Establecer las cabeceras de SSE.
@@ -40,9 +47,19 @@ func Handler(hub *Hub) echo.HandlerFunc {
 			return fmt.Errorf("sse: ResponseWriter does not implement http.Flusher")
 		}
 
-		// 3. Suscribirse al hub.
-		ch := hub.Subscribe(claims.UserID)
-		defer hub.Unsubscribe(claims.UserID, ch)
+		// 3. Suscribirse al hub (userID must be a valid UUID).
+		uid, parseErr := uuid.Parse(userID)
+		if parseErr != nil {
+			slog.Warn("sse: invalid user_id format",
+				slog.String("user_id", userID),
+				slog.String("error", parseErr.Error()))
+			return c.JSON(http.StatusBadRequest, map[string]string{
+				"error": "invalid user identifier",
+			})
+		}
+		slog.Info("sse: subscribed", "user_id", uid.String())
+		ch := hub.Subscribe(uid)
+		defer hub.Unsubscribe(uid, ch)
 
 		// 4. Transmitir eventos en streaming hasta que el cliente se desconecte.
 		ctx := c.Request().Context()
@@ -55,8 +72,8 @@ func Handler(hub *Hub) echo.HandlerFunc {
 				}
 				data, err := json.Marshal(event.Data)
 				if err != nil {
-					slog.Warn("sse: marshal event data failed",
-						slog.String("user_id", claims.UserID.String()),
+				slog.Warn("sse: marshal event data failed",
+					slog.String("user_id", userID),
 						slog.String("event_type", event.Type),
 						slog.String("error", err.Error()),
 					)
